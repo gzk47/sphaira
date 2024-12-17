@@ -1,22 +1,26 @@
 #include "ui/menus/main_menu.hpp"
+#include "ui/menus/irs_menu.hpp"
+#include "ui/menus/themezer.hpp"
+
 #include "ui/sidebar.hpp"
 #include "ui/popup_list.hpp"
 #include "ui/option_box.hpp"
+#include "ui/progress_box.hpp"
+#include "ui/error_box.hpp"
+
 #include "app.hpp"
 #include "log.hpp"
 #include "download.hpp"
 #include "defines.hpp"
-#include "ui/menus/irs_menu.hpp"
-#include "ui/menus/themezer.hpp"
 #include "web.hpp"
 #include "i18n.hpp"
 
 #include <cstring>
+#include <minizip/unzip.h>
 
 namespace sphaira::ui::menu::main {
 namespace {
 
-#if 0
 bool parseSearch(const char *parse_string, const char *filter, char* new_string) {
     char c;
     u32 offset = 0;
@@ -40,37 +44,159 @@ bool parseSearch(const char *parse_string, const char *filter, char* new_string)
 
     return false;
 }
-#endif
+
+auto InstallUpdate(ProgressBox* pbox, const std::string url, const std::string version) -> bool {
+    static fs::FsPath zip_out{"/switch/sphaira/cache/update.zip"};
+    constexpr auto chunk_size = 1024 * 512; // 512KiB
+
+    fs::FsNativeSd fs;
+    R_TRY_RESULT(fs.GetFsOpenResult(), false);
+
+    // 1. download the zip
+    if (!pbox->ShouldExit()) {
+        pbox->NewTransfer("Downloading "_i18n + version);
+        log_write("starting download: %s\n", url.c_str());
+
+        DownloadClearCache(url);
+        if (!DownloadFile(url, zip_out, "", [pbox](u32 dltotal, u32 dlnow, u32 ultotal, u32 ulnow){
+            if (pbox->ShouldExit()) {
+                return false;
+            }
+            pbox->UpdateTransfer(dlnow, dltotal);
+            return true;
+        })) {
+            log_write("error with download\n");
+            // push popup error box
+            return false;
+        }
+    }
+
+    ON_SCOPE_EXIT(fs.DeleteFile(zip_out));
+
+    // 2. extract the zip
+    if (!pbox->ShouldExit()) {
+        auto zfile = unzOpen64(zip_out);
+        if (!zfile) {
+            log_write("failed to open zip: %s\n", zip_out);
+            return false;
+        }
+        ON_SCOPE_EXIT(unzClose(zfile));
+
+        unz_global_info64 pglobal_info;
+        if (UNZ_OK != unzGetGlobalInfo64(zfile, &pglobal_info)) {
+            return false;
+        }
+
+        for (int i = 0; i < pglobal_info.number_entry; i++) {
+            if (i > 0) {
+                if (UNZ_OK != unzGoToNextFile(zfile)) {
+                    log_write("failed to unzGoToNextFile\n");
+                    return false;
+                }
+            }
+
+            if (UNZ_OK != unzOpenCurrentFile(zfile)) {
+                log_write("failed to open current file\n");
+                return false;
+            }
+            ON_SCOPE_EXIT(unzCloseCurrentFile(zfile));
+
+            unz_file_info64 info;
+            fs::FsPath file_path;
+            if (UNZ_OK != unzGetCurrentFileInfo64(zfile, &info, file_path, sizeof(file_path), 0, 0, 0, 0)) {
+                log_write("failed to get current info\n");
+                return false;
+            }
+
+            if (file_path[0] != '/') {
+                file_path = fs::AppendPath("/", file_path);
+            }
+
+            Result rc;
+            if (file_path[strlen(file_path) -1] == '/') {
+                if (R_FAILED(rc = fs.CreateDirectoryRecursively(file_path)) && rc != FsError_ResultPathAlreadyExists) {
+                    log_write("failed to create folder: %s 0x%04X\n", file_path, rc);
+                    return false;
+                }
+            } else {
+                Result rc;
+                if (R_FAILED(rc = fs.CreateFile(file_path, info.uncompressed_size, 0)) && rc != FsError_ResultPathAlreadyExists) {
+                    log_write("failed to create file: %s 0x%04X\n", file_path, rc);
+                    return false;
+                }
+
+                FsFile f;
+                if (R_FAILED(rc = fs.OpenFile(file_path, FsOpenMode_Write, &f))) {
+                    log_write("failed to open file: %s 0x%04X\n", file_path, rc);
+                    return false;
+                }
+                ON_SCOPE_EXIT(fsFileClose(&f));
+
+                if (R_FAILED(rc = fsFileSetSize(&f, info.uncompressed_size))) {
+                    log_write("failed to set file size: %s 0x%04X\n", file_path, rc);
+                    return false;
+                }
+
+                std::vector<char> buf(chunk_size);
+                u64 offset{};
+                while (offset < info.uncompressed_size) {
+                    if (pbox->ShouldExit()) {
+                        return false;
+                    }
+
+                    const auto bytes_read = unzReadCurrentFile(zfile, buf.data(), buf.size());
+                    if (bytes_read <= 0) {
+                        // log_write("failed to read zip file: %s\n", inzip.c_str());
+                        return false;
+                    }
+
+                    if (R_FAILED(rc = fsFileWrite(&f, offset, buf.data(), bytes_read, FsWriteOption_None))) {
+                        log_write("failed to write file: %s 0x%04X\n", file_path, rc);
+                        return false;
+                    }
+
+                    pbox->UpdateTransfer(offset, info.uncompressed_size);
+                    offset += bytes_read;
+                }
+            }
+        }
+    }
+
+    log_write("finished update :)\n");
+    return true;
+}
 
 } // namespace
 
 MainMenu::MainMenu() {
-    #if 0
-    DownloadMemoryAsync("https://api.github.com/repos/ITotalJustice/sys-patch/releases/latest", [this](std::vector<u8>& data, bool success){
+    // todo: replace below with yyjson, this is old code from ams updater, lol.
+    DownloadMemoryAsync("https://api.github.com/repos/ITotalJustice/sphaira/releases/latest", "", [this](std::vector<u8>& data, bool success){
         data.push_back('\0');
         auto raw_str = (const char*)data.data();
         char out_str[0x301];
 
         if (parseSearch(raw_str, "tag_name\":\"", out_str)) {
             m_update_version = out_str;
-            if (strcasecmp("v1.5.0", m_update_version.c_str())) {
-                m_update_avaliable = true;
+            if (std::strcmp(APP_VERSION, m_update_version.c_str()) < 0) {
+                m_update_state = UpdateState::Update;
+                App::Notify("Update avaliable: "_i18n + m_update_version);
+            } else {
+                m_update_state = UpdateState::None;
             }
-            log_write("FOUND IT : %s\n", out_str);
+            log_write("found update tag : %s vs %s\n", APP_VERSION, out_str);
         }
 
         if (parseSearch(raw_str, "browser_download_url\":\"", out_str)) {
             m_update_url = out_str;
-            log_write("FOUND IT : %s\n", out_str);
+            log_write("found download url : %s\n", out_str);
         }
 
         if (parseSearch(raw_str, "body\":\"", out_str)) {
             m_update_description = out_str;
             // m_update_description.replace("\r\n\r\n", "\n");
-            log_write("FOUND IT : %s\n", out_str);
+            log_write("found description : %s\n", out_str);
         }
     });
-    #endif
 
     AddOnLPress();
     AddOnRPress();
@@ -128,21 +254,25 @@ MainMenu::MainMenu() {
                 options->Add(std::make_shared<SidebarEntryBool>("Nxlink"_i18n, App::GetNxlinkEnable(), [this](bool& enable){
                     App::SetNxlinkEnable(enable);
                 }, "Enabled"_i18n, "Disabled"_i18n));
-                options->Add(std::make_shared<SidebarEntryCallback>("Check for update"_i18n, [this](){
-                    App::Notify("Not Implemented"_i18n);
-                }));
+
+                if (m_update_state == UpdateState::Update) {
+                    options->Add(std::make_shared<SidebarEntryCallback>("Download update: "_i18n + m_update_version, [this](){
+                        App::Push(std::make_shared<ProgressBox>("Downloading "_i18n + m_update_version, [this](auto pbox){
+                            return InstallUpdate(pbox, m_update_url, m_update_version);
+                        }, [this](bool success){
+                            if (success) {
+                                m_update_state = UpdateState::None;
+                            } else {
+                                App::Push(std::make_shared<ui::ErrorBox>(MAKERESULT(351, 1), "Failed to download update"));
+                            }
+                        }, 2));
+                    }));
+                }
             }));
 
             options->Add(std::make_shared<SidebarEntryArray>("Language"_i18n, language_items, [this, language_items](std::size_t& index_out){
                 App::SetLanguage(index_out);
             }, (std::size_t)App::GetLanguage()));
-
-            if (m_update_avaliable) {
-                std::string str = "Update avaliable: "_i18n + m_update_version;
-                options->Add(std::make_shared<SidebarEntryCallback>(str, [this](){
-                    App::Notify("Not Implemented"_i18n);
-                }));
-            }
 
             options->Add(std::make_shared<SidebarEntryBool>("Logging"_i18n, App::GetLogEnable(), [this](bool& enable){
                 App::SetLogEnable(enable);
