@@ -49,6 +49,8 @@ struct Widget : public Object {
         m_actions.clear();
     }
 
+    auto FireAction(Button button, u8 type = ActionType::DOWN) -> bool;
+
     void SetPop(bool pop = true) {
         m_pop = pop;
     }

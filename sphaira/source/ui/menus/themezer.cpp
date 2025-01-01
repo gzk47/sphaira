@@ -553,6 +553,36 @@ Menu::~Menu() {
 
 void Menu::Update(Controller* controller, TouchInfo* touch) {
     MenuBase::Update(controller, touch);
+
+    if (m_pages.empty()) {
+        return;
+    }
+
+    const auto& page = m_pages[m_page_index];
+    if (page.m_ready != PageLoadState::Done) {
+        return;
+    }
+
+    const u64 SCROLL = m_start;
+    const u64 max_entry_display = 9;
+    const u64 nro_total = page.m_packList.size();// m_entries_current.size();
+    const u64 cursor_pos = m_index;
+
+    if (touch->is_clicked) {
+        for (u64 i = 0, pos = SCROLL, y = 110, w = 350, h = 250; pos < nro_total && i < max_entry_display; y += h + 10) {
+            for (u64 j = 0, x = 75; j < 3 && pos < nro_total && i < max_entry_display; j++, i++, pos++, x += w + 10) {
+                if (touch->in_range(x, y, w, h)) {
+                    if (pos == m_index) {
+                        FireAction(Button::A);
+                    } else {
+                        App::PlaySoundEffect(SoundEffect_Focus);
+                        SetIndex(pos);
+                    }
+                    break;
+                }
+            }
+        }
+    }
 }
 
 void Menu::Draw(NVGcontext* vg, Theme* theme) {

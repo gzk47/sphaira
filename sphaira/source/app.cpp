@@ -707,34 +707,27 @@ void App::Poll() {
     m_controller.m_kup = padGetButtonsUp(&m_pad);
     m_controller.UpdateButtonHeld(static_cast<u64>(Button::ANY_DIRECTION));
 
-    HidTouchScreenState touch_state{};
-    hidGetTouchScreenStates(&touch_state, 1);
+    HidTouchScreenState state{};
+    hidGetTouchScreenStates(&state, 1);
+    m_touch_info.is_clicked = false;
 
-    if (touch_state.count == 1 && !m_touch_info.is_touching) {
-        m_touch_info.initial_x = m_touch_info.prev_x = m_touch_info.cur_x = touch_state.touches[0].x;
-        m_touch_info.initial_y = m_touch_info.prev_y = m_touch_info.cur_y = touch_state.touches[0].y;
-        m_touch_info.finger_id = touch_state.touches[0].finger_id;
+    if (state.count == 1 && !m_touch_info.is_touching) {
+        m_touch_info.initial = m_touch_info.cur = state.touches[0];
         m_touch_info.is_touching = true;
         m_touch_info.is_tap = true;
         // PlaySoundEffect(SoundEffect_Limit);
-    } else if (touch_state.count >= 1 && m_touch_info.is_touching && m_touch_info.finger_id == touch_state.touches[0].finger_id) {
-        m_touch_info.prev_x = m_touch_info.cur_x;
-        m_touch_info.prev_y = m_touch_info.cur_y;
-
-        m_touch_info.cur_x = touch_state.touches[0].x;
-        m_touch_info.cur_y = touch_state.touches[0].y;
+    } else if (state.count >= 1 && m_touch_info.is_touching) {
+        m_touch_info.cur = state.touches[0];
 
         if (m_touch_info.is_tap &&
-            (std::abs(m_touch_info.initial_x - m_touch_info.cur_x) > 20 ||
-            std::abs(m_touch_info.initial_y - m_touch_info.cur_y) > 20)) {
+            (std::abs((s32)m_touch_info.initial.x - (s32)m_touch_info.cur.x) > 20 ||
+            std::abs((s32)m_touch_info.initial.y - (s32)m_touch_info.cur.y) > 20)) {
             m_touch_info.is_tap = false;
         }
     } else if (m_touch_info.is_touching) {
         m_touch_info.is_touching = false;
-
-        // check if we clicked on anything, if so, handle it
         if (m_touch_info.is_tap) {
-            // todo:
+            m_touch_info.is_clicked = true;
         }
     }
 }

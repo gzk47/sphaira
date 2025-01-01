@@ -47,4 +47,15 @@ void Widget::RemoveAction(Button button) {
     }
 }
 
+auto Widget::FireAction(Button b, u8 type) -> bool {
+    for (const auto& [button, action] : m_actions) {
+        if (button == b && (action.m_type & type)) {
+            App::PlaySoundEffect(SoundEffect_Focus);
+            action.Invoke(true);
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace sphaira::ui

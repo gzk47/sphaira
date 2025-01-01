@@ -1014,6 +1014,27 @@ Menu::~Menu() {
 
 void Menu::Update(Controller* controller, TouchInfo* touch) {
     MenuBase::Update(controller, touch);
+
+    const u64 SCROLL = m_start;
+    const u64 max_entry_display = 9;
+    const u64 nro_total = m_entries.size();
+    const u64 cursor_pos = m_index;
+
+    if (touch->is_clicked) {
+        for (u64 i = 0, pos = SCROLL, y = 110, w = 370, h = 155; pos < nro_total && i < max_entry_display; y += h + 10) {
+            for (u64 j = 0, x = 75; j < 3 && pos < nro_total && i < max_entry_display; j++, i++, pos++, x += w + 10) {
+                if (touch->in_range(x, y, w, h)) {
+                    if (pos == m_index) {
+                        FireAction(Button::A);
+                    } else {
+                        App::PlaySoundEffect(SoundEffect_Focus);
+                        SetIndex(pos);
+                    }
+                    break;
+                }
+            }
+        }
+    }
 }
 
 void Menu::Draw(NVGcontext* vg, Theme* theme) {
