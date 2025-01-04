@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/menus/menu_base.hpp"
+#include "ui/list.hpp"
 #include "nro.hpp"
 #include "fs.hpp"
 #include "option.hpp"
@@ -239,6 +240,7 @@ private:
     std::vector<u32> m_entries_index_search; // files found via search
     std::span<u32> m_entries_current;
 
+    std::unique_ptr<List> m_list;
     std::optional<fs::FsPath> m_daybreak_path;
 
     // search options

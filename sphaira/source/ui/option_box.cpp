@@ -79,26 +79,16 @@ OptionBox::OptionBox(const std::string& message, const Option& a, const Option& 
 auto OptionBox::Update(Controller* controller, TouchInfo* touch) -> void {
     Widget::Update(controller, touch);
 
-    // if (!controller->GotDown(Button::ANY_HORIZONTAL)) {
-    //     return;
-    // }
-
-    // const auto old_index = m_index;
-
-    // if (controller->GotDown(Button::LEFT) && m_index) {
-    //     m_index--;
-    // } else if (controller->GotDown(Button::RIGHT) && m_index < (m_entries.size() - 1)) {
-    //     m_index++;
-    // }
-
-    // if (old_index != m_index) {
-    //     m_entries[old_index].Selected(false);
-    //     m_entries[m_index].Selected(true);
-    // }
-}
-
-auto OptionBox::OnLayoutChange() -> void {
-
+    if (touch->is_clicked) {
+        for (std::size_t i = 0; i < m_entries.size(); i++) {
+            auto& e = m_entries[i];
+            if (touch->in_range(e.GetPos())) {
+                SetIndex(i);
+                FireAction(Button::A);
+                break;
+            }
+        }
+    }
 }
 
 auto OptionBox::Draw(NVGcontext* vg, Theme* theme) -> void {
@@ -136,18 +126,12 @@ auto OptionBox::Setup(std::size_t index) -> void {
     SetActions(
         std::make_pair(Button::LEFT, Action{[this](){
             if (m_index) {
-                m_entries[m_index].Selected(false);
-                m_index--;
-                m_entries[m_index].Selected(true);
-                App::PlaySoundEffect(SoundEffect_Focus);
+                SetIndex(m_index - 1);
             }
         }}),
         std::make_pair(Button::RIGHT, Action{[this](){
             if (m_index < (m_entries.size() - 1)) {
-                m_entries[m_index].Selected(false);
-                m_index++;
-                m_entries[m_index].Selected(true);
-                App::PlaySoundEffect(SoundEffect_Focus);
+                SetIndex(m_index + 1);
             }
         }}),
         std::make_pair(Button::A, Action{[this](){
@@ -159,6 +143,14 @@ auto OptionBox::Setup(std::size_t index) -> void {
             SetPop();
         }})
     );
+}
+
+void OptionBox::SetIndex(std::size_t index) {
+    if (m_index != index) {
+        m_entries[m_index].Selected(false);
+        m_index = index;
+        m_entries[m_index].Selected(true);
+    }
 }
 
 } // namespace sphaira::ui

@@ -701,12 +701,6 @@ void App::ExitRestart() {
 void App::Poll() {
     m_controller.Reset();
 
-    padUpdate(&m_pad);
-    m_controller.m_kdown = padGetButtonsDown(&m_pad);
-    m_controller.m_kheld = padGetButtons(&m_pad);
-    m_controller.m_kup = padGetButtonsUp(&m_pad);
-    m_controller.UpdateButtonHeld(static_cast<u64>(Button::ANY_DIRECTION));
-
     HidTouchScreenState state{};
     hidGetTouchScreenStates(&state, 1);
     m_touch_info.is_clicked = false;
@@ -715,7 +709,6 @@ void App::Poll() {
         m_touch_info.initial = m_touch_info.cur = state.touches[0];
         m_touch_info.is_touching = true;
         m_touch_info.is_tap = true;
-        // PlaySoundEffect(SoundEffect_Limit);
     } else if (state.count >= 1 && m_touch_info.is_touching) {
         m_touch_info.cur = state.touches[0];
 
@@ -723,12 +716,23 @@ void App::Poll() {
             (std::abs((s32)m_touch_info.initial.x - (s32)m_touch_info.cur.x) > 20 ||
             std::abs((s32)m_touch_info.initial.y - (s32)m_touch_info.cur.y) > 20)) {
             m_touch_info.is_tap = false;
+            m_touch_info.is_scroll = true;
         }
     } else if (m_touch_info.is_touching) {
         m_touch_info.is_touching = false;
+        m_touch_info.is_scroll = false;
         if (m_touch_info.is_tap) {
             m_touch_info.is_clicked = true;
         }
+    }
+
+    // todo: better implement this to match hos
+    if (!m_touch_info.is_touching && !m_touch_info.is_clicked) {
+        padUpdate(&m_pad);
+        m_controller.m_kdown = padGetButtonsDown(&m_pad);
+        m_controller.m_kheld = padGetButtons(&m_pad);
+        m_controller.m_kup = padGetButtonsUp(&m_pad);
+        m_controller.UpdateButtonHeld(static_cast<u64>(Button::ANY_DIRECTION));
     }
 }
 
@@ -802,17 +806,21 @@ auto App::GetVg() -> NVGcontext* {
 }
 
 void DrawElement(float x, float y, float w, float h, ThemeEntryID id) {
+    DrawElement({x, y, w, h}, id);
+}
+
+void DrawElement(const Vec4& v, ThemeEntryID id) {
     const auto& e = g_app->m_theme.elements[id];
 
     switch (e.type) {
         case ElementType::None: {
         } break;
         case ElementType::Texture: {
-            const auto paint = nvgImagePattern(g_app->vg, x, y, w, h, 0, e.texture, 1.f);
-            ui::gfx::drawRect(g_app->vg, x, y, w, h, paint);
+            const auto paint = nvgImagePattern(g_app->vg, v.x, v.y, v.w, v.h, 0, e.texture, 1.f);
+            ui::gfx::drawRect(g_app->vg, v, paint);
         } break;
         case ElementType::Colour: {
-            ui::gfx::drawRect(g_app->vg, x, y, w, h, e.colour);
+            ui::gfx::drawRect(g_app->vg, v, e.colour);
         } break;
     }
 }

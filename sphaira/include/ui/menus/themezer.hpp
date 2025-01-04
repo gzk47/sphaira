@@ -2,6 +2,7 @@
 
 #include "ui/menus/menu_base.hpp"
 #include "ui/scrollable_text.hpp"
+#include "ui/list.hpp"
 #include "option.hpp"
 #include <span>
 
@@ -166,6 +167,10 @@ struct Menu final : MenuBase {
 
     void SetIndex(std::size_t index) {
         m_index = index;
+
+        if (m_index > m_start && m_index - m_start >= 6) {
+            m_start = m_index/3*3 - 3;
+        }
     }
 
     // void SetSearch(const std::string& term);
@@ -187,6 +192,7 @@ private:
 
     std::size_t m_start{};
     std::size_t m_index{}; // where i am in the array
+    std::unique_ptr<List> m_list;
 
     // options
     option::OptionLong m_sort{INI_SECTION, "sort", 0};

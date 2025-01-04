@@ -12,7 +12,6 @@ public:
     OptionBoxEntry(const std::string& text, Vec4 pos);
 
     auto Update(Controller* controller, TouchInfo* touch) -> void override {}
-    auto OnLayoutChange() -> void override {}
     auto Draw(NVGcontext* vg, Theme* theme) -> void override;
 
     auto Selected(bool enable) -> void;
@@ -40,13 +39,13 @@ public:
     OptionBox(const std::string& message, const Option& a, const Option& b, const Option& c, std::size_t index, Callback cb); // tri
 
     auto Update(Controller* controller, TouchInfo* touch) -> void override;
-    auto OnLayoutChange() -> void override;
     auto Draw(NVGcontext* vg, Theme* theme) -> void override;
     auto OnFocusGained() noexcept -> void override;
     auto OnFocusLost() noexcept -> void override;
 
 private:
     auto Setup(std::size_t index) -> void; // common setup values
+    void SetIndex(std::size_t index);
 
 private:
     std::string m_message;

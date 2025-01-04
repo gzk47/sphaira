@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ui/widget.hpp"
-#include "ui/scrollbar.hpp"
+#include "ui/list.hpp"
 #include <optional>
 
 namespace sphaira::ui {
@@ -19,10 +19,12 @@ public:
     PopupList(std::string title, Items items, std::size_t& index_ref);
 
     auto Update(Controller* controller, TouchInfo* touch) -> void override;
-    auto OnLayoutChange() -> void override;
     auto Draw(NVGcontext* vg, Theme* theme) -> void override;
     auto OnFocusGained() noexcept -> void override;
     auto OnFocusLost() noexcept -> void override;
+
+private:
+    void SetIndex(std::size_t index);
 
 private:
     static constexpr Vec2 m_title_pos{70.f, 28.f};
@@ -36,14 +38,11 @@ private:
     std::size_t m_index; // index in list array
     std::size_t m_index_offset{}; // drawing from array start
 
-    // std::size_t& index_ref;
-    // std::string& index_str_ref;
+    std::unique_ptr<List> m_list;
 
-    float m_selected_y{};
     float m_yoff{};
     float m_line_top{};
     float m_line_bottom{};
-    ScrollBar m_scrollbar;
 };
 
 } // namespace sphaira::ui

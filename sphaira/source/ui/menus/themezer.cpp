@@ -545,6 +545,10 @@ Menu::Menu() : MenuBase{"Themezer"_i18n} {
     m_page_index = 0;
     m_pages.resize(1);
     PackListDownload();
+
+    const Vec4 v{75, 110, 350, 250};
+    const Vec2 pad{10, 10};
+    m_list = std::make_unique<List>(m_pos, v, pad);
 }
 
 Menu::~Menu() {
@@ -563,26 +567,18 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
         return;
     }
 
-    const u64 SCROLL = m_start;
-    const u64 max_entry_display = 9;
-    const u64 nro_total = page.m_packList.size();// m_entries_current.size();
-    const u64 cursor_pos = m_index;
-
-    if (touch->is_clicked) {
-        for (u64 i = 0, pos = SCROLL, y = 110, w = 350, h = 250; pos < nro_total && i < max_entry_display; y += h + 10) {
-            for (u64 j = 0, x = 75; j < 3 && pos < nro_total && i < max_entry_display; j++, i++, pos++, x += w + 10) {
-                if (touch->in_range(x, y, w, h)) {
-                    if (pos == m_index) {
-                        FireAction(Button::A);
-                    } else {
-                        App::PlaySoundEffect(SoundEffect_Focus);
-                        SetIndex(pos);
-                    }
-                    break;
-                }
+    m_list->Do(m_start, page.m_packList.size(), [this, touch](auto* vg, auto* theme, auto v, auto i) {
+        if (touch->is_clicked && touch->in_range(v)) {
+            if (m_index == i) {
+                FireAction(Button::A);
+            } else {
+                App::PlaySoundEffect(SoundEffect_Focus);
+                SetIndex(i);
             }
+            return false;
         }
-    }
+        return true;
+    });
 }
 
 void Menu::Draw(NVGcontext* vg, Theme* theme) {
@@ -609,109 +605,98 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
             return;
     }
 
-    const u64 SCROLL = m_start;
-    const u64 max_entry_display = 9;
-    const u64 nro_total = page.m_packList.size();// m_entries_current.size();
-    const u64 cursor_pos = m_index;
-
     // only draw scrollbar if needed
-    if (nro_total > max_entry_display) {
-        const auto scrollbar_size = 500.f;
-        const auto sb_h = 3.f / (float)(nro_total + 3) * scrollbar_size;
-        const auto sb_y = SCROLL / 3.f;
-        gfx::drawRect(vg, SCREEN_WIDTH - 50, 100, 10, scrollbar_size, theme->elements[ThemeEntryID_GRID].colour);
-        gfx::drawRect(vg, SCREEN_WIDTH - 50+2, 102 + sb_h * sb_y, 10-4, sb_h + (sb_h * 2) - 4, theme->elements[ThemeEntryID_TEXT_SELECTED].colour);
-    }
+    gfx::drawScrollbar(vg, theme, m_start, page.m_packList.size(), 9);
 
     // max images per frame, in order to not hit io / gpu too hard.
     const int image_load_max = 2;
     int image_load_count = 0;
 
-    nvgSave(vg);
-    nvgScissor(vg, 30, 87, 1220 - 30, 646 - 87); // clip
+    m_list->Do(vg, theme, m_start, page.m_packList.size(), [this, &page, &image_load_count](auto* vg, auto* theme, auto v, auto pos) {
+        const auto& [x, y, w, h] = v;
+        auto& e = page.m_packList[pos];
 
-    for (u64 i = 0, pos = SCROLL, y = 110, w = 350, h = 250; pos < nro_total && i < max_entry_display; y += h + 10) {
-        for (u64 j = 0, x = 75; j < 3 && pos < nro_total && i < max_entry_display; j++, i++, pos++, x += w + 10) {
-            const auto index = pos;
-            auto& e = page.m_packList[index];
+        auto text_id = ThemeEntryID_TEXT;
+        if (pos == m_index) {
+            text_id = ThemeEntryID_TEXT_SELECTED;
+            gfx::drawRectOutline(vg, 4.f, theme->elements[ThemeEntryID_SELECTED_OVERLAY].colour, x, y, w, h, theme->elements[ThemeEntryID_SELECTED].colour);
+        } else {
+            DrawElement(x, y, w, h, ThemeEntryID_GRID);
+        }
 
-            auto text_id = ThemeEntryID_TEXT;
-            if (pos == cursor_pos) {
-                text_id = ThemeEntryID_TEXT_SELECTED;
-                gfx::drawRectOutline(vg, 4.f, theme->elements[ThemeEntryID_SELECTED_OVERLAY].colour, x, y, w, h, theme->elements[ThemeEntryID_SELECTED].colour);
-            } else {
-                DrawElement(x, y, w, h, ThemeEntryID_GRID);
+        const float xoff = (350 - 320) / 2;
+        const float yoff = (350 - 320) / 2;
+
+        // lazy load image
+        if (e.themes.size()) {
+            auto& theme = e.themes[0];
+            auto& image = e.themes[0].preview.lazy_image;
+
+            // try and load cached image.
+            if (image_load_count < image_load_max && !image.image && !image.tried_cache) {
+                image.tried_cache = true;
+                image.cached = loadThemeImage(theme);
+                if (image.cached) {
+                    image_load_count++;
+                }
             }
 
-            const float xoff = (350 - 320) / 2;
-            const float yoff = (350 - 320) / 2;
+            if (!image.image || image.cached) {
+                switch (image.state) {
+                    case ImageDownloadState::None: {
+                        const auto path = apiBuildIconCache(theme);
+                        log_write("downloading theme!: %s\n", path);
 
-            // lazy load image
-            if (e.themes.size()) {
-                auto& theme = e.themes[0];
-                auto& image = e.themes[0].preview.lazy_image;
-
-                // try and load cached image.
-                if (image_load_count < image_load_max && !image.image && !image.tried_cache) {
-                    image.tried_cache = true;
-                    image.cached = loadThemeImage(theme);
-                    if (image.cached) {
-                        image_load_count++;
-                    }
-                }
-
-                if (!image.image || image.cached) {
-                    switch (image.state) {
-                        case ImageDownloadState::None: {
-                            const auto path = apiBuildIconCache(theme);
-                            log_write("downloading theme!: %s\n", path);
-
-                            const auto url = theme.preview.thumb;
-                            log_write("downloading url: %s\n", url.c_str());
-                            image.state = ImageDownloadState::Progress;
-                            curl::Api().ToFileAsync(
-                                curl::Url{url},
-                                curl::Path{path},
-                                curl::Flags{curl::Flag_Cache},
-                                curl::OnComplete{[this, &image](auto& result) {
-                                    if (result.success) {
-                                        image.state = ImageDownloadState::Done;
-                                        // data hasn't changed
-                                        if (result.code == 304) {
-                                            image.cached = false;
-                                        }
-                                    } else {
-                                        image.state = ImageDownloadState::Failed;
-                                        log_write("failed to download image\n");
+                        const auto url = theme.preview.thumb;
+                        log_write("downloading url: %s\n", url.c_str());
+                        image.state = ImageDownloadState::Progress;
+                        curl::Api().ToFileAsync(
+                            curl::Url{url},
+                            curl::Path{path},
+                            curl::Flags{curl::Flag_Cache},
+                            curl::OnComplete{[this, &image](auto& result) {
+                                if (result.success) {
+                                    image.state = ImageDownloadState::Done;
+                                    // data hasn't changed
+                                    if (result.code == 304) {
+                                        image.cached = false;
                                     }
+                                } else {
+                                    image.state = ImageDownloadState::Failed;
+                                    log_write("failed to download image\n");
                                 }
-                            });
-                        }   break;
-                        case ImageDownloadState::Progress: {
-
-                        }   break;
-                        case ImageDownloadState::Done: {
-                            image.cached = false;
-                            if (!loadThemeImage(theme)) {
-                                image.state = ImageDownloadState::Failed;
-                            } else {
-                                image_load_count++;
                             }
-                        }   break;
-                        case ImageDownloadState::Failed: {
-                        }   break;
-                    }
-                }
+                        });
+                    }   break;
+                    case ImageDownloadState::Progress: {
 
-                gfx::drawImageRounded(vg, x + xoff, y, 320, 180, image.image ? image.image : App::GetDefaultImage());
+                    }   break;
+                    case ImageDownloadState::Done: {
+                        image.cached = false;
+                        if (!loadThemeImage(theme)) {
+                            image.state = ImageDownloadState::Failed;
+                        } else {
+                            image_load_count++;
+                        }
+                    }   break;
+                    case ImageDownloadState::Failed: {
+                    }   break;
+                }
             }
 
+            gfx::drawImageRounded(vg, x + xoff, y, 320, 180, image.image ? image.image : App::GetDefaultImage());
+        }
+
+        const auto clip_y = std::min(GetY() + GetH(), y + h) - y;
+        nvgSave(vg);
+        nvgScissor(vg, x, y, w - 30.f, clip_y); // clip
+        {
             gfx::drawTextArgs(vg, x + xoff, y + 180 + 20, 18, NVG_ALIGN_LEFT, theme->elements[text_id].colour, "%s", e.details.name.c_str());
             gfx::drawTextArgs(vg, x + xoff, y + 180 + 55, 18, NVG_ALIGN_LEFT, theme->elements[text_id].colour, "%s", e.creator.display_name.c_str());
         }
-    }
-
-    nvgRestore(vg);
+        nvgRestore(vg);
+        return true;
+    });
 }
 
 void Menu::OnFocusGained() {

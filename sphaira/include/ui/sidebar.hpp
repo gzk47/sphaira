@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/widget.hpp"
+#include "ui/list.hpp"
 #include <memory>
 
 namespace sphaira::ui {
@@ -9,7 +10,6 @@ class SidebarEntryBase : public Widget {
 public:
     SidebarEntryBase(std::string&& title);
     virtual auto Draw(NVGcontext* vg, Theme* theme) -> void override;
-    virtual auto OnLayoutChange() -> void override {}
 
 protected:
     std::string m_title;
@@ -24,9 +24,9 @@ public:
     SidebarEntryBool(std::string title, bool option, Callback cb, std::string true_str = "On", std::string false_str = "Off");
     SidebarEntryBool(std::string title, bool& option, std::string true_str = "On", std::string false_str = "Off");
 
+private:
     auto Draw(NVGcontext* vg, Theme* theme) -> void override;
 
-private:
     bool m_option;
     Callback m_callback;
     std::string m_true_str;
@@ -101,14 +101,11 @@ public:
     Sidebar(std::string title, std::string sub, Side side);
 
     auto Update(Controller* controller, TouchInfo* touch) -> void override;
-    auto OnLayoutChange() -> void override {}
     auto Draw(NVGcontext* vg, Theme* theme) -> void override;
     auto OnFocusGained() noexcept -> void override;
     auto OnFocusLost() noexcept -> void override;
 
     void Add(std::shared_ptr<SidebarEntryBase> entry);
-    void AddSpacer();
-    void AddHeader(std::string name);
 
 private:
     void SetIndex(std::size_t index);
@@ -121,12 +118,12 @@ private:
     std::size_t m_index{};
     std::size_t m_index_offset{};
 
+    std::unique_ptr<List> m_list;
+
     Vec4 m_top_bar{};
     Vec4 m_bottom_bar{};
     Vec2 m_title_pos{};
     Vec4 m_base_pos{};
-
-    float m_selected_y{};
 
     static constexpr float m_title_size{28.f};
     // static constexpr Vec2 box_size{380.f, 70.f};

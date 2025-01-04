@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/menus/menu_base.hpp"
+#include "ui/list.hpp"
 #include "fs.hpp"
 #include "option.hpp"
 #include <vector>
@@ -68,6 +69,7 @@ private:
     std::vector<Entry> m_entries;
     std::size_t m_index{};
     std::size_t m_index_offset{};
+    std::unique_ptr<List> m_list;
 };
 
 } // namespace sphaira::ui::menu::gh

@@ -198,16 +198,27 @@ struct Theme {
     ElementEntry elements[ThemeEntryID_MAX];
 };
 
+// enum class TouchGesture {
+//     None,
+//     Tap,
+//     Scroll,
+// };
+
 struct TouchInfo {
     HidTouchState initial;
     HidTouchState cur;
 
+    auto in_range(const Vec4& v) const -> bool {
+        return cur.x >= v.x && cur.x <= v.x + v.w && cur.y >= v.y && cur.y <= v.y + v.h;
+    }
+
     auto in_range(s32 x, s32 y, s32 w, s32 h) const -> bool {
-        return cur.x >= x && cur.x <= x + w && cur.y >= y && cur.y <= y + h;
+        return in_range(Vec4(x, y, w, h));
     }
 
     bool is_touching;
     bool is_tap;
+    bool is_scroll;
     bool is_clicked;
 };
 

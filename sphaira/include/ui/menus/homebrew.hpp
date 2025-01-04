@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/menus/menu_base.hpp"
+#include "ui/list.hpp"
 #include "nro.hpp"
 #include "fs.hpp"
 #include "option.hpp"
@@ -52,6 +53,10 @@ private:
     std::vector<NroEntry> m_entries;
     std::size_t m_start{};
     std::size_t m_index{}; // where i am in the array
+    std::unique_ptr<List> m_list;
+
+    // todo: needed for scroll
+    float y_off = 0;
 
     option::OptionLong m_sort{INI_SECTION, "sort", SortType::SortType_AlphabeticalStar};
     option::OptionLong m_order{INI_SECTION, "order", OrderType::OrderType_Decending};

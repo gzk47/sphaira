@@ -229,8 +229,6 @@ MainMenu::MainMenu() {
             language_items.push_back("Russian"_i18n);
             language_items.push_back("Swedish"_i18n);
 
-            options->AddHeader("Header"_i18n);
-            options->AddSpacer();
             options->Add(std::make_shared<SidebarEntryCallback>("Theme"_i18n, [this](){
                 SidebarEntryArray::Items theme_items{};
                 const auto theme_meta = App::GetThemeMetaList();

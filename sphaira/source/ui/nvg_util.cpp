@@ -291,7 +291,7 @@ void textBounds(NVGcontext* vg, float x, float y, float *bounds, const char* str
 void dimBackground(NVGcontext* vg) {
     // drawRectIntenal(vg, {0.f,0.f,1280.f,720.f}, nvgRGBA(30,30,30,180));
     // drawRectIntenal(vg, {0.f,0.f,1920.f,1080.f}, nvgRGBA(20, 20, 20, 225), false);
-    drawRectIntenal(vg, {0.f,0.f,1920.f,1080.f}, nvgRGBA(0, 0, 0, 220), false);
+    drawRectIntenal(vg, {0.f,0.f,1920.f,1080.f}, nvgRGBA(0, 0, 0, 230), false);
 }
 
 void drawRect(NVGcontext* vg, float x, float y, float w, float h, Colour c, bool rounded) {
@@ -453,58 +453,25 @@ void drawTextArgs(NVGcontext* vg, float x, float y, float size, int align, Colou
     drawTextIntenal(vg, {x, y}, size, buffer, nullptr, align, getColour(c));
 }
 
-void drawButton(NVGcontext* vg, float x, float y, float size, Button button) {
-    drawText(vg, x, y, size, getButton(button), nullptr, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, getColour(Colour::WHITE));
-}
+void drawScrollbar(NVGcontext* vg, Theme* theme, float x, float y, float h, u32 index_off, u32 count, u32 max_per_page) {
+    const u64 SCROLL = index_off;
+    const u64 max_entry_display = max_per_page;
+    const u64 entry_total = count;
+    const float scc2 = 8.0;
+    const float scw = 2.0;
 
-void drawButtons(NVGcontext* vg, const Widget::Actions& _actions, const NVGcolor& c, float start_x) {
-    nvgBeginPath(vg);
-    nvgFontSize(vg, 24.f);
-    nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP);
-    nvgFillColor(vg, c);
-
-    float x = start_x;
-    const float y = 675.f;
-    float bounds[4]{};
-
-    // swaps L/R position, idc how shit this is, it's called once per frame.
-    std::vector<std::pair<Button, Action>> actions;
-    actions.reserve(_actions.size());
-
-    for (const auto a: _actions) {
-        // swap
-        if (a.first == Button::R && actions.size() && actions.back().first == Button::L) {
-            const auto s = actions.back();
-            actions.back() = a;
-            actions.emplace_back(s);
-
-        } else {
-            actions.emplace_back(a);
-        }
-    }
-
-    for (const auto& [button, action] : actions) {
-        if (action.IsHidden() || action.m_hint.empty()) {
-            continue;
-        }
-        nvgFontSize(vg, 20.f);
-        nvgTextBounds(vg, x, y, action.m_hint.c_str(), nullptr, bounds);
-        auto len = bounds[2] - bounds[0];
-        nvgText(vg, x, y, action.m_hint.c_str(), nullptr);
-
-        x -= len + 8.f;
-        nvgFontSize(vg, 26.f);
-        nvgTextBounds(vg, x, y - 7.f, getButton(button), nullptr, bounds);
-        len = bounds[2] - bounds[0];
-        nvgText(vg, x, y - 4.f, getButton(button), nullptr);
-        x -= len + 34.f;
+    // only draw scrollbar if needed
+    if (entry_total > max_entry_display) {
+        const float sb_h = 1.f / (float)entry_total * h;
+        const float sb_y = SCROLL;
+        gfx::drawRect(vg, x, y, scc2, h, theme->elements[ThemeEntryID_GRID].colour, false);
+        gfx::drawRect(vg, x + scw, y + scw + sb_h * sb_y, scc2 - scw * 2, sb_h * float(max_entry_display) - scw * 2, theme->elements[ThemeEntryID_TEXT_SELECTED].colour, false);
     }
 }
 
-// from gc installer
-void drawDimBackground(NVGcontext* vg) {
-    // drawRect(vg, 0, 0, 1920, 1080, nvgRGBA(20, 20, 20, 225));
-    drawRect(vg, 0, 0, 1920, 1080, nvgRGBA(0, 0, 0, 220));
+void drawScrollbar(NVGcontext* vg, Theme* theme, u32 index_off, u32 count, u32 max_per_page) {
+    // drawScrollbar(vg, SCREEN_WIDTH - 50, 100, 500, index_off, count, max_per_page);
+    drawScrollbar(vg, theme, SCREEN_WIDTH - 50, 100, SCREEN_HEIGHT-200, index_off, count, max_per_page);
 }
 
 #define HIGHLIGHT_SPEED 350.0
