@@ -58,8 +58,8 @@ public:
     static void NotifyFlashLed();
 
     static auto GetThemeMetaList() -> std::span<ThemeMeta>;
-    static void SetTheme(u64 theme_index);
-    static auto GetThemeIndex() -> u64;
+    static void SetTheme(s64 theme_index);
+    static auto GetThemeIndex() -> s64;
 
     static auto GetDefaultImage(int* w = nullptr, int* h = nullptr) -> int;
 
@@ -145,7 +145,7 @@ public:
 
     Theme m_theme{};
     fs::FsPath theme_path{};
-    std::size_t m_theme_index{};
+    s64 m_theme_index{};
 
     bool m_quit{};
 

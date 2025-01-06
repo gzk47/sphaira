@@ -220,6 +220,7 @@ struct TouchInfo {
     bool is_tap;
     bool is_scroll;
     bool is_clicked;
+    bool is_end;
 };
 
 enum class Button : u64 {

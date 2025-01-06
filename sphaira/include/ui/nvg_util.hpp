@@ -84,6 +84,9 @@ auto getButton(Button button) -> const char*;
 void drawScrollbar(NVGcontext* vg, Theme* theme, u32 index_off, u32 count, u32 max_per_page);
 void drawScrollbar(NVGcontext* vg, Theme* theme, float x, float y, float h, u32 index_off, u32 count, u32 max_per_page);
 
+void drawScrollbar2(NVGcontext* vg, Theme* theme, float x, float y, float h, s64 index_off, s64 count, s64 row, s64 page);
+void drawScrollbar2(NVGcontext* vg, Theme* theme, s64 index_off, s64 count, s64 row, s64 page);
+
 void updateHighlightAnimation();
 void getHighlightAnimation(float* gradientX, float* gradientY, float* color);
 

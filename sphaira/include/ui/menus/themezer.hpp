@@ -165,11 +165,10 @@ struct Menu final : MenuBase {
     void Draw(NVGcontext* vg, Theme* theme) override;
     void OnFocusGained() override;
 
-    void SetIndex(std::size_t index) {
+    void SetIndex(s64 index) {
         m_index = index;
-
-        if (m_index > m_start && m_index - m_start >= 6) {
-            m_start = m_index/3*3 - 3;
+        if (!m_index) {
+            m_list->SetYoff(0);
         }
     }
 
@@ -185,13 +184,12 @@ private:
     static constexpr inline u32 MAX_ON_PAGE = 16; // same as website
 
     std::vector<PageEntry> m_pages;
-    std::size_t m_page_index{};
-    std::size_t m_page_index_max{1};
+    s64 m_page_index{};
+    s64 m_page_index_max{1};
 
     std::string m_search{};
 
-    std::size_t m_start{};
-    std::size_t m_index{}; // where i am in the array
+    s64 m_index{}; // where i am in the array
     std::unique_ptr<List> m_list;
 
     // options

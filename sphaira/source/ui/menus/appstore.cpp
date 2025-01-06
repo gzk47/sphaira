@@ -856,7 +856,7 @@ void EntryMenu::UpdateOptions() {
     SetIndex(0);
 }
 
-void EntryMenu::SetIndex(std::size_t index) {
+void EntryMenu::SetIndex(s64 index) {
     m_index = index;
     const auto option = m_options[m_index];
     if (option.confirm_text.empty()) {
@@ -908,22 +908,22 @@ Menu::Menu(const std::vector<NroEntry>& nro_entries) : MenuBase{"AppStore"_i18n}
             }
         }}),
         std::make_pair(Button::DOWN, Action{[this](){
-            if (ScrollHelperDown(m_index, m_start, 3, 3, 9, m_entries_current.size())) {
+            if (m_list->ScrollDown(m_index, 3, m_entries_current.size())) {
                 SetIndex(m_index);
             }
         }}),
         std::make_pair(Button::UP, Action{[this](){
-            if (ScrollHelperUp(m_index, m_start, 3, 3, 9, m_entries_current.size())) {
+            if (m_list->ScrollUp(m_index, 3, m_entries_current.size())) {
                 SetIndex(m_index);
             }
         }}),
         std::make_pair(Button::R2, Action{[this](){
-            if (ScrollHelperDown(m_index, m_start, 9, 3, 9, m_entries_current.size())) {
+            if (m_list->ScrollDown(m_index, 9, m_entries_current.size())) {
                 SetIndex(m_index);
             }
         }}),
         std::make_pair(Button::L2, Action{[this](){
-            if (ScrollHelperUp(m_index, m_start, 9, 3, 9, m_entries_current.size())) {
+            if (m_list->ScrollUp(m_index, 9, m_entries_current.size())) {
                 SetIndex(m_index);
             }
         }}),
@@ -958,17 +958,17 @@ Menu::Menu(const std::vector<NroEntry>& nro_entries) : MenuBase{"AppStore"_i18n}
             order_items.push_back("Decending"_i18n);
             order_items.push_back("Ascending"_i18n);
 
-            options->Add(std::make_shared<SidebarEntryArray>("Filter"_i18n, filter_items, [this, filter_items](std::size_t& index_out){
+            options->Add(std::make_shared<SidebarEntryArray>("Filter"_i18n, filter_items, [this, filter_items](s64& index_out){
                 SetFilter((Filter)index_out);
-            }, (std::size_t)m_filter));
+            }, (s64)m_filter));
 
-            options->Add(std::make_shared<SidebarEntryArray>("Sort"_i18n, sort_items, [this, sort_items](std::size_t& index_out){
+            options->Add(std::make_shared<SidebarEntryArray>("Sort"_i18n, sort_items, [this, sort_items](s64& index_out){
                 SetSort((SortType)index_out);
-            }, (std::size_t)m_sort));
+            }, (s64)m_sort));
 
-            options->Add(std::make_shared<SidebarEntryArray>("Order"_i18n, order_items, [this, order_items](std::size_t& index_out){
+            options->Add(std::make_shared<SidebarEntryArray>("Order"_i18n, order_items, [this, order_items](s64& index_out){
                 SetOrder((OrderType)index_out);
-            }, (std::size_t)m_order));
+            }, (s64)m_order));
 
             options->Add(std::make_shared<SidebarEntryCallback>("Search"_i18n, [this](){
                 std::string out;
@@ -1003,7 +1003,7 @@ Menu::Menu(const std::vector<NroEntry>& nro_entries) : MenuBase{"AppStore"_i18n}
 
     const Vec4 v{75, 110, 370, 155};
     const Vec2 pad{10, 10};
-    m_list = std::make_unique<List>(m_pos, v, pad);
+    m_list = std::make_unique<List>(3, 9, m_pos, v, pad);
     Sort();
 }
 
@@ -1013,19 +1013,13 @@ Menu::~Menu() {
 
 void Menu::Update(Controller* controller, TouchInfo* touch) {
     MenuBase::Update(controller, touch);
-
-    m_list->Do(m_start, m_entries_current.size(), [this, &touch](auto* vg, auto* theme, auto v, auto pos) {
-        if (touch->is_clicked && touch->in_range(v)) {
-            if (pos == m_index) {
-                FireAction(Button::A);
-            } else {
-                App::PlaySoundEffect(SoundEffect_Focus);
-                SetIndex(pos);
-            }
-            return false;
+    m_list->OnUpdate(controller, touch, m_entries_current.size(), [this](auto i) {
+        if (m_index == i) {
+            FireAction(Button::A);
+        } else {
+            App::PlaySoundEffect(SoundEffect_Focus);
+            SetIndex(i);
         }
-
-        return true;
     });
 }
 
@@ -1042,14 +1036,11 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
         return;
     }
 
-    // only draw scrollbar if needed
-    gfx::drawScrollbar(vg, theme, m_start, m_entries_current.size(), 9);
-
     // max images per frame, in order to not hit io / gpu too hard.
     const int image_load_max = 2;
     int image_load_count = 0;
 
-    m_list->Do(vg, theme, m_start, m_entries_current.size(), [this, &image_load_count](auto* vg, auto* theme, auto v, auto pos) {
+    m_list->Draw(vg, theme, m_entries_current.size(), [this, &image_load_count](auto* vg, auto* theme, auto v, auto pos) {
         const auto& [x, y, w, h] = v;
         const auto index = m_entries_current[pos];
         auto& e = m_entries[index];
@@ -1121,9 +1112,8 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
         DrawIcon(vg, e.image, m_default_image, x + 20, y + 20, 115, 115, true, image_scale);
         // gfx::drawImage(vg, x + 20, y + 20, image_size, image_size_h, image.image ? image.image : m_default_image);
 
-        const auto clip_y = std::min(GetY() + GetH(), y + h) - y;
         nvgSave(vg);
-        nvgScissor(vg, v.x, v.y, w - 30.f, clip_y); // clip
+        nvgIntersectScissor(vg, v.x, v.y, w - 30.f, h); // clip
         {
             const float font_size = 18;
             gfx::drawTextArgs(vg, x + 148, y + 45, font_size, NVG_ALIGN_LEFT, theme->elements[text_id].colour, e.title.c_str());
@@ -1147,8 +1137,6 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
                 gfx::drawImageRounded(vg, x + w - 30.f, y + 110, i_size, i_size, m_update.image);
                 break;
         }
-
-        return true;
     });
 }
 
@@ -1178,21 +1166,16 @@ void Menu::OnFocusGained() {
         if (m_dirty) {
             m_dirty = false;
             const auto& current_entry = m_entries[m_entries_current[m_index]];
-            // m_start = 0;
-            // m_index = 0;
-            log_write("\nold index: %zu start: %zu\n", m_index, m_start);
-            // old index: 19 start: 12
             Sort();
 
             for (u32 i = 0; i < m_entries_current.size(); i++) {
                 if (current_entry.name == m_entries[m_entries_current[i]].name) {
                     SetIndex(i);
                     if (i >= 9) {
-                        m_start = (i - 9) / 3 * 3 + 3;
+                        m_list->SetYoff((((i - 9) + 3) / 3) * m_list->GetMaxY());
                     } else {
-                        m_start = 0;
+                        m_list->SetYoff(0);
                     }
-                    log_write("\nnew index: %zu start: %zu\n", m_index, m_start);
                     break;
                 }
             }
@@ -1200,14 +1183,10 @@ void Menu::OnFocusGained() {
     }
 }
 
-void Menu::SetIndex(std::size_t index) {
+void Menu::SetIndex(s64 index) {
     m_index = index;
     if (!m_index) {
-        m_start = 0;
-    }
-
-    if (m_index > m_start && m_index - m_start >= 9) {
-        m_start = m_index/3*3 - 6;
+        m_list->SetYoff(0);
     }
 
     this->SetSubHeading(std::to_string(m_index + 1) + " / " + std::to_string(m_entries_current.size()));
@@ -1402,9 +1381,10 @@ void Menu::SetSearch(const std::string& term) {
         SetFilter(m_filter);
         SetIndex(m_entry_search_jump_back);
         if (m_entry_search_jump_back >= 9) {
-            m_start = (m_entry_search_jump_back - 9) / 3 * 3 + 3;
+            m_list->SetYoff(0);
+            m_list->SetYoff((((m_entry_search_jump_back - 9) + 3) / 3) * m_list->GetMaxY());
         } else {
-            m_start = 0;
+            m_list->SetYoff(0);
         }
     }});
 
@@ -1435,11 +1415,12 @@ void Menu::SetAuthor() {
         } else {
             SetFilter(m_filter);
         }
+
         SetIndex(m_entry_author_jump_back);
         if (m_entry_author_jump_back >= 9) {
-            m_start = (m_entry_author_jump_back - 9) / 3 * 3 + 3;
+            m_list->SetYoff((((m_entry_author_jump_back - 9) + 3) / 3) * m_list->GetMaxY());
         } else {
-            m_start = 0;
+            m_list->SetYoff(0);
         }
     }});
 

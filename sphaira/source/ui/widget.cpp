@@ -24,20 +24,24 @@ void Widget::Update(Controller* controller, TouchInfo* touch) {
                 App::PlaySoundEffect(SoundEffect_Focus);
             }
             action.Invoke(true);
+            break;
         }
         else if ((action.m_type & ActionType::UP) && controller->GotUp(button)) {
             action.Invoke(false);
+            break;
         }
         else if ((action.m_type & ActionType::HELD) && controller->GotHeld(button)) {
             action.Invoke(true);
+            break;
         }
     }
 
     auto draw_actions = GetUiButtons();
     for (auto& e : draw_actions) {
         if (touch->is_clicked && touch->in_range(e.GetPos())) {
-            FireAction(e.m_button);
             log_write("got click: %s\n", e.m_action.m_hint.c_str());
+            FireAction(e.m_button);
+            break;
         }
     }
 }
@@ -75,71 +79,15 @@ auto Widget::FireAction(Button b, u8 type) -> bool {
     return false;
 }
 
-auto Widget::ScrollHelperDown(u64& index, u64& start, u64 step, s64 row, s64 page, u64 size) -> bool {
-    const auto old_index = index;
-
-    if (!size) {
-        return false;
-    }
-
-    if (index + step < size) {
-        index += step;
-    } else {
-        index = size - 1;
-    }
-
-    if (index != old_index) {
-        App::PlaySoundEffect(SoundEffect_Scroll);
-        s64 delta = index - old_index;
-
-        if (index - start >= page) {
-            do {
-                start += row;
-                delta -= row;
-            } while (delta > 0 && start + page < size);
-        }
-
-        return true;
-    }
-
-    return false;
-}
-
-auto Widget::ScrollHelperUp(u64& index, u64& start, s64 step, s64 row, s64 page, s64 size) -> bool {
-    const auto old_index = index;
-
-    if (!size) {
-        return false;
-    }
-
-    if (index >= step) {
-        index -= step;
-    } else {
-        index = 0;
-    }
-
-    if (index != old_index) {
-        App::PlaySoundEffect(SoundEffect_Scroll);
-        // if ()
-        while (index < start) {
-            // log_write("moved up\n");
-            start -= row;
-        }
-
-        return true;
-    }
-
-    return false;
-}
-
-auto Widget::GetUiButtons(const Actions& actions, float x, float y) -> uiButtons {
+auto Widget::GetUiButtons() const -> uiButtons {
     auto vg = App::GetVg();
+    auto [x, y] = m_button_pos;
 
     uiButtons draw_actions;
-    draw_actions.reserve(actions.size());
+    draw_actions.reserve(m_actions.size());
 
     // build array
-    for (const auto& [button, action] : actions) {
+    for (const auto& [button, action] : m_actions) {
         if (action.IsHidden() || action.m_hint.empty()) {
             continue;
         }
@@ -181,10 +129,6 @@ auto Widget::GetUiButtons(const Actions& actions, float x, float y) -> uiButtons
     }
 
     return draw_actions;
-}
-
-auto Widget::GetUiButtons() const -> uiButtons {
-    return GetUiButtons(m_actions);
 }
 
 } // namespace sphaira::ui

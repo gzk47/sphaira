@@ -93,9 +93,9 @@ struct FileAssocEntry {
 
 struct LastFile {
     fs::FsPath name;
-    u64 index;
-    u64 offset;
-    u64 entries_count;
+    s64 index;
+    float offset;
+    s64 entries_count;
 };
 
 struct FsDirCollection {
@@ -120,7 +120,7 @@ struct Menu final : MenuBase {
     }
 
 private:
-    void SetIndex(std::size_t index);
+    void SetIndex(s64 index);
     void InstallForwarder();
     auto Scan(const fs::FsPath& new_path, bool is_walk_up = false) -> Result;
 
@@ -132,7 +132,7 @@ private:
         return GetNewPath(m_path, entry.name);
     }
 
-    auto GetNewPath(u64 index) const -> fs::FsPath {
+    auto GetNewPath(s64 index) const -> fs::FsPath {
         return GetNewPath(m_path, GetEntry(index).name);
     }
 
@@ -257,9 +257,8 @@ private:
     // if it does, the index becomes that file.
     std::vector<LastFile> m_previous_highlighted_file;
     fs::FsPath m_selected_path;
-    std::size_t m_index{};
-    std::size_t m_index_offset{};
-    std::size_t m_selected_count{};
+    s64 m_index{};
+    s64 m_selected_count{};
     SelectedType m_selected_type{SelectedType::None};
 
     option::OptionLong m_sort{INI_SECTION, "sort", SortType::SortType_Alphabetical};

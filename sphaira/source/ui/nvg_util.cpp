@@ -77,6 +77,19 @@ inline void drawRectOutlineInternal(NVGcontext* vg, float size, const NVGcolor& 
     float gradientX, gradientY, color;
     getHighlightAnimation(&gradientX, &gradientY, &color);
 
+#if 1
+    // NVGcolor pulsationColor = nvgRGBAf((color * out_col.r) + (1 - color) * out_col.r,
+    //         (color * out_col.g) + (1 - color) * out_col.g,
+    //         (color * out_col.b) + (1 - color) * out_col.b,
+    //         out_col.a);
+    NVGcolor pulsationColor = nvgRGBAf((color * out_col.r) + (1 - color) * out_col.r,
+            (color * out_col.g) + (1 - color) * out_col.g,
+            (color * out_col.b) + (1 - color) * out_col.b,
+            out_col.a);
+
+    drawRectIntenal(vg, {vec.x-size,vec.y-size,vec.w+(size*2.f),vec.h+(size * 2.f)}, pulsationColor, false);
+    drawRectIntenal(vg, vec, c, false);
+#else
     const auto strokeWidth = 5.0;
     auto v2 = vec;
     v2.x -= strokeWidth / 2.0;
@@ -85,8 +98,8 @@ inline void drawRectOutlineInternal(NVGcontext* vg, float size, const NVGcolor& 
     v2.h += strokeWidth;
     const auto corner_radius = 0.5;
 
-    nvgSave(vg);
-    nvgResetScissor(vg);
+    // nvgSave(vg);
+    // nvgResetScissor(vg);
 
     // const auto stroke_width = 5.0f;
     // const auto shadow_corner_radius = 6.0f;
@@ -155,7 +168,8 @@ inline void drawRectOutlineInternal(NVGcontext* vg, float size, const NVGcolor& 
     nvgFillColor(vg, c);
     nvgFill(vg);
 
-    nvgRestore(vg);
+    // nvgRestore(vg);
+#endif
 }
 
 inline void drawRectOutlineInternal(NVGcontext* vg, float size, const NVGcolor& out_col, Vec4 vec, const NVGpaint& p) {
@@ -454,9 +468,9 @@ void drawTextArgs(NVGcontext* vg, float x, float y, float size, int align, Colou
 }
 
 void drawScrollbar(NVGcontext* vg, Theme* theme, float x, float y, float h, u32 index_off, u32 count, u32 max_per_page) {
-    const u64 SCROLL = index_off;
-    const u64 max_entry_display = max_per_page;
-    const u64 entry_total = count;
+    const s64 SCROLL = index_off;
+    const s64 max_entry_display = max_per_page;
+    const s64 entry_total = count;
     const float scc2 = 8.0;
     const float scw = 2.0;
 
@@ -472,6 +486,28 @@ void drawScrollbar(NVGcontext* vg, Theme* theme, float x, float y, float h, u32 
 void drawScrollbar(NVGcontext* vg, Theme* theme, u32 index_off, u32 count, u32 max_per_page) {
     // drawScrollbar(vg, SCREEN_WIDTH - 50, 100, 500, index_off, count, max_per_page);
     drawScrollbar(vg, theme, SCREEN_WIDTH - 50, 100, SCREEN_HEIGHT-200, index_off, count, max_per_page);
+}
+
+void drawScrollbar2(NVGcontext* vg, Theme* theme, float x, float y, float h, s64 index_off, s64 count, s64 row, s64 page) {
+    // round up
+    if (count % row) {
+        count = count + (row - count % row);
+    }
+
+    const float scc2 = 8.0;
+    const float scw = 2.0;
+
+    // only draw scrollbar if needed
+    if (count > page) {
+        const float sb_h = 1.f / (float)count * h;
+        const float sb_y = index_off;
+        gfx::drawRect(vg, x, y, scc2, h, theme->elements[ThemeEntryID_GRID].colour, false);
+        gfx::drawRect(vg, x + scw, y + scw + sb_h * sb_y, scc2 - scw * 2, sb_h * float(page) - scw * 2, theme->elements[ThemeEntryID_TEXT_SELECTED].colour, false);
+    }
+}
+
+void drawScrollbar2(NVGcontext* vg, Theme* theme, s64 index_off, s64 count, s64 row, s64 page) {
+    drawScrollbar2(vg, theme, SCREEN_WIDTH - 50, 100, SCREEN_HEIGHT-200, index_off, count, row, page);
 }
 
 #define HIGHLIGHT_SPEED 350.0

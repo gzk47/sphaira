@@ -43,22 +43,22 @@ Menu::Menu() : MenuBase{"Homebrew"_i18n} {
             }
         }}),
         std::make_pair(Button::DOWN, Action{[this](){
-            if (ScrollHelperDown(m_index, m_start, 3, 3, 9, m_entries.size())) {
+            if (m_list->ScrollDown(m_index, 3, m_entries.size())) {
                 SetIndex(m_index);
             }
         }}),
         std::make_pair(Button::UP, Action{[this](){
-            if (ScrollHelperUp(m_index, m_start, 3, 3, 9, m_entries.size())) {
+            if (m_list->ScrollUp(m_index, 3, m_entries.size())) {
                 SetIndex(m_index);
             }
         }}),
         std::make_pair(Button::R2, Action{[this](){
-            if (ScrollHelperDown(m_index, m_start, 9, 3, 9, m_entries.size())) {
+            if (m_list->ScrollDown(m_index, 9, m_entries.size())) {
                 SetIndex(m_index);
             }
         }}),
         std::make_pair(Button::L2, Action{[this](){
-            if (ScrollHelperUp(m_index, m_start, 9, 3, 9, m_entries.size())) {
+            if (m_list->ScrollUp(m_index, 9, m_entries.size())) {
                 SetIndex(m_index);
             }
         }}),
@@ -86,12 +86,12 @@ Menu::Menu() : MenuBase{"Homebrew"_i18n} {
                     order_items.push_back("Decending"_i18n);
                     order_items.push_back("Ascending"_i18n);
 
-                    options->Add(std::make_shared<SidebarEntryArray>("Sort"_i18n, sort_items, [this, sort_items](std::size_t& index_out){
+                    options->Add(std::make_shared<SidebarEntryArray>("Sort"_i18n, sort_items, [this, sort_items](s64& index_out){
                         m_sort.Set(index_out);
                         SortAndFindLastFile();
                     }, m_sort.Get()));
 
-                    options->Add(std::make_shared<SidebarEntryArray>("Order"_i18n, order_items, [this, order_items](std::size_t& index_out){
+                    options->Add(std::make_shared<SidebarEntryArray>("Order"_i18n, order_items, [this, order_items](s64& index_out){
                         m_order.Set(index_out);
                         SortAndFindLastFile();
                     }, m_order.Get()));
@@ -144,7 +144,7 @@ Menu::Menu() : MenuBase{"Homebrew"_i18n} {
 
     const Vec4 v{75, 110, 370, 155};
     const Vec2 pad{10, 10};
-    m_list = std::make_unique<List>(m_pos, v, pad);
+    m_list = std::make_unique<List>(3, 9, m_pos, v, pad);
 }
 
 Menu::~Menu() {
@@ -157,42 +157,24 @@ Menu::~Menu() {
 
 void Menu::Update(Controller* controller, TouchInfo* touch) {
     MenuBase::Update(controller, touch);
-
-    if (touch->is_clicked && touch->in_range(GetPos())) {
-        m_list->Do(m_start, m_entries.size(), [this, touch](auto* vg, auto* theme, auto v, auto i) {
-            if (touch->is_clicked && touch->in_range(v)) {
-                if (m_index == i) {
-                    FireAction(Button::A);
-                } else {
-                    App::PlaySoundEffect(SoundEffect_Focus);
-                    SetIndex(i);
-                }
-                return false;
-            }
-            return true;
-        });
-    } else if (touch->is_scroll && touch->in_range(GetPos())) {
-        y_off = (s32)touch->initial.y - (s32)touch->cur.y;
-        log_write("y off: %.2f\n", y_off);
-    } else {
-        // y_off = 0;
-    }
+    m_list->OnUpdate(controller, touch, m_entries.size(), [this](auto i) {
+        if (m_index == i) {
+            FireAction(Button::A);
+        } else {
+            App::PlaySoundEffect(SoundEffect_Focus);
+            SetIndex(i);
+        }
+    });
 }
 
 void Menu::Draw(NVGcontext* vg, Theme* theme) {
     MenuBase::Draw(vg, theme);
 
-    // only draw scrollbar if needed
-    gfx::drawScrollbar(vg, theme, m_start, m_entries.size(), 9);
-
     // max images per frame, in order to not hit io / gpu too hard.
     const int image_load_max = 2;
     int image_load_count = 0;
 
-    nvgSave(vg);
-    nvgScissor(vg, GetX(), GetY(), GetW(), GetH());
-
-    m_list->Do(vg, theme, m_start, m_entries.size(), [this, &image_load_count](auto* vg, auto* theme, auto v, auto pos) {
+    m_list->Draw(vg, theme, m_entries.size(), [this, &image_load_count](auto* vg, auto* theme, auto v, auto pos) {
         const auto& [x, y, w, h] = v;
         auto& e = m_entries[pos];
 
@@ -222,9 +204,8 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
         const float image_size = 115;
         gfx::drawImageRounded(vg, x + 20, y + 20, image_size, image_size, e.image ? e.image : App::GetDefaultImage());
 
-        const auto clip_y = std::min(GetY() + GetH(), y + h) - y;
         nvgSave(vg);
-        nvgScissor(vg, x, y, w - 30.f, clip_y); // clip
+        nvgIntersectScissor(vg, x, y, w - 30.f, h); // clip
         {
             bool has_star = false;
             if (IsStarEnabled()) {
@@ -240,10 +221,7 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
             gfx::drawTextArgs(vg, x + 148, y + 115, font_size, NVG_ALIGN_LEFT, theme->elements[text_id].colour, e.GetDisplayVersion());
         }
         nvgRestore(vg);
-        return true;
-    }, y_off);
-
-    nvgRestore(vg);
+    });
 }
 
 void Menu::OnFocusGained() {
@@ -253,14 +231,10 @@ void Menu::OnFocusGained() {
     }
 }
 
-void Menu::SetIndex(std::size_t index) {
+void Menu::SetIndex(s64 index) {
     m_index = index;
     if (!m_index) {
-        m_start = 0;
-    }
-
-    if (m_index > m_start && m_index - m_start >= 9) {
-        m_start = m_index/3*3 - 6;
+        m_list->SetYoff(0);
     }
 
     const auto& e = m_entries[m_index];
@@ -450,9 +424,9 @@ void Menu::SortAndFindLastFile() {
     if (index >= 0) {
         // guesstimate where the position is
         if (index >= 9) {
-            m_start = (index - 9) / 3 * 3 + 3;
+            m_list->SetYoff((((index - 9) + 3) / 3) * m_list->GetMaxY());
         } else {
-            m_start = 0;
+            m_list->SetYoff(0);
         }
         SetIndex(index);
     }

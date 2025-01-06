@@ -391,12 +391,12 @@ auto App::GetThemeMetaList() -> std::span<ThemeMeta> {
     return g_app->m_theme_meta_entries;
 }
 
-void App::SetTheme(u64 theme_index) {
+void App::SetTheme(s64 theme_index) {
     g_app->LoadTheme(g_app->m_theme_meta_entries[theme_index].ini_path.c_str());
     g_app->m_theme_index = theme_index;
 }
 
-auto App::GetThemeIndex() -> u64 {
+auto App::GetThemeIndex() -> s64 {
     return g_app->m_theme_index;
 }
 
@@ -723,6 +723,8 @@ void App::Poll() {
         m_touch_info.is_scroll = false;
         if (m_touch_info.is_tap) {
             m_touch_info.is_clicked = true;
+        } else {
+            m_touch_info.is_end = true;
         }
     }
 

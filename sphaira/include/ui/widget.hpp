@@ -72,13 +72,14 @@ struct Widget : public Object {
         return m_pop;
     }
 
-    auto GetUiButtons() const -> uiButtons;
-    static auto GetUiButtons(const Actions& actions, float x = 1220, float y = 675) -> uiButtons;
+    auto SetUiButtonPos(Vec2 pos) {
+        m_button_pos = pos;
+    }
 
-    static auto ScrollHelperDown(u64& index, u64& start, u64 step, s64 row, s64 page, u64 size) -> bool;
-    static auto ScrollHelperUp(u64& index, u64& start, s64 step, s64 row, s64 page, s64 size) -> bool;
+    auto GetUiButtons() const -> uiButtons;
 
     Actions m_actions;
+    Vec2 m_button_pos{1220, 675};
     bool m_focus{false};
     bool m_pop{false};
 };

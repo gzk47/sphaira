@@ -45,7 +45,7 @@ OptionBox::OptionBox(const std::string& message, const Option& a, const Option& 
 
 }
 
-OptionBox::OptionBox(const std::string& message, const Option& a, const Option& b, std::size_t index, Callback cb)
+OptionBox::OptionBox(const std::string& message, const Option& a, const Option& b, s64 index, Callback cb)
 : m_message{message}
 , m_callback{cb} {
 
@@ -70,7 +70,7 @@ OptionBox::OptionBox(const std::string& message, const Option& a, const Option& 
 
 }
 
-OptionBox::OptionBox(const std::string& message, const Option& a, const Option& b, const Option& c, std::size_t index, Callback cb)
+OptionBox::OptionBox(const std::string& message, const Option& a, const Option& b, const Option& c, s64 index, Callback cb)
 : m_message{message}
 , m_callback{cb} {
 
@@ -80,7 +80,7 @@ auto OptionBox::Update(Controller* controller, TouchInfo* touch) -> void {
     Widget::Update(controller, touch);
 
     if (touch->is_clicked) {
-        for (std::size_t i = 0; i < m_entries.size(); i++) {
+        for (s64 i = 0; i < m_entries.size(); i++) {
             auto& e = m_entries[i];
             if (touch->in_range(e.GetPos())) {
                 SetIndex(i);
@@ -118,8 +118,8 @@ auto OptionBox::OnFocusLost() noexcept -> void {
     SetHidden(true);
 }
 
-auto OptionBox::Setup(std::size_t index) -> void {
-    m_index = std::min(m_entries.size() - 1, index);
+auto OptionBox::Setup(s64 index) -> void {
+    m_index = std::min<s64>(m_entries.size() - 1, index);
     m_entries[m_index].Selected(true);
     m_spacer_line = Vec4{m_pos.x, m_pos.y + 220.f - 2.f, m_pos.w, 2.f};
 
@@ -145,7 +145,7 @@ auto OptionBox::Setup(std::size_t index) -> void {
     );
 }
 
-void OptionBox::SetIndex(std::size_t index) {
+void OptionBox::SetIndex(s64 index) {
     if (m_index != index) {
         m_entries[m_index].Selected(false);
         m_index = index;

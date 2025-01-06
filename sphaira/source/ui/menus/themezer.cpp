@@ -369,7 +369,7 @@ auto InstallTheme(ProgressBox* pbox, const PackListEntry& entry) -> bool {
             }
 
             std::vector<char> buf(chunk_size);
-            u64 offset{};
+            s64 offset{};
             while (offset < info.uncompressed_size) {
                 if (pbox->ShouldExit()) {
                     return false;
@@ -429,25 +429,25 @@ Menu::Menu() : MenuBase{"Themezer"_i18n} {
         }}),
         std::make_pair(Button::DOWN, Action{[this](){
             const auto& page = m_pages[m_page_index];
-            if (ScrollHelperDown(m_index, m_start, 3, 3, 6, page.m_packList.size())) {
+            if (m_list->ScrollDown(m_index, 3, page.m_packList.size())) {
                 SetIndex(m_index);
             }
         }}),
         std::make_pair(Button::UP, Action{[this](){
             const auto& page = m_pages[m_page_index];
-            if (ScrollHelperUp(m_index, m_start, 3, 3, 6, page.m_packList.size())) {
+            if (m_list->ScrollUp(m_index, 3, page.m_packList.size())) {
                 SetIndex(m_index);
             }
         }}),
         std::make_pair(Button::R2, Action{[this](){
             const auto& page = m_pages[m_page_index];
-            if (ScrollHelperDown(m_index, m_start, 6, 3, 6, page.m_packList.size())) {
+            if (m_list->ScrollDown(m_index, 6, page.m_packList.size())) {
                 SetIndex(m_index);
             }
         }}),
         std::make_pair(Button::L2, Action{[this](){
             const auto& page = m_pages[m_page_index];
-            if (ScrollHelperUp(m_index, m_start, 6, 3, 6, page.m_packList.size())) {
+            if (m_list->ScrollUp(m_index, 6, page.m_packList.size())) {
                 SetIndex(m_index);
             }
         }}),
@@ -492,14 +492,14 @@ Menu::Menu() : MenuBase{"Themezer"_i18n} {
                 InvalidateAllPages();
             }, "Enabled"_i18n, "Disabled"_i18n));
 
-            options->Add(std::make_shared<SidebarEntryArray>("Sort"_i18n, sort_items, [this, sort_items](std::size_t& index_out){
+            options->Add(std::make_shared<SidebarEntryArray>("Sort"_i18n, sort_items, [this, sort_items](s64& index_out){
                 if (m_sort.Get() != index_out) {
                     m_sort.Set(index_out);
                     InvalidateAllPages();
                 }
             }, m_sort.Get()));
 
-            options->Add(std::make_shared<SidebarEntryArray>("Order"_i18n, order_items, [this, order_items](std::size_t& index_out){
+            options->Add(std::make_shared<SidebarEntryArray>("Order"_i18n, order_items, [this, order_items](s64& index_out){
                 if (m_order.Get() != index_out) {
                     m_order.Set(index_out);
                     InvalidateAllPages();
@@ -548,7 +548,7 @@ Menu::Menu() : MenuBase{"Themezer"_i18n} {
 
     const Vec4 v{75, 110, 350, 250};
     const Vec2 pad{10, 10};
-    m_list = std::make_unique<List>(m_pos, v, pad);
+    m_list = std::make_unique<List>(3, 6, m_pos, v, pad);
 }
 
 Menu::~Menu() {
@@ -567,17 +567,13 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
         return;
     }
 
-    m_list->Do(m_start, page.m_packList.size(), [this, touch](auto* vg, auto* theme, auto v, auto i) {
-        if (touch->is_clicked && touch->in_range(v)) {
-            if (m_index == i) {
-                FireAction(Button::A);
-            } else {
-                App::PlaySoundEffect(SoundEffect_Focus);
-                SetIndex(i);
-            }
-            return false;
+    m_list->OnUpdate(controller, touch, page.m_packList.size(), [this](auto i) {
+        if (m_index == i) {
+            FireAction(Button::A);
+        } else {
+            App::PlaySoundEffect(SoundEffect_Focus);
+            SetIndex(i);
         }
-        return true;
     });
 }
 
@@ -605,14 +601,11 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
             return;
     }
 
-    // only draw scrollbar if needed
-    gfx::drawScrollbar(vg, theme, m_start, page.m_packList.size(), 9);
-
     // max images per frame, in order to not hit io / gpu too hard.
     const int image_load_max = 2;
     int image_load_count = 0;
 
-    m_list->Do(vg, theme, m_start, page.m_packList.size(), [this, &page, &image_load_count](auto* vg, auto* theme, auto v, auto pos) {
+    m_list->Draw(vg, theme, page.m_packList.size(), [this, &page, &image_load_count](auto* vg, auto* theme, auto v, auto pos) {
         const auto& [x, y, w, h] = v;
         auto& e = page.m_packList[pos];
 
@@ -687,15 +680,13 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
             gfx::drawImageRounded(vg, x + xoff, y, 320, 180, image.image ? image.image : App::GetDefaultImage());
         }
 
-        const auto clip_y = std::min(GetY() + GetH(), y + h) - y;
         nvgSave(vg);
-        nvgScissor(vg, x, y, w - 30.f, clip_y); // clip
+        nvgIntersectScissor(vg, x, y, w - 30.f, h); // clip
         {
             gfx::drawTextArgs(vg, x + xoff, y + 180 + 20, 18, NVG_ALIGN_LEFT, theme->elements[text_id].colour, "%s", e.details.name.c_str());
             gfx::drawTextArgs(vg, x + xoff, y + 180 + 55, 18, NVG_ALIGN_LEFT, theme->elements[text_id].colour, "%s", e.creator.display_name.c_str());
         }
         nvgRestore(vg);
-        return true;
     });
 }
 
@@ -719,7 +710,7 @@ void Menu::PackListDownload() {
     SetSubHeading(subheading);
 
     m_index = 0;
-    m_start = 0;
+    m_list->SetYoff(0);
 
     // already downloaded
     if (m_pages[m_page_index].m_ready != PageLoadState::None) {

@@ -50,10 +50,10 @@ class SidebarEntryArray final : public SidebarEntryBase {
 public:
     using Items = std::vector<std::string>;
     using ListCallback = std::function<void()>;
-    using Callback = std::function<void(std::size_t& index)>;
+    using Callback = std::function<void(s64& index)>;
 
 public:
-    explicit SidebarEntryArray(std::string title, Items items, Callback cb, std::size_t index = 0);
+    explicit SidebarEntryArray(std::string title, Items items, Callback cb, s64 index = 0);
     SidebarEntryArray(std::string title, Items items, Callback cb, std::string index);
     SidebarEntryArray(std::string title, Items items, std::string& index);
 
@@ -63,7 +63,7 @@ private:
     Items m_items;
     ListCallback m_list_callback;
     Callback m_callback;
-    std::size_t m_index;
+    s64 m_index;
 };
 
 template <typename T>
@@ -108,15 +108,16 @@ public:
     void Add(std::shared_ptr<SidebarEntryBase> entry);
 
 private:
-    void SetIndex(std::size_t index);
+    void SetIndex(s64 index);
+    void SetupButtons();
 
 private:
     std::string m_title;
     std::string m_sub;
     Side m_side;
     Items m_items;
-    std::size_t m_index{};
-    std::size_t m_index_offset{};
+    s64 m_index{};
+    s64 m_index_offset{};
 
     std::unique_ptr<List> m_list;
 
