@@ -153,19 +153,19 @@ struct FsProxy final : FsProxyBase {
         return f->GetSize(out_size);
     }
     Result SetFileSize(FsFile *file, s64 size) override {
-        log_write("[HAZE] SetFileSize()\n");
+        log_write("[HAZE] SetFileSize(%zd)\n", size);
         fs::File* f;
         std::memcpy(&f, &file->s, sizeof(f));
         return f->SetSize(size);
     }
     Result ReadFile(FsFile *file, s64 off, void *buf, u64 read_size, u32 option, u64 *out_bytes_read) override {
-        log_write("[HAZE] ReadFile()\n");
+        log_write("[HAZE] ReadFile(%zd, %zu)\n", off, read_size);
         fs::File* f;
         std::memcpy(&f, &file->s, sizeof(f));
         return f->Read(off, buf, read_size, option, out_bytes_read);
     }
     Result WriteFile(FsFile *file, s64 off, const void *buf, u64 write_size, u32 option) override {
-        log_write("[HAZE] WriteFile()\n");
+        log_write("[HAZE] WriteFile(%zd, %zu)\n", off, write_size);
         fs::File* f;
         std::memcpy(&f, &file->s, sizeof(f));
         return f->Write(off, buf, write_size, option);
@@ -227,6 +227,9 @@ struct FsProxy final : FsProxyBase {
             delete f;
         }
         std::memset(d, 0, sizeof(*d));
+    }
+    virtual bool MultiThreadTransfer(s64 size, bool read) override {
+        return !App::IsFileBaseEmummc();
     }
 
 private:
@@ -398,6 +401,9 @@ struct FsDevNullProxy final : FsProxyVfs {
         *out = 1024ULL * 1024ULL * 1024ULL * 256ULL;
         R_SUCCEED();
     }
+    bool MultiThreadTransfer(s64 size, bool read) override {
+        return true;
+    }
 };
 
 struct FsInstallProxy final : FsProxyVfs {
@@ -517,6 +523,12 @@ struct FsInstallProxy final : FsProxyVfs {
         }
 
         FsProxyVfs::CloseFile(file);
+    }
+
+    // installs are already multi-threaded via yati.
+    bool MultiThreadTransfer(s64 size, bool read) override {
+        App::IsFileBaseEmummc();
+        return false;
     }
 };
 
