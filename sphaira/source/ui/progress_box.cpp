@@ -43,6 +43,9 @@ ProgressBox::ProgressBox(int image, const std::string& action, const std::string
     m_action = action;
     m_image = image;
 
+    // create cancel event.
+    ueventCreate(&m_uevent, false);
+
     m_cpuid = cpuid;
     m_thread_data.pbox = this;
     m_thread_data.callback = callback;
@@ -55,6 +58,7 @@ ProgressBox::ProgressBox(int image, const std::string& action, const std::string
 }
 
 ProgressBox::~ProgressBox() {
+    ueventSignal(GetCancelEvent());
     m_stop_source.request_stop();
 
     if (R_FAILED(threadWaitForExit(&m_thread))) {
@@ -250,6 +254,7 @@ auto ProgressBox::SetImageDataConst(std::span<const u8> data) -> ProgressBox& {
 
 void ProgressBox::RequestExit() {
     m_stop_source.request_stop();
+    ueventSignal(GetCancelEvent());
 }
 
 auto ProgressBox::ShouldExit() -> bool {

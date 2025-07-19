@@ -141,6 +141,9 @@ struct ThreadData {
         condvarInit(std::addressof(can_decompress_write));
         condvarInit(std::addressof(can_write));
 
+        ueventCreate(&m_uevent_done, false);
+        ueventCreate(&m_uevent_progres, true);
+
         sha256ContextCreate(&sha256);
         // this will be updated with the actual size from nca header.
         write_size = nca->size;
@@ -158,6 +161,45 @@ struct ThreadData {
     auto GetResults() volatile -> Result;
     void WakeAllThreads();
 
+    auto IsAnyRunning() volatile const -> bool {
+        return read_running || decompress_result || write_running;
+    }
+
+    auto GetWriteOffset() volatile const -> s64 {
+        return write_offset;
+    }
+
+    auto GetWriteSize() volatile const -> s64 {
+        return write_size;
+    }
+
+    auto GetDoneEvent() {
+        return &m_uevent_done;
+    }
+
+    auto GetProgressEvent() {
+        return &m_uevent_progres;
+    }
+
+    void SetReadResult(Result result) {
+        read_result = result;
+        if (R_FAILED(result)) {
+            ueventSignal(GetDoneEvent());
+        }
+    }
+
+    void SetDecompressResult(Result result) {
+        decompress_result = result;
+        if (R_FAILED(result)) {
+            ueventSignal(GetDoneEvent());
+        }
+    }
+
+    void SetWriteResult(Result result) {
+        write_result = result;
+        ueventSignal(GetDoneEvent());
+    }
+
     Result Read(void* buf, s64 size, u64* bytes_read);
 
     Result SetDecompressBuf(std::vector<u8>& buf, s64 off, s64 size) {
@@ -165,6 +207,9 @@ struct ThreadData {
 
         mutexLock(std::addressof(read_mutex));
         if (!read_buffers.ringbuf_free()) {
+            if (!write_running) {
+                R_SUCCEED();
+            }
             R_TRY(condvarWait(std::addressof(can_read), std::addressof(read_mutex)));
         }
 
@@ -177,6 +222,10 @@ struct ThreadData {
     Result GetDecompressBuf(std::vector<u8>& buf_out, s64& off_out) {
         mutexLock(std::addressof(read_mutex));
         if (!read_buffers.ringbuf_size()) {
+            if (!read_running) {
+                buf_out.resize(0);
+                R_SUCCEED();
+            }
             R_TRY(condvarWait(std::addressof(can_decompress), std::addressof(read_mutex)));
         }
 
@@ -194,6 +243,9 @@ struct ThreadData {
 
         mutexLock(std::addressof(write_mutex));
         if (!write_buffers.ringbuf_free()) {
+            if (!decompress_running) {
+                R_SUCCEED();
+            }
             R_TRY(condvarWait(std::addressof(can_decompress_write), std::addressof(write_mutex)));
         }
 
@@ -206,6 +258,10 @@ struct ThreadData {
     Result GetWriteBuf(std::vector<u8>& buf_out, s64& off_out) {
         mutexLock(std::addressof(write_mutex));
         if (!write_buffers.ringbuf_size()) {
+            if (!decompress_running) {
+                buf_out.resize(0);
+                R_SUCCEED();
+            }
             R_TRY(condvarWait(std::addressof(can_write), std::addressof(write_mutex)));
         }
 
@@ -229,6 +285,9 @@ struct ThreadData {
     CondVar can_decompress_write{};
     CondVar can_write{};
 
+    UEvent m_uevent_done{};
+    UEvent m_uevent_progres{};
+
     RingBuf<4> read_buffers{};
     RingBuf<4> write_buffers{};
 
@@ -250,6 +309,10 @@ struct ThreadData {
     std::atomic<Result> read_result{};
     std::atomic<Result> decompress_result{};
     std::atomic<Result> write_result{};
+
+    std::atomic_bool read_running{true};
+    std::atomic_bool decompress_running{true};
+    std::atomic_bool write_running{true};
 };
 
 struct Yati {
@@ -371,6 +434,8 @@ Result HasRequiredTicket(const nca::Header& header, std::span<TikCollection> tik
 // read thread reads all data from the source, it also handles
 // parsing ncz headers, sections and reading ncz blocks
 Result Yati::readFuncInternal(ThreadData* t) {
+    ON_SCOPE_EXIT( t->read_running = false; );
+
     // the main buffer which data is read into.
     std::vector<u8> buf;
     // workaround ncz block reading ahead. if block isn't found, we usually
@@ -401,6 +466,9 @@ Result Yati::readFuncInternal(ThreadData* t) {
         buf.resize(buf_offset + read_size);
         R_TRY(t->Read(buf.data() + buf_offset, read_size, std::addressof(bytes_read)));
         auto buf_size = buf_offset + bytes_read;
+        if (!bytes_read) {
+            break;
+        }
 
         // read enough bytes for ncz, check magic
         if (t->read_offset == NCZ_SECTION_OFFSET) {
@@ -454,6 +522,8 @@ Result Yati::readFuncInternal(ThreadData* t) {
 // decompress thread handles decrypting / modifying the nca header, decompressing ncz
 // and calculating the running sha256.
 Result Yati::decompressFuncInternal(ThreadData* t) {
+    ON_SCOPE_EXIT( t->decompress_running = false; );
+
     // only used for ncz files.
     auto dctx = ZSTD_createDCtx();
     ON_SCOPE_EXIT(ZSTD_freeDCtx(dctx));
@@ -534,6 +604,9 @@ Result Yati::decompressFuncInternal(ThreadData* t) {
     while (t->decompress_offset < t->write_size && R_SUCCEEDED(t->GetResults())) {
         s64 decompress_buf_off{};
         R_TRY(t->GetDecompressBuf(buf, decompress_buf_off));
+        if (buf.empty()) {
+            break;
+        }
 
         // do we have an nsz? if so, setup buffers.
         if (!is_ncz && !t->ncz_sections.empty()) {
@@ -714,6 +787,8 @@ Result Yati::decompressFuncInternal(ThreadData* t) {
 
 // write thread writes data to the nca placeholder.
 Result Yati::writeFuncInternal(ThreadData* t) {
+    ON_SCOPE_EXIT( t->write_running = false; );
+
     std::vector<u8> buf;
     buf.reserve(t->max_buffer_size);
     const auto is_file_based_emummc = App::IsFileBaseEmummc();
@@ -721,6 +796,9 @@ Result Yati::writeFuncInternal(ThreadData* t) {
     while (t->write_offset < t->write_size && R_SUCCEEDED(t->GetResults())) {
         s64 dummy_off;
         R_TRY(t->GetWriteBuf(buf, dummy_off));
+        if (buf.empty()) {
+            break;
+        }
 
         s64 off{};
         while (off < buf.size() && t->write_offset < t->write_size && R_SUCCEEDED(t->GetResults())) {
@@ -729,6 +807,7 @@ Result Yati::writeFuncInternal(ThreadData* t) {
 
             off += wsize;
             t->write_offset += wsize;
+            ueventSignal(t->GetProgressEvent());
 
             // todo: check how much time elapsed and sleep the diff
             // rather than always sleeping a fixed amount.
@@ -745,20 +824,20 @@ Result Yati::writeFuncInternal(ThreadData* t) {
 
 void readFunc(void* d) {
     auto t = static_cast<ThreadData*>(d);
-    t->read_result = t->yati->readFuncInternal(t);
+    t->SetReadResult(t->yati->readFuncInternal(t));
     log_write("read thread returned now\n");
 }
 
 void decompressFunc(void* d) {
     log_write("hello decomp thread func\n");
     auto t = static_cast<ThreadData*>(d);
-    t->decompress_result = t->yati->decompressFuncInternal(t);
+    t->SetDecompressResult(t->yati->decompressFuncInternal(t));
     log_write("decompress thread returned now\n");
 }
 
 void writeFunc(void* d) {
     auto t = static_cast<ThreadData*>(d);
-    t->write_result = t->yati->writeFuncInternal(t);
+    t->SetWriteResult(t->yati->writeFuncInternal(t));
     log_write("write thread returned now\n");
 }
 
@@ -900,14 +979,26 @@ Result Yati::InstallNcaInternal(std::span<TikCollection> tickets, NcaCollection&
     R_TRY(threadStart(std::addressof(t_write)));
     ON_SCOPE_EXIT(threadWaitForExit(std::addressof(t_write)));
 
-    while (t_data.write_offset != t_data.write_size && R_SUCCEEDED(t_data.GetResults())) {
-        pbox->UpdateTransfer(t_data.write_offset, t_data.write_size);
-        svcSleepThread(1e+6);
+    const auto waiter_progress = waiterForUEvent(t_data.GetProgressEvent());
+    const auto waiter_cancel = waiterForUEvent(pbox->GetCancelEvent());
+    const auto waiter_done = waiterForUEvent(t_data.GetDoneEvent());
+
+    for (;;) {
+        s32 idx;
+        if (R_FAILED(waitMulti(&idx, UINT64_MAX, waiter_progress, waiter_cancel, waiter_done))) {
+            break;
+        }
+
+        if (!idx) {
+            pbox->UpdateTransfer(t_data.GetWriteOffset(), t_data.GetWriteSize());
+        } else {
+            break;
+        }
     }
 
     // wait for all threads to close.
     log_write("waiting for threads to close\n");
-    for (;;) {
+    while (t_data.IsAnyRunning()) {
         t_data.WakeAllThreads();
         pbox->Yield();
 
