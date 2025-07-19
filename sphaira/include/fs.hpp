@@ -533,4 +533,10 @@ struct FsNativeSave final : FsNative {
     }
 };
 
+struct FsNativeId final : FsNative {
+    FsNativeId(u64 program_id, FsFileSystemType type, const FsPath& path, FsContentAttributes attr = FsContentAttributes_All) {
+        m_open_result = fsOpenFileSystemWithId(&m_fs, program_id, type, path, attr);
+    }
+};
+
 } // namespace fs

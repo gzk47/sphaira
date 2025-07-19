@@ -25,24 +25,63 @@ auto DistanceBetweenY(Vec4 va, Vec4 vb) -> Vec4 {
 
 } // namespace
 
-SidebarEntryBase::SidebarEntryBase(std::string&& title)
-: m_title{std::forward<decltype(title)>(title)} {
+SidebarEntryBase::SidebarEntryBase(const std::string& title, const std::string& info)
+: m_title{title}, m_info{info} {
 
 }
 
-auto SidebarEntryBase::Draw(NVGcontext* vg, Theme* theme) -> void {
+void SidebarEntryBase::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) {
     // draw spacers or highlight box if in focus (selected)
     if (HasFocus()) {
         gfx::drawRectOutline(vg, theme, 4.f, m_pos);
+
+        if (!m_info.empty()) {
+            // reset clip here as the box will draw oob.
+            nvgSave(vg);
+            nvgScissor(vg, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+            ON_SCOPE_EXIT(nvgRestore(vg));
+
+            Vec4 info_box{};
+            info_box.y = 86;
+            info_box.w = 400;
+
+            if (left) {
+                info_box.x = root_pos.x + root_pos.w + 10;
+            } else {
+                info_box.x = root_pos.x - info_box.w - 10;
+            }
+
+            const float info_pad = 30;
+            const float title_font_size = 18;
+            const float info_font_size = 18;
+            const float pad_after_title = title_font_size + info_pad;
+            const float x = info_box.x + info_pad;
+            const auto end_w = info_box.w - info_pad * 2;
+
+            float bounds[4];
+            nvgFontSize(vg, info_font_size);
+            nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+            nvgTextLineHeight(vg, 1.7);
+            nvgTextBoxBounds(vg, 0, 0, end_w, m_info.c_str(), nullptr, bounds);
+            info_box.h = pad_after_title + info_pad * 2 + bounds[3] - bounds[1];
+
+            gfx::drawRect(vg, info_box, theme->GetColour(ThemeEntryID_SIDEBAR), 5);
+
+            float y = info_box.y + info_pad;
+            m_scolling_title.Draw(vg, true, x, y, end_w, title_font_size, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), m_title.c_str());
+
+            y += pad_after_title;
+            gfx::drawTextBox(vg, x, y, info_font_size, end_w, theme->GetColour(ThemeEntryID_TEXT), m_info.c_str());
+        }
     }
 }
 
-SidebarEntryBool::SidebarEntryBool(std::string title, bool option, Callback cb, std::string true_str, std::string false_str)
-: SidebarEntryBase{std::move(title)}
+SidebarEntryBool::SidebarEntryBool(const std::string& title, bool option, Callback cb, const std::string& info, const std::string& true_str, const std::string& false_str)
+: SidebarEntryBase{title, info}
 , m_option{option}
 , m_callback{cb}
-, m_true_str{std::move(true_str)}
-, m_false_str{std::move(false_str)} {
+, m_true_str{true_str}
+, m_false_str{false_str} {
 
     if (m_true_str == "On") {
         m_true_str = i18n::get(m_true_str);
@@ -58,15 +97,15 @@ SidebarEntryBool::SidebarEntryBool(std::string title, bool option, Callback cb, 
     });
 }
 
-SidebarEntryBool::SidebarEntryBool(std::string title, bool& option, std::string true_str, std::string false_str)
-: SidebarEntryBool{std::move(title), option, Callback{} } {
+SidebarEntryBool::SidebarEntryBool(const std::string& title, bool& option, const std::string& info, const std::string& true_str, const std::string& false_str)
+: SidebarEntryBool{title, option, Callback{}, info, true_str, false_str} {
     m_callback = [](bool& option){
         option ^= 1;
     };
 }
 
-auto SidebarEntryBool::Draw(NVGcontext* vg, Theme* theme) -> void {
-    SidebarEntryBase::Draw(vg, theme);
+void SidebarEntryBool::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) {
+    SidebarEntryBase::Draw(vg, theme, root_pos, left);
 
     // if (HasFocus()) {
     //     gfx::drawText(vg, Vec2{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f)}, 20.f, theme->GetColour(ThemeEntryID_TEXT_SELECTED), m_title.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
@@ -82,8 +121,8 @@ auto SidebarEntryBool::Draw(NVGcontext* vg, Theme* theme) -> void {
     }
 }
 
-SidebarEntryCallback::SidebarEntryCallback(std::string title, Callback cb, bool pop_on_click)
-: SidebarEntryBase{std::move(title)}
+SidebarEntryCallback::SidebarEntryCallback(const std::string& title, Callback cb, bool pop_on_click, const std::string& info)
+: SidebarEntryBase{title, info}
 , m_callback{cb}
 , m_pop_on_click{pop_on_click} {
     SetAction(Button::A, Action{"OK"_i18n, [this](){
@@ -95,8 +134,13 @@ SidebarEntryCallback::SidebarEntryCallback(std::string title, Callback cb, bool 
     });
 }
 
-auto SidebarEntryCallback::Draw(NVGcontext* vg, Theme* theme) -> void {
-    SidebarEntryBase::Draw(vg, theme);
+SidebarEntryCallback::SidebarEntryCallback(const std::string& title, Callback cb, const std::string& info)
+: SidebarEntryCallback{title, cb, false, info} {
+
+}
+
+void SidebarEntryCallback::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) {
+    SidebarEntryBase::Draw(vg, theme, root_pos, left);
 
     // if (HasFocus()) {
     //     gfx::drawText(vg, Vec2{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f)}, 20.f, theme->GetColour(ThemeEntryID_TEXT_SELECTED), m_title.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
@@ -105,8 +149,8 @@ auto SidebarEntryCallback::Draw(NVGcontext* vg, Theme* theme) -> void {
     // }
 }
 
-SidebarEntryArray::SidebarEntryArray(std::string title, Items items, std::string& index)
-: SidebarEntryArray{std::move(title), std::move(items), Callback{}, 0} {
+SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& items, std::string& index, const std::string& info)
+: SidebarEntryArray{title, items, Callback{}, 0, info} {
 
     const auto it = std::find(m_items.cbegin(), m_items.cend(), index);
     if (it != m_items.cend()) {
@@ -120,8 +164,8 @@ SidebarEntryArray::SidebarEntryArray(std::string title, Items items, std::string
     };
 }
 
-SidebarEntryArray::SidebarEntryArray(std::string title, Items items, Callback cb, std::string index)
-: SidebarEntryArray{std::move(title), std::move(items), cb, 0} {
+SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& items, Callback cb, const std::string& index, const std::string& info)
+: SidebarEntryArray{title, items, cb, 0, info} {
 
     const auto it = std::find(m_items.cbegin(), m_items.cend(), index);
     if (it != m_items.cend()) {
@@ -129,9 +173,9 @@ SidebarEntryArray::SidebarEntryArray(std::string title, Items items, Callback cb
     }
 }
 
-SidebarEntryArray::SidebarEntryArray(std::string title, Items items, Callback cb, s64 index)
-: SidebarEntryBase{std::forward<decltype(title)>(title)}
-, m_items{std::move(items)}
+SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& items, Callback cb, s64 index, const std::string& info)
+: SidebarEntryBase{title, info}
+, m_items{items}
 , m_callback{cb}
 , m_index{index} {
 
@@ -153,8 +197,8 @@ SidebarEntryArray::SidebarEntryArray(std::string title, Items items, Callback cb
     });
 }
 
-auto SidebarEntryArray::Draw(NVGcontext* vg, Theme* theme) -> void {
-    SidebarEntryBase::Draw(vg, theme);
+void SidebarEntryArray::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) {
+    SidebarEntryBase::Draw(vg, theme, root_pos, left);
 
     const auto& text_entry = m_items[m_index];
 
@@ -212,17 +256,17 @@ auto SidebarEntryArray::OnFocusLost() noexcept -> void {
     m_text_yoff = 0;
 }
 
-Sidebar::Sidebar(std::string title, Side side, Items&& items)
-: Sidebar{std::move(title), "", side, std::forward<decltype(items)>(items)} {
+Sidebar::Sidebar(const std::string& title, Side side, Items&& items)
+: Sidebar{title, "", side, std::forward<decltype(items)>(items)} {
 }
 
-Sidebar::Sidebar(std::string title, Side side)
-: Sidebar{std::move(title), "", side, {}} {
+Sidebar::Sidebar(const std::string& title, Side side)
+: Sidebar{title, "", side, {}} {
 }
 
-Sidebar::Sidebar(std::string title, std::string sub, Side side, Items&& items)
-: m_title{std::move(title)}
-, m_sub{std::move(sub)}
+Sidebar::Sidebar(const std::string& title, const std::string& sub, Side side, Items&& items)
+: m_title{title}
+, m_sub{sub}
 , m_side{side}
 , m_items{std::forward<decltype(items)>(items)} {
     switch (m_side) {
@@ -249,8 +293,8 @@ Sidebar::Sidebar(std::string title, std::string sub, Side side, Items&& items)
     m_list->SetScrollBarPos(GetX() + GetW() - 20, m_base_pos.y - 10, pos.h - m_base_pos.y + 48);
 }
 
-Sidebar::Sidebar(std::string title, std::string sub, Side side)
-: Sidebar{std::move(title), sub, side, {}} {
+Sidebar::Sidebar(const std::string& title, const std::string& sub, Side side)
+: Sidebar{title, sub, side, {}} {
 }
 
 
@@ -275,6 +319,30 @@ auto Sidebar::Update(Controller* controller, TouchInfo* touch) -> void {
 }
 
 auto Sidebar::Draw(NVGcontext* vg, Theme* theme) -> void {
+    // Vec4 info_box{};
+    // info_box.y = m_top_bar.y;
+    // info_box.w = 300;
+    // info_box.h = 250;
+
+    // if (m_side == Side::LEFT) {
+    //     info_box.x = m_pos.x + m_pos.w + 10;
+    // } else {
+    //     info_box.x = m_pos.x - info_box.w - 10;
+    // }
+
+    // const float info_pad = 30;
+    // const float info_font_size = 18;
+    // const char* msg = "Skips verifying the nca header signature";
+    // float bounds[4];
+    // nvgFontSize(vg, info_font_size);
+    // nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+    // nvgTextLineHeight(vg, 1.7);
+    // nvgTextBoxBounds(vg, info_box.x + info_pad, info_box.y + info_pad, info_box.w - info_pad * 2, msg, nullptr, bounds);
+    // info_box.h = info_pad * 2 + bounds[3] - bounds[1];
+
+    // gfx::drawRect(vg, info_box, theme->GetColour(ThemeEntryID_SIDEBAR), 5);
+    // gfx::drawTextBox(vg, bounds[0], bounds[1], info_font_size, info_box.w - info_pad * 2, theme->GetColour(ThemeEntryID_TEXT), msg);
+
     gfx::drawRect(vg, m_pos, theme->GetColour(ThemeEntryID_SIDEBAR));
     gfx::drawText(vg, m_title_pos, m_title_size, theme->GetColour(ThemeEntryID_TEXT), m_title.c_str());
     if (!m_sub.empty()) {
@@ -293,7 +361,7 @@ auto Sidebar::Draw(NVGcontext* vg, Theme* theme) -> void {
         }
 
         m_items[i]->SetY(y);
-        m_items[i]->Draw(vg, theme);
+        m_items[i]->Draw(vg, theme, m_pos, m_side == Side::LEFT);
     });
 }
 

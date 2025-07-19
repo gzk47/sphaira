@@ -13,6 +13,7 @@ namespace sphaira::ui::menu::game {
 
 struct Entry {
     u64 app_id{};
+    u8 type{};
     NacpLanguageEntry lang{};
     int image{};
     bool selected{};

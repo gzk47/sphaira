@@ -27,7 +27,7 @@ struct InstallSharedData {
 
 constexpr int THREAD_PRIO = PRIO_PREEMPTIVE;
 constexpr int THREAD_CORE = 2;
-volatile bool g_should_exit = false;
+std::atomic_bool g_should_exit = false;
 bool g_is_running{false};
 Mutex g_mutex{};
 InstallSharedData g_shared_data{};

@@ -84,6 +84,10 @@ constexpr std::string_view ZIP_EXTENSIONS[] = {
     "zip",
 };
 
+// case insensitive check
+auto IsSamePath(std::string_view a, std::string_view b) -> bool {
+    return a.length() == b.length() && !strncasecmp(a.data(), b.data(), a.length());
+}
 
 struct RomDatabaseEntry {
     // uses the naming scheme from retropie.
@@ -95,12 +99,12 @@ struct RomDatabaseEntry {
 
     // compares against all of the above strings.
     auto IsDatabase(std::string_view name) const {
-        if (name == folder || name == database) {
+        if (IsSamePath(name, folder) || IsSamePath(name, database)) {
             return true;
         }
 
         for (const auto& str : alias) {
-            if (!str.empty() && name == str) {
+            if (!str.empty() && IsSamePath(name, str)) {
                 return true;
             }
         }
@@ -348,7 +352,7 @@ FsView::FsView(Menu* menu, const fs::FsPath& path, const FsEntry& entry, ViewSid
                 Scan(GetNewPathCurrent());
             } else {
                 // special case for nro
-                if (IsSd() && entry.GetExtension() == "nro") {
+                if (IsSd() && IsSamePath(entry.GetExtension(), "nro")) {
                     App::Push<OptionBox>("Launch "_i18n + entry.GetName() + '?',
                         "No"_i18n, "Launch"_i18n, 1, [this](auto op_index){
                             if (op_index && *op_index) {
@@ -598,7 +602,7 @@ void FsView::SetIndex(s64 index) {
         m_list->SetYoff();
     }
 
-    if (IsSd() && !m_entries_current.empty() && !GetEntry().checked_internal_extension && GetEntry().extension == "zip") {
+    if (IsSd() && !m_entries_current.empty() && !GetEntry().checked_internal_extension && IsSamePath(GetEntry().extension, "zip")) {
         GetEntry().checked_internal_extension = true;
 
         if (auto zfile = unzOpen64(GetNewPathCurrent())) {
@@ -623,7 +627,7 @@ void FsView::SetIndex(s64 index) {
 }
 
 void FsView::InstallForwarder() {
-    if (GetEntry().GetExtension() == "nro") {
+    if (IsSamePath(GetEntry().GetExtension(), "nro")) {
         if (R_FAILED(homebrew::Menu::InstallHomebrewFromPath(GetNewPathCurrent()))) {
             log_write("failed to create forwarder\n");
         }
@@ -1364,13 +1368,12 @@ auto FsView::CheckIfUpdateFolder() -> Result {
     R_UNLESS(m_entries.size() > 150 && m_entries.size() < 300, Result_FileBrowserDirNotDaybreak);
 
     // check that all entries end in .nca
-    const auto nca_ext = std::string_view{".nca"};
     for (auto& e : m_entries) {
         // check that we are at the bottom level
         R_UNLESS(e.type == FsDirEntryType_File, Result_FileBrowserDirNotDaybreak);
 
         const auto ext = std::strrchr(e.name, '.');
-        R_UNLESS(ext && ext == nca_ext, Result_FileBrowserDirNotDaybreak);
+        R_UNLESS(ext && IsSamePath(ext, ".nca"), Result_FileBrowserDirNotDaybreak);
     }
 
     R_SUCCEED();
@@ -1680,7 +1683,7 @@ void FsView::DisplayOptions() {
     }
 
     if (IsSd() && m_entries_current.size() && !m_selected_count) {
-        if (App::GetInstallEnable() && GetEntry().IsFile() && (GetEntry().GetExtension() == "nro" || !m_menu->FindFileAssocFor().empty())) {
+        if (App::GetInstallEnable() && GetEntry().IsFile() && (IsSamePath(GetEntry().GetExtension(), "nro") || !m_menu->FindFileAssocFor().empty())) {
             options->Add<SidebarEntryCallback>("Install Forwarder"_i18n, [this](){;
                 if (App::GetInstallPrompt()) {
                     App::Push<OptionBox>(

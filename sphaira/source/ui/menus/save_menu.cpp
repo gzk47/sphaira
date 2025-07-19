@@ -240,7 +240,7 @@ void LoadResultIntoEntry(Entry& e, title::ThreadResultData* result) {
 }
 
 void LoadControlEntry(Entry& e, bool force_image_load = false) {
-    if (e.status == title::NacpLoadStatus::None) {
+    if (e.status != title::NacpLoadStatus::Loaded) {
         if (e.save_data_type == FsSaveDataType_System || e.save_data_type == FsSaveDataType_SystemBcat) {
             FakeNacpEntryForSystem(e);
         } else {

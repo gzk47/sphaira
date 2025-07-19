@@ -208,7 +208,7 @@ void LoadResultIntoEntry(Entry& e, title::ThreadResultData* result) {
 }
 
 void LoadControlEntry(Entry& e, bool force_image_load = false) {
-    if (e.status == title::NacpLoadStatus::None) {
+    if (e.status != title::NacpLoadStatus::Loaded) {
         LoadResultIntoEntry(e, title::Get(e.app_id));
     }
 
@@ -784,25 +784,12 @@ void Menu::ScanHomebrew() {
 
         for (s32 i = 0; i < record_count; i++) {
             const auto& e = record_list[i];
-            #if 0
-            u8 unk_x09 = e.unk_x09;
-            u64 unk_x0a;// = e.unk_x0a;
-            u8 unk_x10 = e.unk_x10;
-            u64 unk_x11;// = e.unk_x11;
-            memcpy(&unk_x0a, e.unk_x0a, sizeof(e.unk_x0a));
-            memcpy(&unk_x11, e.unk_x11, sizeof(e.unk_x11));
-            log_write("ID: %016lx got type: %u unk_x09: %u unk_x0a: %zu unk_x10: %u unk_x11: %zu\n", e.app_id, e.type,
-                unk_x09,
-                unk_x0a,
-                unk_x10,
-                unk_x11
-            );
-            #endif
+
             if (hide_forwarders && (e.application_id & 0x0500000000000000) == 0x0500000000000000) {
                 continue;
             }
 
-            m_entries.emplace_back(e.application_id);
+            m_entries.emplace_back(e.application_id, e.type);
         }
 
         offset += record_count;

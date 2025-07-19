@@ -112,10 +112,19 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
         App::Push<ui::ProgressBox>(0, "Installing "_i18n, "", [this](auto pbox) -> Result {
             ON_SCOPE_EXIT(m_usb_source->Finished(FINISHED_TIMEOUT));
 
+            // if we are doing s2s install, skip verifying the nca contents.
+            yati::ConfigOverride config_override{};
+            if (m_usb_source->IsStream()) {
+                config_override.skip_nca_hash_verify = true;
+                config_override.skip_rsa_header_fixed_key_verify = true;
+                config_override.skip_rsa_npdm_fixed_key_verify = true;
+            }
+
             log_write("inside progress box\n");
             for (const auto& file_name : m_names) {
+                pbox->SetTitle(file_name);
                 m_usb_source->SetFileNameForTranfser(file_name);
-                const auto rc = yati::InstallFromSource(pbox, m_usb_source.get(), file_name);
+                const auto rc = yati::InstallFromSource(pbox, m_usb_source.get(), file_name, config_override);
                 if (R_FAILED(rc)) {
                     m_usb_source->SignalCancel();
                     log_write("exiting usb install\n");

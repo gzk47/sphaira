@@ -100,6 +100,7 @@ auto GetCodeMessage(Result rc) -> const char* {
         case Result_UsbDsBadDeviceSpeed: return "SphairaError_UsbDsBadDeviceSpeed";
         case Result_NspBadMagic: return "SphairaError_NspBadMagic";
         case Result_XciBadMagic: return "SphairaError_XciBadMagic";
+        case Result_XciSecurePartitionNotFound: return "SphairaError_XciSecurePartitionNotFound";
         case Result_EsBadTitleKeyType: return "SphairaError_EsBadTitleKeyType";
         case Result_EsPersonalisedTicketDeviceIdMissmatch: return "SphairaError_EsPersonalisedTicketDeviceIdMissmatch";
         case Result_EsFailedDecryptPersonalisedTicket: return "SphairaError_EsFailedDecryptPersonalisedTicket";

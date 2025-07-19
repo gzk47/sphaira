@@ -576,6 +576,7 @@ enum class SphairaResult : Result {
 
     NspBadMagic,
     XciBadMagic,
+    XciSecurePartitionNotFound,
 
     EsBadTitleKeyType,
     EsPersonalisedTicketDeviceIdMissmatch,
@@ -710,6 +711,7 @@ enum : Result {
     MAKE_SPHAIRA_RESULT_ENUM(UsbDsBadDeviceSpeed),
     MAKE_SPHAIRA_RESULT_ENUM(NspBadMagic),
     MAKE_SPHAIRA_RESULT_ENUM(XciBadMagic),
+    MAKE_SPHAIRA_RESULT_ENUM(XciSecurePartitionNotFound),
     MAKE_SPHAIRA_RESULT_ENUM(EsBadTitleKeyType),
     MAKE_SPHAIRA_RESULT_ENUM(EsPersonalisedTicketDeviceIdMissmatch),
     MAKE_SPHAIRA_RESULT_ENUM(EsFailedDecryptPersonalisedTicket),

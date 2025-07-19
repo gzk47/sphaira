@@ -2,6 +2,7 @@
 
 #include "ui/widget.hpp"
 #include "ui/list.hpp"
+#include "ui/scrolling_text.hpp"
 #include <memory>
 #include <concepts>
 #include <utility>
@@ -10,11 +11,17 @@ namespace sphaira::ui {
 
 class SidebarEntryBase : public Widget {
 public:
-    SidebarEntryBase(std::string&& title);
-    virtual auto Draw(NVGcontext* vg, Theme* theme) -> void override;
+    explicit SidebarEntryBase(const std::string& title, const std::string& info);
+
+    using Widget::Draw;
+    virtual void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left);
 
 protected:
     std::string m_title;
+
+private:
+    std::string m_info;
+    ScrollingText m_scolling_title{};
 };
 
 template<typename T>
@@ -25,11 +32,11 @@ public:
     using Callback = std::function<void(bool&)>;
 
 public:
-    SidebarEntryBool(std::string title, bool option, Callback cb, std::string true_str = "On", std::string false_str = "Off");
-    SidebarEntryBool(std::string title, bool& option, std::string true_str = "On", std::string false_str = "Off");
+    explicit SidebarEntryBool(const std::string& title, bool option, Callback cb, const std::string& info = "", const std::string& true_str = "On", const std::string& false_str = "Off");
+    explicit SidebarEntryBool(const std::string& title, bool& option, const std::string& info = "", const std::string& true_str = "On", const std::string& false_str = "Off");
 
 private:
-    auto Draw(NVGcontext* vg, Theme* theme) -> void override;
+    void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) override;
 
     bool m_option;
     Callback m_callback;
@@ -42,8 +49,9 @@ public:
     using Callback = std::function<void()>;
 
 public:
-    SidebarEntryCallback(std::string title, Callback cb, bool pop_on_click = false);
-    auto Draw(NVGcontext* vg, Theme* theme) -> void override;
+    explicit SidebarEntryCallback(const std::string& title, Callback cb, const std::string& info);
+    explicit SidebarEntryCallback(const std::string& title, Callback cb, bool pop_on_click = false, const std::string& info = "");
+    void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) override;
 
 private:
     Callback m_callback;
@@ -57,11 +65,11 @@ public:
     using Callback = std::function<void(s64& index)>;
 
 public:
-    explicit SidebarEntryArray(std::string title, Items items, Callback cb, s64 index = 0);
-    SidebarEntryArray(std::string title, Items items, Callback cb, std::string index);
-    SidebarEntryArray(std::string title, Items items, std::string& index);
+    explicit SidebarEntryArray(const std::string& title, const Items& items, Callback cb, s64 index = 0, const std::string& info = "");
+    explicit SidebarEntryArray(const std::string& title, const Items& items, Callback cb, const std::string& index, const std::string& info = "");
+    explicit SidebarEntryArray(const std::string& title, const Items& items, std::string& index, const std::string& info = "");
 
-    auto Draw(NVGcontext* vg, Theme* theme) -> void override;
+    void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) override;
     auto OnFocusGained() noexcept -> void override;
     auto OnFocusLost() noexcept -> void override;
 
@@ -74,39 +82,16 @@ private:
     float m_text_yoff{};
 };
 
-template <typename T>
-class SidebarEntrySlider final : public SidebarEntryBase {
-public:
-    SidebarEntrySlider(std::string title, T& value, T min, T max)
-    : SidebarEntryBase{title}
-    , m_value{value}
-    , m_min{min}
-    , m_max{max} {
-
-    }
-
-    auto Draw(NVGcontext* vg, Theme* theme) -> void override;
-    auto Update(Controller* controller, TouchInfo* touch) -> void override;
-
-private:
-    T& m_value;
-    T m_min;
-    T m_max;
-    T m_step{};
-    Vec4 m_bar{};
-    Vec4 m_bar_fill{};
-};
-
 class Sidebar final : public Widget {
 public:
     enum class Side { LEFT, RIGHT };
     using Items = std::vector<std::unique_ptr<SidebarEntryBase>>;
 
 public:
-    Sidebar(std::string title, Side side, Items&& items);
-    Sidebar(std::string title, Side side);
-    Sidebar(std::string title, std::string sub, Side side, Items&& items);
-    Sidebar(std::string title, std::string sub, Side side);
+    explicit Sidebar(const std::string& title, Side side, Items&& items);
+    explicit Sidebar(const std::string& title, Side side);
+    explicit Sidebar(const std::string& title, const std::string& sub, Side side, Items&& items);
+    explicit Sidebar(const std::string& title, const std::string& sub, Side side);
 
     auto Update(Controller* controller, TouchInfo* touch) -> void override;
     auto Draw(NVGcontext* vg, Theme* theme) -> void override;

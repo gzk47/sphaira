@@ -20,6 +20,7 @@
 #include <zstd.h>
 #include <minIni.h>
 #include <algorithm>
+#include <atomic>
 
 namespace sphaira::yati {
 namespace {
@@ -154,7 +155,7 @@ struct ThreadData {
         max_buffer_size = std::max(read_buffer_size, INFLATE_BUFFER_MAX);
     }
 
-    auto GetResults() -> Result;
+    auto GetResults() volatile -> Result;
     void WakeAllThreads();
 
     Result Read(void* buf, s64 size, u64* bytes_read);
@@ -241,14 +242,14 @@ struct ThreadData {
     u64 max_buffer_size{};
 
     // these are shared between threads
-    volatile s64 read_offset{};
-    volatile s64 decompress_offset{};
-    volatile s64 write_offset{};
-    volatile s64 write_size{};
+    std::atomic<s64> read_offset{};
+    std::atomic<s64> decompress_offset{};
+    std::atomic<s64> write_offset{};
+    std::atomic<s64> write_size{};
 
-    volatile Result read_result{};
-    volatile Result decompress_result{};
-    volatile Result write_result{};
+    std::atomic<Result> read_result{};
+    std::atomic<Result> decompress_result{};
+    std::atomic<Result> write_result{};
 };
 
 struct Yati {
@@ -290,11 +291,11 @@ struct Yati {
     keys::Keys keys{};
 };
 
-auto ThreadData::GetResults() -> Result {
+auto ThreadData::GetResults() volatile -> Result {
     R_TRY(yati->pbox->ShouldExitResult());
-    R_TRY(read_result);
-    R_TRY(decompress_result);
-    R_TRY(write_result);
+    R_TRY(read_result.load());
+    R_TRY(decompress_result.load());
+    R_TRY(write_result.load());
     R_SUCCEED();
 }
 
@@ -380,7 +381,7 @@ Result Yati::readFuncInternal(ThreadData* t) {
     temp_buf.reserve(t->max_buffer_size);
 
     while (t->read_offset < t->nca->size && R_SUCCEEDED(t->GetResults())) {
-        const auto buffer_offset = t->read_offset;
+        const auto buffer_offset = t->read_offset.load();
 
         // read more data
         s64 read_size = t->read_buffer_size;
@@ -434,7 +435,7 @@ Result Yati::readFuncInternal(ThreadData* t) {
                     R_TRY(t->Read(blocks.data(), blocks.size() * sizeof(ncz::Block), std::addressof(bytes_read)));
 
                     // calculate offsets for each block.
-                    auto block_offset = t->read_offset;
+                    auto block_offset = t->read_offset.load();
                     for (const auto& block : blocks) {
                         t->ncz_blocks.emplace_back(block_offset, block.size);
                         block_offset += block.size;
@@ -564,7 +565,7 @@ Result Yati::decompressFuncInternal(ThreadData* t) {
                 }
 
                 t->write_size = header.size;
-                log_write("setting placeholder size: %zu\n", t->write_size);
+                log_write("setting placeholder size: %zu\n", t->write_size.load());
                 R_TRY(ncmContentStorageSetPlaceHolderSize(std::addressof(cs), std::addressof(t->nca->placeholder_id), t->write_size));
 
                 if (!config.ignore_distribution_bit && header.distribution_type == nca::DistributionType_GameCard) {
@@ -1443,7 +1444,7 @@ Result InstallInternalStream(ui::ProgressBox* pbox, source::Base* source, contai
 
 Result InstallFromFile(ui::ProgressBox* pbox, fs::Fs* fs, const fs::FsPath& path, const ConfigOverride& override) {
     auto source = std::make_unique<source::File>(fs, path);
-    // auto source = std::make_unique<source::StreamFile>(fs, path); // enable for testing.
+    // auto source = std::make_unique<source::StreamFile>(fs, path, override); // enable for testing.
     return InstallFromSource(pbox, source.get(), path, override);
 }
 
@@ -1465,7 +1466,7 @@ Result InstallFromSource(ui::ProgressBox* pbox, source::Base* source, const fs::
 Result InstallFromContainer(ui::ProgressBox* pbox, container::Base* container, const ConfigOverride& override) {
     container::Collections collections;
     R_TRY(container->GetCollections(collections));
-    return InstallFromCollections(pbox, container->GetSource(), collections);
+    return InstallFromCollections(pbox, container->GetSource(), collections, override);
 }
 
 Result InstallFromCollections(ui::ProgressBox* pbox, source::Base* source, const container::Collections& collections, const ConfigOverride& override) {

@@ -257,7 +257,7 @@ MainMenu::MainMenu() {
 
             options->Add<SidebarEntryCallback>("Theme"_i18n, [](){
                 App::DisplayThemeOptions();
-            });
+            }, "Customise the look of Sphaira by changing the theme"_i18n);
 
             options->Add<SidebarEntryCallback>("Network"_i18n, [this](){
                 auto options = std::make_unique<Sidebar>("Network Options"_i18n, Sidebar::Side::LEFT);
@@ -302,7 +302,8 @@ MainMenu::MainMenu() {
                 options->Add<SidebarEntryBool>("Hdd write protect"_i18n, App::GetWriteProtect(), [](bool& enable){
                     App::SetWriteProtect(enable);
                 });
-            });
+            }, "Toggle FTP, MTP, HDD and NXlink\n\n" \
+               "If Sphaira has a update available, you can download it from this menu"_i18n);
 
             options->Add<SidebarEntryArray>("Language"_i18n, language_items, [](s64& index_out){
                 App::SetLanguage(index_out);
@@ -310,7 +311,7 @@ MainMenu::MainMenu() {
 
             options->Add<SidebarEntryCallback>("Misc"_i18n, [](){
                 App::DisplayMiscOptions();
-            });
+            }, "View and launch one of Sphaira's menus"_i18n);
 
             options->Add<SidebarEntryCallback>("Advanced"_i18n, [](){
                 App::DisplayAdvancedOptions();

@@ -18,7 +18,7 @@ enum class InstallState {
 
 constexpr u64 MAX_BUFFER_SIZE = 1024ULL*1024ULL*8ULL;
 constexpr u64 MAX_BUFFER_RESERVE_SIZE = 1024ULL*1024ULL*32ULL;
-volatile InstallState INSTALL_STATE{InstallState::None};
+std::atomic<InstallState> INSTALL_STATE{InstallState::None};
 
 } // namespace
 

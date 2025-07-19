@@ -31,7 +31,7 @@ const char* INI_PATH = "/config/ftpsrv/config.ini";
 constexpr int THREAD_PRIO = PRIO_PREEMPTIVE;
 constexpr int THREAD_CORE = 2;
 FtpSrvConfig g_ftpsrv_config = {0};
-volatile bool g_should_exit = false;
+std::atomic_bool g_should_exit = false;
 bool g_is_running{false};
 Thread g_thread;
 Mutex g_mutex{};

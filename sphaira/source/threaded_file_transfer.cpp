@@ -7,6 +7,7 @@
 #include <vector>
 #include <algorithm>
 #include <cstring>
+#include <atomic>
 #include <minizip/unzip.h>
 #include <minizip/zip.h>
 
@@ -73,7 +74,7 @@ public:
 struct ThreadData {
     ThreadData(ui::ProgressBox* _pbox, s64 size, ReadCallback _rfunc, WriteCallback _wfunc, u64 buffer_size);
 
-    auto GetResults() -> Result;
+    auto GetResults() volatile -> Result;
     void WakeAllThreads();
 
     void SetReadResult(Result result) {
@@ -88,7 +89,7 @@ struct ThreadData {
         pull_result = result;
     }
 
-    auto GetWriteOffset() const {
+    auto GetWriteOffset() volatile const -> s64 {
         return write_offset;
     }
 
@@ -131,12 +132,12 @@ private:
     const s64 write_size;
 
     // these are shared between threads
-    volatile s64 read_offset{};
-    volatile s64 write_offset{};
+    std::atomic<s64> read_offset{};
+    std::atomic<s64> write_offset{};
 
-    volatile Result read_result{};
-    volatile Result write_result{};
-    volatile Result pull_result{};
+    std::atomic<Result> read_result{};
+    std::atomic<Result> write_result{};
+    std::atomic<Result> pull_result{};
 };
 
 ThreadData::ThreadData(ui::ProgressBox* _pbox, s64 size, ReadCallback _rfunc, WriteCallback _wfunc, u64 buffer_size)
@@ -154,11 +155,11 @@ ThreadData::ThreadData(ui::ProgressBox* _pbox, s64 size, ReadCallback _rfunc, Wr
     condvarInit(std::addressof(can_pull_write));
 }
 
-auto ThreadData::GetResults() -> Result {
+auto ThreadData::GetResults() volatile -> Result {
     R_UNLESS(!pbox->ShouldExit(), Result_TransferCancelled);
-    R_TRY(read_result);
-    R_TRY(write_result);
-    R_TRY(pull_result);
+    R_TRY(read_result.load());
+    R_TRY(write_result.load());
+    R_TRY(pull_result.load());
     R_SUCCEED();
 }
 
@@ -323,7 +324,9 @@ Result TransferInternal(ui::ProgressBox* pbox, s64 size, ReadCallback rfunc, Wri
     }
 
     // single threaded pull buffer is not supported.
-    R_UNLESS(mode != Mode::MultiThreaded || !sfunc, 0x1);
+    log_write("checking invalid transfer mode: %u %u\n", mode == Mode::MultiThreaded, !sfunc);
+    R_UNLESS(mode == Mode::MultiThreaded || !sfunc, 0x1);
+    log_write("valid transfer mode\n");
 
     // todo: support single threaded pull buffer.
     if (mode == Mode::SingleThreaded) {
@@ -374,8 +377,7 @@ Result TransferInternal(ui::ProgressBox* pbox, s64 size, ReadCallback rfunc, Wri
                 R_TRY(t_data.GetResults());
                 return t_data.Pull(data, size, bytes_read);
             }));
-        }
-        else {
+        } else {
             log_write("[THREAD] doing normal\n");
             R_TRY(start_threads());
             log_write("[THREAD] started threads\n");
