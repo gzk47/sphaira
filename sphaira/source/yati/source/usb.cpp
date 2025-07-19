@@ -71,7 +71,7 @@ Result Usb::SendFileRangeCmd(u64 off, u64 size, u64 timeout) {
 
     R_TRY(SendCmdHeader(tinfoil::USBCmdId::FILE_RANGE, sizeof(fRangeHeader) + fRangeHeader.nspNameLen, timeout));
     R_TRY(m_usb->TransferAll(false, &fRangeHeader, sizeof(fRangeHeader), timeout));
-    R_TRY(m_usb->TransferAll(false, m_transfer_file_name.data(), m_transfer_file_name.size(), timeout));
+    R_TRY(m_usb->TransferAll(false, m_transfer_file_name.data(), fRangeHeader.nspNameLen, timeout));
 
     tinfoil::USBCmdHeader responseHeader;
     R_TRY(m_usb->TransferAll(true, &responseHeader, sizeof(responseHeader), timeout));

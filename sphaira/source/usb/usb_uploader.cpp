@@ -92,9 +92,7 @@ Result Usb::FileRangeCmd(u64 data_size) {
     s64 end_off = header.size;
     s64 read_size = header.size;
 
-    // use transfer buffer directly to avoid copy overhead.
-    auto& buf = m_usb->GetTransferBuffer();
-    buf.resize(header.size);
+    m_buf.resize(header.size);
 
     while (curr_off < end_off) {
         if (curr_off + read_size >= end_off) {
@@ -102,8 +100,8 @@ Result Usb::FileRangeCmd(u64 data_size) {
         }
 
         u64 bytes_read;
-        R_TRY(Read(path, buf.data(), header.offset + curr_off, read_size, &bytes_read));
-        R_TRY(m_usb->TransferAll(false, buf.data(), bytes_read));
+        R_TRY(Read(path, m_buf.data(), header.offset + curr_off, read_size, &bytes_read));
+        R_TRY(m_usb->TransferAll(false, m_buf.data(), bytes_read));
         curr_off += bytes_read;
     }
 

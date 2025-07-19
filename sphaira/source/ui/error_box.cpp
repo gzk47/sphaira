@@ -114,8 +114,10 @@ auto GetCodeMessage(Result rc) -> const char* {
         case Result_UsbBadMagic: return "SphairaError_UsbBadMagic";
         case Result_UsbBadVersion: return "SphairaError_UsbBadVersion";
         case Result_UsbBadCount: return "SphairaError_UsbBadCount";
+        case Result_UsbBadBufferAlign: return "SphairaError_UsbBadBufferAlign";
         case Result_UsbBadTransferSize: return "SphairaError_UsbBadTransferSize";
-        case Result_UsbBadTotalSize: return "SphairaError_UsbBadTotalSize";
+        case Result_UsbEmptyTransferSize: return "SphairaError_UsbEmptyTransferSize";
+        case Result_UsbOverflowTransferSize: return "SphairaError_UsbOverflowTransferSize";
         case Result_UsbUploadBadMagic: return "SphairaError_UsbUploadBadMagic";
         case Result_UsbUploadExit: return "SphairaError_UsbUploadExit";
         case Result_UsbUploadBadCount: return "SphairaError_UsbUploadBadCount";

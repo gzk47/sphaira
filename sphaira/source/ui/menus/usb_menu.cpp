@@ -16,37 +16,7 @@ constexpr u64 FINISHED_TIMEOUT = 1e+9 * 3; // 3 seconds.
 
 void thread_func(void* user) {
     auto app = static_cast<Menu*>(user);
-
-    for (;;) {
-        if (app->GetToken().stop_requested()) {
-            break;
-        }
-
-        const auto rc = app->m_usb_source->IsUsbConnected(CONNECTION_TIMEOUT);
-        if (rc == Result_UsbCancelled) {
-            break;
-        }
-
-        // set connected status
-        mutexLock(&app->m_mutex);
-            if (R_SUCCEEDED(rc)) {
-                app->m_state = State::Connected_WaitForFileList;
-            } else {
-                app->m_state = State::None;
-            }
-        mutexUnlock(&app->m_mutex);
-
-        if (R_SUCCEEDED(rc)) {
-            std::vector<std::string> names;
-            if (R_SUCCEEDED(app->m_usb_source->WaitForConnection(CONNECTION_TIMEOUT, names))) {
-                mutexLock(&app->m_mutex);
-                ON_SCOPE_EXIT(mutexUnlock(&app->m_mutex));
-                app->m_state = State::Connected_StartingTransfer;
-                app->m_names = names;
-                break;
-            }
-        }
-    }
+    app->ThreadFunction();
 }
 
 } // namespace
@@ -74,8 +44,6 @@ Menu::Menu(u32 flags) : MenuBase{"USB"_i18n, flags} {
         m_state = State::Failed;
     }
 
-    mutexInit(&m_mutex);
-
     if (m_state != State::Failed) {
         threadCreate(&m_thread, thread_func, this, nullptr, 1024*32, PRIO_PREEMPTIVE, 1);
         threadStart(&m_thread);
@@ -102,8 +70,20 @@ Menu::~Menu() {
 void Menu::Update(Controller* controller, TouchInfo* touch) {
     MenuBase::Update(controller, touch);
 
-    mutexLock(&m_mutex);
-    ON_SCOPE_EXIT(mutexUnlock(&m_mutex));
+    static TimeStamp poll_ts;
+    if (poll_ts.GetSeconds() >= 1) {
+        poll_ts.Update();
+
+        UsbState state{UsbState_Detached};
+        usbDsGetState(&state);
+
+        UsbDeviceSpeed speed{(UsbDeviceSpeed)UsbDeviceSpeed_None};
+        usbDsGetSpeed(&speed);
+
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "State: %s | Speed: %s", i18n::get(GetUsbDsStateStr(state)).c_str(), i18n::get(GetUsbDsSpeedStr(speed)).c_str());
+        SetSubHeading(buf);
+    }
 
     if (m_state == State::Connected_StartingTransfer) {
         log_write("set to progress\n");
@@ -152,9 +132,6 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
 void Menu::Draw(NVGcontext* vg, Theme* theme) {
     MenuBase::Draw(vg, theme);
 
-    mutexLock(&m_mutex);
-    ON_SCOPE_EXIT(mutexUnlock(&m_mutex));
-
     switch (m_state) {
         case State::None:
             gfx::drawTextArgs(vg, SCREEN_WIDTH / 2.f, SCREEN_HEIGHT / 2.f, 36.f, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE, theme->GetColour(ThemeEntryID_TEXT_INFO), "Waiting for connection..."_i18n.c_str());
@@ -182,8 +159,33 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
     }
 }
 
-void Menu::OnFocusGained() {
-    MenuBase::OnFocusGained();
+void Menu::ThreadFunction() {
+    for (;;) {
+        if (GetToken().stop_requested()) {
+            break;
+        }
+
+        const auto rc = m_usb_source->IsUsbConnected(CONNECTION_TIMEOUT);
+        if (rc == Result_UsbCancelled) {
+            break;
+        }
+
+        // set connected status
+        if (R_SUCCEEDED(rc)) {
+            m_state = State::Connected_WaitForFileList;
+        } else {
+            m_state = State::None;
+        }
+
+        if (R_SUCCEEDED(rc)) {
+            std::vector<std::string> names;
+            if (R_SUCCEEDED(m_usb_source->WaitForConnection(CONNECTION_TIMEOUT, names))) {
+                m_names = names;
+                m_state = State::Connected_StartingTransfer;
+                break;
+            }
+        }
+    }
 }
 
 } // namespace sphaira::ui::menu::usb

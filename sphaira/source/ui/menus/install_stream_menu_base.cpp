@@ -41,7 +41,7 @@ Result Stream::ReadChunk(void* buf, s64 size, u64* bytes_read) {
     while (!m_token.stop_requested()) {
         SCOPED_MUTEX(&m_mutex);
         if (m_active && m_buffer.empty()) {
-            condvarWait(&m_can_read, &m_mutex);
+            R_TRY(condvarWait(&m_can_read, &m_mutex));
         }
 
         if ((!m_active && m_buffer.empty()) || m_token.stop_requested()) {
