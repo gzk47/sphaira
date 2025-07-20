@@ -35,10 +35,11 @@ private:
     std::stop_token m_token{};
     std::vector<u8> m_buffer{};
     CondVar m_can_read{};
+    CondVar m_can_write{};
 
 public:
     Mutex m_mutex{};
-    bool m_active{};
+    std::atomic_bool m_active{};
 };
 
 struct Menu : MenuBase {
