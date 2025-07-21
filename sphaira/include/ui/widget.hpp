@@ -10,11 +10,14 @@
 namespace sphaira::ui {
 
 struct uiButton final : Object {
-    uiButton(Button button, Action action) : m_button{button}, m_action{action} {}
+    uiButton(Button button, const std::string& button_str, const std::string& action_str);
+    uiButton(Button button, const std::string& action_str);
+
     auto Draw(NVGcontext* vg, Theme* theme) -> void override;
 
     Button m_button;
-    Action m_action;
+    std::string m_button_str;
+    std::string m_action_str;
     Vec4 m_button_pos{};
     Vec4 m_hint_pos{};
 };
@@ -84,6 +87,8 @@ struct Widget : public Object {
     }
 
     auto GetUiButtons() const -> uiButtons;
+    static void SetupUiButtons(uiButtons& buttons, const Vec2& button_pos = {1220, 675});
+    static auto GetUiButtons(const Actions& actions, const Vec2& button_pos = {1220, 675}) -> uiButtons;
 
     Actions m_actions{};
     Vec2 m_button_pos{1220, 675};

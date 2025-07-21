@@ -99,9 +99,23 @@ SidebarEntryBool::SidebarEntryBool(const std::string& title, bool option, Callba
 
 SidebarEntryBool::SidebarEntryBool(const std::string& title, bool& option, const std::string& info, const std::string& true_str, const std::string& false_str)
 : SidebarEntryBool{title, option, Callback{}, info, true_str, false_str} {
-    m_callback = [](bool& option){
+    m_callback = [&option](bool&){
         option ^= 1;
     };
+}
+
+SidebarEntryBool::SidebarEntryBool(const std::string& title, option::OptionBool& option, const Callback& cb, const std::string& info, const std::string& true_str, const std::string& false_str)
+: SidebarEntryBool{title, option.Get(), Callback{}, info, true_str, false_str} {
+    m_callback = [&option, cb](bool& v_out){
+        if (cb) {
+            cb(v_out);
+        }
+        option.Set(v_out);
+    };
+}
+
+SidebarEntryBool::SidebarEntryBool(const std::string& title, option::OptionBool& option, const std::string& info, const std::string& true_str, const std::string& false_str)
+: SidebarEntryBool{title, option, Callback{}, info, true_str, false_str} {
 }
 
 void SidebarEntryBool::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) {
@@ -271,11 +285,11 @@ Sidebar::Sidebar(const std::string& title, const std::string& sub, Side side, It
 , m_items{std::forward<decltype(items)>(items)} {
     switch (m_side) {
         case Side::LEFT:
-            SetPos(Vec4{0.f, 0.f, 450.f, 720.f});
+            SetPos(Vec4{0.f, 0.f, 450.f, SCREEN_HEIGHT});
             break;
 
         case Side::RIGHT:
-            SetPos(Vec4{1280.f - 450.f, 0.f, 450.f, 720.f});
+            SetPos(Vec4{SCREEN_WIDTH - 450.f, 0.f, 450.f, SCREEN_HEIGHT});
             break;
     }
 

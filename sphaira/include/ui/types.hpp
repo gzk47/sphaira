@@ -274,6 +274,13 @@ enum class Button : u64 {
     START = static_cast<u64>(HidNpadButton_Plus),
     SELECT = static_cast<u64>(HidNpadButton_Minus),
 
+    SL_LEFT = static_cast<u64>(HidNpadButton_LeftSL),
+    SR_LEFT = static_cast<u64>(HidNpadButton_LeftSR),
+    SL_RIGHT = static_cast<u64>(HidNpadButton_RightSL),
+    SR_RIGHT = static_cast<u64>(HidNpadButton_RightSR),
+    SL_ANY = SL_LEFT | SL_RIGHT,
+    SR_ANY = SR_LEFT | SR_RIGHT,
+
     // todo:
     DPAD_LEFT = static_cast<u64>(HidNpadButton_Left),
     DPAD_RIGHT = static_cast<u64>(HidNpadButton_Right),

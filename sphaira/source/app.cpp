@@ -1710,10 +1710,9 @@ void App::DisplayAdvancedOptions(bool left_side) {
     }, "When enabled, it replaces /hbmenu.nro with Sphaira, creating a backup of hbmenu to /switch/hbmenu.nro\n\n" \
        "Disabling will give you the option to restore hbmenu."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Boost CPU during transfer"_i18n, App::GetApp()->m_progress_boost_mode.Get(), [](bool& enable){
-        App::GetApp()->m_progress_boost_mode.Set(enable);
-    }, "Enables boost mode during transfers which can improve transfer speed. "\
-       "This sets the CPU to 1785mhz and lowers the GPU 76mhz"_i18n);
+    options->Add<ui::SidebarEntryBool>("Boost CPU during transfer"_i18n, App::GetApp()->m_progress_boost_mode,
+        "Enables boost mode during transfers which can improve transfer speed. "\
+        "This sets the CPU to 1785mhz and lowers the GPU 76mhz"_i18n);
 
     options->Add<ui::SidebarEntryArray>("Text scroll speed"_i18n, text_scroll_speed_items, [](s64& index_out){
         App::SetTextScrollSpeed(index_out);
@@ -1797,124 +1796,90 @@ void App::DisplayInstallOptions(bool left_side) {
         App::SetInstallEmummcEnable(enable);
     }, "Enables installing whilst in emuMMC mode."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Show install warning"_i18n, App::GetApp()->m_install_prompt.Get(), [](bool& enable){
-        App::GetApp()->m_install_prompt.Set(enable);
-    }, "When enabled, a warning is show when attempting to install a forwarder."_i18n);
+    options->Add<ui::SidebarEntryBool>("Show install warning"_i18n, App::GetApp()->m_install_prompt,
+        "When enabled, a warning is show when attempting to install a forwarder."_i18n);
 
     options->Add<ui::SidebarEntryArray>("Install location"_i18n, install_items, [](s64& index_out){
         App::SetInstallSdEnable(index_out);
     }, (s64)App::GetInstallSdEnable());
 
-    options->Add<ui::SidebarEntryBool>("Allow downgrade"_i18n, App::GetApp()->m_allow_downgrade.Get(), [](bool& enable){
-        App::GetApp()->m_allow_downgrade.Set(enable);
-    }, "Allows for installing title updates that are lower than the currently installed update."_i18n);
+    options->Add<ui::SidebarEntryBool>("Allow downgrade"_i18n, App::GetApp()->m_allow_downgrade,
+        "Allows for installing title updates that are lower than the currently installed update."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Skip if already installed"_i18n, App::GetApp()->m_skip_if_already_installed.Get(), [](bool& enable){
-        App::GetApp()->m_skip_if_already_installed.Set(enable);
-    }, "Skips installing titles / ncas if they're already installed."_i18n);
+    options->Add<ui::SidebarEntryBool>("Skip if already installed"_i18n, App::GetApp()->m_skip_if_already_installed,
+        "Skips installing titles / ncas if they're already installed."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Ticket only"_i18n, App::GetApp()->m_ticket_only.Get(), [](bool& enable){
-        App::GetApp()->m_ticket_only.Set(enable);
-    }, "Installs tickets only, useful if the title was already installed however the tickets were missing or corrupted."_i18n);
+    options->Add<ui::SidebarEntryBool>("Ticket only"_i18n, App::GetApp()->m_ticket_only,
+        "Installs tickets only, useful if the title was already installed however the tickets were missing or corrupted."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Skip base"_i18n, App::GetApp()->m_skip_base.Get(), [](bool& enable){
-        App::GetApp()->m_skip_base.Set(enable);
-    }, "Skips installing the base application."_i18n);
+    options->Add<ui::SidebarEntryBool>("Skip base"_i18n, App::GetApp()->m_skip_base,
+        "Skips installing the base application."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Skip patch"_i18n, App::GetApp()->m_skip_patch.Get(), [](bool& enable){
-        App::GetApp()->m_skip_patch.Set(enable);
-    }, "Skips installing updates."_i18n);
+    options->Add<ui::SidebarEntryBool>("Skip patch"_i18n, App::GetApp()->m_skip_patch,
+        "Skips installing updates."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Skip dlc"_i18n, App::GetApp()->m_skip_addon.Get(), [](bool& enable){
-        App::GetApp()->m_skip_addon.Set(enable);
-    }, "Skips installing DLC."_i18n);
+    options->Add<ui::SidebarEntryBool>("Skip dlc"_i18n, App::GetApp()->m_skip_addon,
+        "Skips installing DLC."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Skip data patch"_i18n, App::GetApp()->m_skip_data_patch.Get(), [](bool& enable){
-        App::GetApp()->m_skip_data_patch.Set(enable);
-    }, "Skips installing DLC update (data patch)."_i18n);
+    options->Add<ui::SidebarEntryBool>("Skip data patch"_i18n, App::GetApp()->m_skip_data_patch,
+        "Skips installing DLC update (data patch)."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Skip ticket"_i18n, App::GetApp()->m_skip_ticket.Get(), [](bool& enable){
-        App::GetApp()->m_skip_ticket.Set(enable);
-    }, "Skips installing tickets, not recommended."_i18n);
+    options->Add<ui::SidebarEntryBool>("Skip ticket"_i18n, App::GetApp()->m_skip_ticket,
+        "Skips installing tickets, not recommended."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Skip NCA hash verify"_i18n, App::GetApp()->m_skip_nca_hash_verify.Get(), [](bool& enable){
-        App::GetApp()->m_skip_nca_hash_verify.Set(enable);
-    }, "Enables the option to skip sha256 verification. This is a hash over the entire NCA. "\
-       "It is used to verify that the NCA is valid / not corrupted. "\
-       "You may have seen the option for \"checking for corrupted data\" when a corrupted game is installed. "\
-       "That check performs various hash checks, including the hash over the NCA.\n\n"\
-       "It is recommended to keep this disabled."_i18n);
+    options->Add<ui::SidebarEntryBool>("Skip NCA hash verify"_i18n, App::GetApp()->m_skip_nca_hash_verify,
+        "Enables the option to skip sha256 verification. This is a hash over the entire NCA. "\
+        "It is used to verify that the NCA is valid / not corrupted. "\
+        "You may have seen the option for \"checking for corrupted data\" when a corrupted game is installed. "\
+        "That check performs various hash checks, including the hash over the NCA.\n\n"\
+        "It is recommended to keep this disabled."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Skip RSA header verify"_i18n, App::GetApp()->m_skip_rsa_header_fixed_key_verify.Get(), [](bool& enable){
-        App::GetApp()->m_skip_rsa_header_fixed_key_verify.Set(enable);
-    }, "Enables the option to skip RSA NCA fixed key verification. "\
-       "This is a hash over the NCA header. It is used to verify that the header has not been modified. "\
-       "The header is signed by nintendo, thus it cannot be forged, and is reliable to detect modified NCA headers (such as NSP/XCI converts).\n\n"\
-       "It is recommended to keep this disabled, unless you need to install nsp/xci converts."_i18n);
+    options->Add<ui::SidebarEntryBool>("Skip RSA header verify"_i18n, App::GetApp()->m_skip_rsa_header_fixed_key_verify,
+        "Enables the option to skip RSA NCA fixed key verification. "\
+        "This is a hash over the NCA header. It is used to verify that the header has not been modified. "\
+        "The header is signed by nintendo, thus it cannot be forged, and is reliable to detect modified NCA headers (such as NSP/XCI converts).\n\n"\
+        "It is recommended to keep this disabled, unless you need to install nsp/xci converts."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Skip RSA NPDM verify"_i18n, App::GetApp()->m_skip_rsa_npdm_fixed_key_verify.Get(), [](bool& enable){
-        App::GetApp()->m_skip_rsa_npdm_fixed_key_verify.Set(enable);
-    }, "Enables the option to skip RSA NPDM fixed key verification.\n\n"\
-       "Currently, this option is stubbed (not implemented)."_i18n);
+    options->Add<ui::SidebarEntryBool>("Skip RSA NPDM verify"_i18n, App::GetApp()->m_skip_rsa_npdm_fixed_key_verify,
+        "Enables the option to skip RSA NPDM fixed key verification.\n\n"\
+        "Currently, this option is stubbed (not implemented)."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Ignore distribution bit"_i18n, App::GetApp()->m_ignore_distribution_bit.Get(), [](bool& enable){
-        App::GetApp()->m_ignore_distribution_bit.Set(enable);
-    }, "If set, it will ignore the distribution bit in the NCA header. "\
-       "The distribution bit is used to signify whether a NCA is Eshop or GameCard. "\
-       "You cannot (normally) launch install games that have the distruction bit set to GameCard.\n\n"\
-       "It is recommended to keep this disabled."_i18n);
+    options->Add<ui::SidebarEntryBool>("Ignore distribution bit"_i18n, App::GetApp()->m_ignore_distribution_bit,
+        "If set, it will ignore the distribution bit in the NCA header. "\
+        "The distribution bit is used to signify whether a NCA is Eshop or GameCard. "\
+        "You cannot (normally) launch install games that have the distruction bit set to GameCard.\n\n"\
+        "It is recommended to keep this disabled."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Convert to common ticket"_i18n, App::GetApp()->m_convert_to_common_ticket.Get(), [](bool& enable){
-        App::GetApp()->m_convert_to_common_ticket.Set(enable);
-    }, "[Requires keys] Converts personalised tickets to common (fake) tickets.\n\n"\
-       "It is recommended to keep this enabled."_i18n);
+    options->Add<ui::SidebarEntryBool>("Convert to common ticket"_i18n, App::GetApp()->m_convert_to_common_ticket,
+        "[Requires keys] Converts personalised tickets to common (fake) tickets.\n\n"\
+        "It is recommended to keep this enabled."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Convert to standard crypto"_i18n, App::GetApp()->m_convert_to_standard_crypto.Get(), [](bool& enable){
-        App::GetApp()->m_convert_to_standard_crypto.Set(enable);
-    }, "[Requires keys] Converts titlekey to standard crypto, also known as \"ticketless\".\n\n"\
-       "It is recommended to keep this disabled."_i18n);
+    options->Add<ui::SidebarEntryBool>("Convert to standard crypto"_i18n, App::GetApp()->m_convert_to_standard_crypto,
+        "[Requires keys] Converts titlekey to standard crypto, also known as \"ticketless\".\n\n"\
+        "It is recommended to keep this disabled."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Lower master key"_i18n, App::GetApp()->m_lower_master_key.Get(), [](bool& enable){
-        App::GetApp()->m_lower_master_key.Set(enable);
-    }, "[Requires keys] Encrypts the keak (key area key) with master key 0, which allows the game to be launched on every fw. "\
-       "Implicitly performs standard crypto.\n\n"\
-       "Do note that just because the game can be launched on any fw (as it can be decrypted), doesn't mean it will work. It is strongly recommened to update your firmware and Atmosphere version in order to play the game, rather than enabling this option.\n\n"\
-       "It is recommended to keep this disabled."_i18n);
+    options->Add<ui::SidebarEntryBool>("Lower master key"_i18n, App::GetApp()->m_lower_master_key,
+        "[Requires keys] Encrypts the keak (key area key) with master key 0, which allows the game to be launched on every fw. "\
+        "Implicitly performs standard crypto.\n\n"\
+        "Do note that just because the game can be launched on any fw (as it can be decrypted), doesn't mean it will work. It is strongly recommened to update your firmware and Atmosphere version in order to play the game, rather than enabling this option.\n\n"\
+        "It is recommended to keep this disabled."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("Lower system version"_i18n, App::GetApp()->m_lower_system_version.Get(), [](bool& enable){
-        App::GetApp()->m_lower_system_version.Set(enable);
-    }, "Sets the system_firmware field in the cnmt extended header to 0. "\
-       "Note: if the master key is higher than fw version, the game still won't launch as the fw won't have the key to decrypt keak (see above).\n\n"\
-       "It is recommended to keep this disabled."_i18n);
+    options->Add<ui::SidebarEntryBool>("Lower system version"_i18n, App::GetApp()->m_lower_system_version,
+        "Sets the system_firmware field in the cnmt extended header to 0. "\
+        "Note: if the master key is higher than fw version, the game still won't launch as the fw won't have the key to decrypt keak (see above).\n\n"\
+        "It is recommended to keep this disabled."_i18n);
 }
 
 void App::DisplayDumpOptions(bool left_side) {
     auto options = std::make_unique<ui::Sidebar>("Dump Options"_i18n, left_side ? ui::Sidebar::Side::LEFT : ui::Sidebar::Side::RIGHT);
     ON_SCOPE_EXIT(App::Push(std::move(options)));
 
-    options->Add<ui::SidebarEntryBool>("Created nested folder"_i18n, App::GetApp()->m_dump_app_folder.Get(), [](bool& enable){
-        App::GetApp()->m_dump_app_folder.Set(enable);
-    });
-
-    options->Add<ui::SidebarEntryBool>("Append folder with .xci"_i18n, App::GetApp()->m_dump_append_folder_with_xci.Get(), [](bool& enable){
-        App::GetApp()->m_dump_append_folder_with_xci.Set(enable);
-    });
-
-    options->Add<ui::SidebarEntryBool>("Trim XCI"_i18n, App::GetApp()->m_dump_trim_xci.Get(), [](bool& enable){
-        App::GetApp()->m_dump_trim_xci.Set(enable);
-    });
-
-    options->Add<ui::SidebarEntryBool>("Label trimmed XCI"_i18n, App::GetApp()->m_dump_label_trim_xci.Get(), [](bool& enable){
-        App::GetApp()->m_dump_label_trim_xci.Set(enable);
-    });
-
-    options->Add<ui::SidebarEntryBool>("Multi-threaded USB transfer"_i18n, App::GetApp()->m_dump_usb_transfer_stream.Get(), [](bool& enable){
-        App::GetApp()->m_dump_usb_transfer_stream.Set(enable);
-    });
-
-    options->Add<ui::SidebarEntryBool>("Convert to common ticket"_i18n, App::GetApp()->m_dump_convert_to_common_ticket.Get(), [](bool& enable){
-        App::GetApp()->m_dump_convert_to_common_ticket.Set(enable);
-    });
+    options->Add<ui::SidebarEntryBool>("Created nested folder"_i18n, App::GetApp()->m_dump_app_folder);
+    options->Add<ui::SidebarEntryBool>("Append folder with .xci"_i18n, App::GetApp()->m_dump_append_folder_with_xci);
+    options->Add<ui::SidebarEntryBool>("Trim XCI"_i18n, App::GetApp()->m_dump_trim_xci);
+    options->Add<ui::SidebarEntryBool>("Label trimmed XCI"_i18n, App::GetApp()->m_dump_label_trim_xci);
+    options->Add<ui::SidebarEntryBool>("Multi-threaded USB transfer"_i18n, App::GetApp()->m_dump_usb_transfer_stream);
+    options->Add<ui::SidebarEntryBool>("Convert to common ticket"_i18n, App::GetApp()->m_dump_convert_to_common_ticket);
 }
 
 App::~App() {
