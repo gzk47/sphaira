@@ -1,3 +1,5 @@
+#if ENABLE_NETWORK_INSTALL
+
 #include "usb/usbds.hpp"
 #include "log.hpp"
 #include "defines.hpp"
@@ -342,3 +344,5 @@ Result UsbDs::GetTransferResult(UsbSessionEndpoint ep, u32 urb_id, u32 *out_requ
 }
 
 } // namespace sphaira::usb
+
+#endif

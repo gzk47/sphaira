@@ -1,3 +1,5 @@
+#if ENABLE_NETWORK_INSTALL
+
 #include "ui/menus/mtp_menu.hpp"
 #include "usb/usbds.hpp"
 #include "app.hpp"
@@ -57,3 +59,5 @@ void Menu::OnDisableInstallMode() {
 }
 
 } // namespace sphaira::ui::menu::mtp
+
+#endif

@@ -1,4 +1,5 @@
 // The USB protocol was taken from Tinfoil, by Adubbz.
+#if ENABLE_NETWORK_INSTALL
 
 #include "usb/usb_uploader.hpp"
 #include "usb/tinfoil.hpp"
@@ -109,3 +110,5 @@ Result Usb::FileRangeCmd(u64 data_size) {
 }
 
 } // namespace sphaira::usb::upload
+
+#endif

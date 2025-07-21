@@ -8,7 +8,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        preset: [MinSizeRel]
+        preset: [Release]
     runs-on: ${{ matrix.os }}
     container: devkitpro/devkita64:latest
 

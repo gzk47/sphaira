@@ -1,4 +1,5 @@
 // The USB protocol was taken from Tinfoil, by Adubbz.
+#if ENABLE_NETWORK_INSTALL
 
 #include "yati/source/usb.hpp"
 #include "usb/tinfoil.hpp"
@@ -97,3 +98,5 @@ Result Usb::Read(void* buf, s64 off, s64 size, u64* bytes_read) {
 }
 
 } // namespace sphaira::yati::source
+
+#endif

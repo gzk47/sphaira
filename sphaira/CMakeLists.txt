@@ -111,6 +111,7 @@ target_compile_definitions(sphaira PRIVATE
     -DAPP_VERSION="${sphaira_VERSION}"
     -DAPP_VERSION_HASH="${sphaira_VERSION_HASH}"
     -DCURL_NO_OLDIES=1
+    -DENABLE_NETWORK_INSTALL=$<BOOL:${ENABLE_NETWORK_INSTALL}>
 )
 
 target_compile_options(sphaira PRIVATE

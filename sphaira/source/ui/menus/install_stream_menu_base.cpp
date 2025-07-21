@@ -1,3 +1,5 @@
+#if ENABLE_NETWORK_INSTALL
+
 #include "ui/menus/install_stream_menu_base.hpp"
 #include "yati/yati.hpp"
 #include "app.hpp"
@@ -273,3 +275,5 @@ void Menu::OnInstallClose() {
 }
 
 } // namespace sphaira::ui::menu::stream
+
+#endif

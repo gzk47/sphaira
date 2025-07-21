@@ -1,3 +1,5 @@
+#if ENABLE_NETWORK_INSTALL
+
 #include "ui/menus/usb_menu.hpp"
 #include "yati/yati.hpp"
 #include "app.hpp"
@@ -189,3 +191,5 @@ void Menu::ThreadFunction() {
 }
 
 } // namespace sphaira::ui::menu::usb
+
+#endif

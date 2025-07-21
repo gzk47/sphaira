@@ -30,10 +30,13 @@ struct DumpLocationEntry {
 
 constexpr DumpLocationEntry DUMP_LOCATIONS[]{
     { DumpLocationType_SdCard, "microSD card (/dumps/)" },
+#if ENABLE_NETWORK_INSTALL
     { DumpLocationType_UsbS2S, "USB transfer (Switch 2 Switch)" },
+#endif
     { DumpLocationType_DevNull, "/dev/null (Speed Test)" },
 };
 
+#if ENABLE_NETWORK_INSTALL
 struct UsbTest final : usb::upload::Usb, yati::source::Stream {
     UsbTest(ui::ProgressBox* pbox, BaseSource* source) : Usb{UINT64_MAX} {
         m_pbox = pbox;
@@ -97,6 +100,7 @@ private:
     s64 m_progress{};
     s64 m_pull_offset{};
 };
+#endif
 
 Result DumpToFile(ui::ProgressBox* pbox, fs::Fs* fs, const fs::FsPath& root, BaseSource* source, std::span<const fs::FsPath> paths) {
     const auto is_file_based_emummc = App::IsFileBaseEmummc();
@@ -150,6 +154,7 @@ Result DumpToStdio(ui::ProgressBox* pbox, const location::StdioEntry& loc, BaseS
     return DumpToFile(pbox, &fs, loc.mount, source, paths);
 }
 
+#if ENABLE_NETWORK_INSTALL
 Result DumpToUsbS2SStream(ui::ProgressBox* pbox, UsbTest* usb, std::span<const fs::FsPath> paths) {
     auto source = usb->GetSource();
 
@@ -239,6 +244,7 @@ Result DumpToUsbS2S(ui::ProgressBox* pbox, BaseSource* source, std::span<const f
 
     R_THROW(0xFFFF);
 }
+#endif
 
 Result DumpToDevNull(ui::ProgressBox* pbox, BaseSource* source, std::span<const fs::FsPath> paths) {
     for (auto path : paths) {
@@ -357,7 +363,9 @@ void Dump(const std::shared_ptr<BaseSource>& source, const DumpLocation& locatio
         } else if (location.entry.type == DumpLocationType_SdCard) {
             R_TRY(DumpToFileNative(pbox, source.get(), paths));
         } else if (location.entry.type == DumpLocationType_UsbS2S) {
+            #if ENABLE_NETWORK_INSTALL
             R_TRY(DumpToUsbS2S(pbox, source.get(), paths));
+            #endif
         } else if (location.entry.type == DumpLocationType_DevNull) {
             R_TRY(DumpToDevNull(pbox, source.get(), paths));
         }
