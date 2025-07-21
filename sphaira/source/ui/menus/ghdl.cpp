@@ -72,23 +72,17 @@ void from_json(yyjson_val* json, GhApiAsset& e) {
         JSON_SET_STR(content_type);
         JSON_SET_UINT(size);
         JSON_SET_UINT(download_count);
+        JSON_SET_STR(updated_at);
         JSON_SET_STR(browser_download_url);
     );
 }
-
-// void from_json(const fs::FsPath& path, GhApiEntry& e) {
-//     JSON_INIT_VEC_FILE(path, nullptr, nullptr);
-//     JSON_OBJ_ITR(
-//         JSON_SET_STR(tag_name);
-//         JSON_SET_STR(name);
-//         JSON_SET_ARR_OBJ(assets);
-//     );
-// }
 
 void from_json(yyjson_val* json, GhApiEntry& e) {
     JSON_OBJ_ITR(
         JSON_SET_STR(tag_name);
         JSON_SET_STR(name);
+        JSON_SET_STR(published_at);
+        JSON_SET_BOOL(prerelease);
         JSON_SET_ARR_OBJ(assets);
     );
 }
@@ -362,7 +356,18 @@ void Menu::DownloadEntries() {
 
         PopupList::Items entry_items;
         for (const auto& e : gh_entries) {
-            entry_items.emplace_back(e.name);
+            std::string str;
+            if (!e.name.empty()) {
+                str += e.name + "   |  ";
+            } else {
+                str += e.tag_name + "   |  ";
+            }
+            if (e.prerelease) {
+                str += " (Pre-Release)";
+            }
+            str += " [" + e.published_at.substr(0, 10) + "]";
+
+            entry_items.emplace_back(str);
         }
 
         App::Push<PopupList>("Select release to download for "_i18n + GetEntry().repo, entry_items, [this](auto op_index){
@@ -393,7 +398,10 @@ void Menu::DownloadEntries() {
                 }
 
                 if (!using_name || found) {
-                    asset_items.emplace_back(p.name);
+                    std::string str = p.name + "   |  ";
+                    str += " [" + p.updated_at.substr(0, 10) + "]";
+
+                    asset_items.emplace_back(str);
                     api_assets.emplace_back(p);
                 }
             }

@@ -32,12 +32,15 @@ struct GhApiAsset {
     std::string content_type{};
     u64 size{};
     u64 download_count{};
+    std::string updated_at{};
     std::string browser_download_url{};
 };
 
 struct GhApiEntry {
     std::string tag_name{};
     std::string name{};
+    std::string published_at{};
+    bool prerelease{};
     std::vector<GhApiAsset> assets{};
 };
 

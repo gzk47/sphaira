@@ -28,6 +28,7 @@
 
 #include <cstring>
 #include <yyjson.h>
+#include <iomanip>
 
 namespace sphaira::ui::menu::main {
 namespace {
