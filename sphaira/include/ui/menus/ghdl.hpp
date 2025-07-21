@@ -66,6 +66,8 @@ private:
     void Sort();
     void UpdateSubheading();
 
+    void DownloadEntries();
+
 private:
     std::vector<Entry> m_entries{};
     s64 m_index{};
