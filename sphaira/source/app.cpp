@@ -413,6 +413,14 @@ void on_i18n_change() {
 } // namespace
 
 void App::Loop() {
+    // adjust these if FPSlocker ever supports different min/max fps.
+    constexpr double min_delta    = 1000.0 / 120.0; // 120 fps
+    constexpr double max_delta    = 1000.0 / 15.0;  // 15  fps
+    constexpr double target_delta = 1000.0 / 60.0;  // 60  fps
+
+    u64 start = armTicksToNs(armGetSystemTick());
+    m_delta_time = 1.0;
+
     while (!m_quit && appletMainLoop()) {
         if (m_widgets.empty()) {
             m_quit = true;
@@ -497,6 +505,15 @@ void App::Loop() {
         this->Poll();
         this->Update();
         this->Draw();
+
+        // check how long this frame took.
+        const u64 now = armTicksToNs(armGetSystemTick());
+        // convert to ns.
+        const double delta = (double)(now - start) / 1e+6;
+        // clamp and normalise to 1.0 as the target, higher values if we took too long.
+        m_delta_time = std::clamp(delta, min_delta, max_delta) / target_delta;
+        // save timestamp for next frame.
+        start = now;
     }
 }
 
@@ -1024,7 +1041,7 @@ void App::Poll() {
         m_controller.m_kdown = padGetButtonsDown(&m_pad);
         m_controller.m_kheld = padGetButtons(&m_pad);
         m_controller.m_kup = padGetButtonsUp(&m_pad);
-        m_controller.UpdateButtonHeld(static_cast<u64>(Button::ANY_DIRECTION));
+        m_controller.UpdateButtonHeld(static_cast<u64>(Button::ANY_DIRECTION), m_delta_time);
     }
 }
 

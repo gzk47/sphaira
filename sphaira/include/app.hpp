@@ -337,6 +337,8 @@ public:
     nj::Decoder m_decoder;
 #endif
 
+    double m_delta_time{};
+
 private: // from nanovg decko3d example by adubbz
     static constexpr unsigned NumFramebuffers = 2;
     static constexpr unsigned StaticCmdSize = 0x1000;

@@ -395,12 +395,12 @@ struct Controller {
         m_kup = 0;
     }
 
-    void UpdateButtonHeld(u64 buttons) {
+    void UpdateButtonHeld(u64 buttons, double delta) {
         if (m_kdown & buttons) {
             m_step = 50;
             m_counter = 0;
         } else if (m_kheld & buttons) {
-            m_counter += m_step;
+            m_counter += m_step * delta;
 
             if (m_counter >= m_MAX) {
                 m_kdown |= m_kheld & buttons;
@@ -411,10 +411,10 @@ struct Controller {
     }
 
 private:
-    static constexpr int m_MAX = 1000;
-    static constexpr int m_MAX_STEP = 250;
-    int m_step = 50;
-    int m_counter = 0;
+    static constexpr double m_MAX = 1000;
+    static constexpr double m_MAX_STEP = 250;
+    double m_step = 50;
+    double m_counter = 0;
 };
 
 } // namespace sphaira
