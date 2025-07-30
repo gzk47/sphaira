@@ -31,6 +31,7 @@ struct MiscMenuEntry {
     const char* title;
     MiscMenuFunction func;
     u8 flag;
+    const char* info;
 
     auto IsShortcut() const -> bool {
         return flag & MiscMenuFlag_Shortcut;

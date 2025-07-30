@@ -325,7 +325,7 @@ public:
     option::OptionBool m_dump_append_folder_with_xci{"dump", "append_folder_with_xci", true};
     option::OptionBool m_dump_trim_xci{"dump", "trim_xci", false};
     option::OptionBool m_dump_label_trim_xci{"dump", "label_trim_xci", false};
-    option::OptionBool m_dump_usb_transfer_stream{"dump", "usb_transfer_stream", true};
+    option::OptionBool m_dump_usb_transfer_stream{"dump", "usb_transfer_stream", true, false};
     option::OptionBool m_dump_convert_to_common_ticket{"dump", "convert_to_common_ticket", true};
 
     // todo: move this into it's own menu

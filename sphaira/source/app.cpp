@@ -1619,11 +1619,13 @@ void App::DisplayThemeOptions(bool left_side) {
 
     options->Add<ui::SidebarEntryBool>("Music"_i18n, App::GetThemeMusicEnable(), [](bool& enable){
         App::SetThemeMusicEnable(enable);
-    });
+    },  "Enable background music.\n"\
+        "Each theme can have it's own music file."\
+        "If a theme does not set a music file, then /config/sphaira/themes/default_music.bfstm is loaded instead (if it exists)."_i18n);
 
     options->Add<ui::SidebarEntryBool>("12 Hour Time"_i18n, App::Get12HourTimeEnable(), [](bool& enable){
         App::Set12HourTimeEnable(enable);
-    });
+    }, "Changes the clock to 12 hour"_i18n);
 
     options->Add<ui::SidebarEntryCallback>("Download Default Music"_i18n, [](){
         // check if we already have music
@@ -1640,7 +1642,7 @@ void App::DisplayThemeOptions(bool left_side) {
         } else {
             download_default_music();
         }
-    });
+    },  "Downloads the default background music for sphaira to /config/sphaira/themes/default_music.bfstm"_i18n);
 }
 
 void App::DisplayNetworkOptions(bool left_side) {
@@ -1662,7 +1664,7 @@ void App::DisplayMiscOptions(bool left_side) {
 
         options->Add<ui::SidebarEntryCallback>(i18n::get(e.title), [e](){
             App::Push(e.func(ui::menu::MenuFlag_None));
-        });
+        }, i18n::get(e.info));
     }
 
     if (App::IsApplication()) {
@@ -1690,7 +1692,9 @@ void App::DisplayMiscOptions(bool left_side) {
                     }
                 }
             );
-        });
+        },
+        "Launch the built-in web browser.\n\n",
+        "NOTE: The browser is very limted, some websites will fail to load and there's a 30 minute timeout which closes the browser"_i18n);
     }
 }
 
@@ -1733,7 +1737,7 @@ void App::DisplayAdvancedOptions(bool left_side) {
 
     options->Add<ui::SidebarEntryArray>("Text scroll speed"_i18n, text_scroll_speed_items, [](s64& index_out){
         App::SetTextScrollSpeed(index_out);
-    }, App::GetTextScrollSpeed());
+    }, App::GetTextScrollSpeed(), "Change how fast the scrolling text updates"_i18n);
 
     options->Add<ui::SidebarEntryArray>("Set left-side menu"_i18n, menu_items, [menu_names](s64& index_out){
         const auto e = menu_names[index_out];
@@ -1750,7 +1754,7 @@ void App::DisplayAdvancedOptions(bool left_side) {
                 }
             );
         }
-    }, i18n::get(g_app->m_left_menu.Get()));
+    }, i18n::get(g_app->m_left_menu.Get()), "Set the menu that appears on the left tab."_i18n);
 
     options->Add<ui::SidebarEntryArray>("Set right-side menu"_i18n, menu_items, [menu_names](s64& index_out){
         const auto e = menu_names[index_out];
@@ -1767,15 +1771,16 @@ void App::DisplayAdvancedOptions(bool left_side) {
                 }
             );
         }
-    }, i18n::get(g_app->m_right_menu.Get()));
+    }, i18n::get(g_app->m_right_menu.Get()), "Set the menu that appears on the right tab."_i18n);
 
     options->Add<ui::SidebarEntryCallback>("Install options"_i18n, [left_side](){
         App::DisplayInstallOptions(left_side);
-    });
+    },  "Change the install options.\n"\
+        "You can enable installing from here."_i18n);
 
     options->Add<ui::SidebarEntryCallback>("Dump options"_i18n, [left_side](){
         App::DisplayDumpOptions(left_side);
-    });
+    },  "Change the dump options."_i18n);
 
     static const char* erpt_path = "/atmosphere/erpt_reports";
     options->Add<ui::SidebarEntryBool>("Disable erpt_reports"_i18n, fs::FsNativeSd().FileExists(erpt_path), [](bool& enable){
@@ -1891,12 +1896,31 @@ void App::DisplayDumpOptions(bool left_side) {
     auto options = std::make_unique<ui::Sidebar>("Dump Options"_i18n, left_side ? ui::Sidebar::Side::LEFT : ui::Sidebar::Side::RIGHT);
     ON_SCOPE_EXIT(App::Push(std::move(options)));
 
-    options->Add<ui::SidebarEntryBool>("Created nested folder"_i18n, App::GetApp()->m_dump_app_folder);
-    options->Add<ui::SidebarEntryBool>("Append folder with .xci"_i18n, App::GetApp()->m_dump_append_folder_with_xci);
-    options->Add<ui::SidebarEntryBool>("Trim XCI"_i18n, App::GetApp()->m_dump_trim_xci);
-    options->Add<ui::SidebarEntryBool>("Label trimmed XCI"_i18n, App::GetApp()->m_dump_label_trim_xci);
-    options->Add<ui::SidebarEntryBool>("Multi-threaded USB transfer"_i18n, App::GetApp()->m_dump_usb_transfer_stream);
-    options->Add<ui::SidebarEntryBool>("Convert to common ticket"_i18n, App::GetApp()->m_dump_convert_to_common_ticket);
+    options->Add<ui::SidebarEntryBool>(
+        "Created nested folder"_i18n, App::GetApp()->m_dump_app_folder,
+        "Creates a folder using the name of the game.\n"\
+        "For example, /dumps/XCI/name/name.xci"\
+        "Disabling this would use /dumps/XCI/name.xci"_i18n
+    );
+    options->Add<ui::SidebarEntryBool>(
+        "Append folder with .xci"_i18n, App::GetApp()->m_dump_append_folder_with_xci,
+        "XCI dumps will name the folder with the .xci extension.\n"\
+        "For example, /dumps/XCI/name.xci/name.xci\n\n"
+        "Some devices only function is the xci folder is named exactly the same as the xci."_i18n
+    );
+    options->Add<ui::SidebarEntryBool>(
+        "Trim XCI"_i18n, App::GetApp()->m_dump_trim_xci,
+        "Removes the unused data at the end of the XCI, making the output smaller."_i18n
+    );
+    options->Add<ui::SidebarEntryBool>(
+        "Label trimmed XCI"_i18n, App::GetApp()->m_dump_label_trim_xci,
+        "Names the trimmed xci.\n"
+        "For example, /dumps/XCI/name/name (trimmed).xci"_i18n
+    );
+    options->Add<ui::SidebarEntryBool>(
+        "Convert to common ticket"_i18n, App::GetApp()->m_dump_convert_to_common_ticket,
+        "Converts personalised ticket to a fake common ticket."_i18n
+    );
 }
 
 App::~App() {
