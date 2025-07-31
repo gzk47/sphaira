@@ -12,16 +12,45 @@ namespace sphaira::ui {
 
 class SidebarEntryBase : public Widget {
 public:
+    using DependsCallback = std::function<bool(void)>;
+
+public:
     explicit SidebarEntryBase(const std::string& title, const std::string& info);
 
     using Widget::Draw;
     virtual void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left);
 
+    void Depends(const DependsCallback& callback, const std::string& depends_info) {
+        m_depends_callback = callback;
+        m_depends_info = depends_info;
+    }
+
+    void Depends(bool& value, const std::string& depends_info) {
+        m_depends_callback = [&value](){ return value; };
+        m_depends_info = depends_info;
+    }
+
+    void Depends(option::OptionBool& value, const std::string& depends_info) {
+        m_depends_callback = [&value](){ return value.Get(); };
+        m_depends_info = depends_info;
+    }
+
+protected:
+    auto IsEnabled() -> bool {
+        if (m_depends_callback) {
+            return m_depends_callback();
+        }
+
+        return true;
+    }
+
 protected:
     std::string m_title;
 
 private:
-    std::string m_info;
+    std::string m_info{};
+    std::string m_depends_info{};
+    DependsCallback m_depends_callback{};
     ScrollingText m_scolling_title{};
 };
 
@@ -101,11 +130,11 @@ public:
     auto OnFocusGained() noexcept -> void override;
     auto OnFocusLost() noexcept -> void override;
 
-    void Add(std::unique_ptr<SidebarEntryBase>&& entry);
+    auto Add(std::unique_ptr<SidebarEntryBase>&& entry) -> SidebarEntryBase*;
 
     template<DerivedFromSidebarBase T, typename... Args>
-    void Add(Args&&... args) {
-        Add(std::make_unique<T>(std::forward<Args>(args)...));
+    auto Add(Args&&... args) -> SidebarEntryBase* {
+        return Add(std::make_unique<T>(std::forward<Args>(args)...));
     }
 
 private:

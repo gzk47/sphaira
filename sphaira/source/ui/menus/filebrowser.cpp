@@ -359,7 +359,7 @@ FsView::FsView(Menu* menu, const fs::FsPath& path, const FsEntry& entry, ViewSid
                                 nro_launch(GetNewPathCurrent());
                             }
                         });
-                } else if (App::GetInstallEnable() && IsExtension(entry.GetExtension(), INSTALL_EXTENSIONS)) {
+                } else if (IsExtension(entry.GetExtension(), INSTALL_EXTENSIONS)) {
                     InstallFiles();
                 } else if (IsSd()) {
                     const auto assoc_list = m_menu->FindFileAssocFor();
@@ -703,6 +703,16 @@ void FsView::InstallForwarder() {
 }
 
 void FsView::InstallFiles() {
+    if (!App::GetInstallEnable()) {
+        App::Push<ui::OptionBox>(
+            "Install disabled...\n"
+            "Please enable installing via the install options."_i18n,
+            "OK"_i18n
+        );
+
+        return;
+    }
+
     const auto targets = GetSelectedEntries();
 
     App::Push<OptionBox>("Install Selected files?"_i18n, "No"_i18n, "Yes"_i18n, 0, [this, targets](auto op_index){
@@ -1674,17 +1684,18 @@ void FsView::DisplayOptions() {
     };
 
     // if install is enabled, check if all currently selected files are installable.
-    if (m_entries_current.size() && App::GetInstallEnable()) {
+    if (m_entries_current.size()) {
         if (check_all_ext(INSTALL_EXTENSIONS)) {
-            options->Add<SidebarEntryCallback>("Install"_i18n, [this](){
+            auto entry = options->Add<SidebarEntryCallback>("Install"_i18n, [this](){
                 InstallFiles();
             });
+            entry->Depends(App::GetInstallEnable, i18n::get(App::INSTALL_DEPENDS_STR));
         }
     }
 
     if (IsSd() && m_entries_current.size() && !m_selected_count) {
-        if (App::GetInstallEnable() && GetEntry().IsFile() && (IsSamePath(GetEntry().GetExtension(), "nro") || !m_menu->FindFileAssocFor().empty())) {
-            options->Add<SidebarEntryCallback>("Install Forwarder"_i18n, [this](){;
+        if (GetEntry().IsFile() && (IsSamePath(GetEntry().GetExtension(), "nro") || !m_menu->FindFileAssocFor().empty())) {
+            auto entry = options->Add<SidebarEntryCallback>("Install Forwarder"_i18n, [this](){;
                 if (App::GetInstallPrompt()) {
                     App::Push<OptionBox>(
                         "WARNING: Installing forwarders will lead to a ban!"_i18n,
@@ -1698,6 +1709,7 @@ void FsView::DisplayOptions() {
                     InstallForwarder();
                 }
             });
+            entry->Depends(App::GetInstallEnable, i18n::get(App::INSTALL_DEPENDS_STR));
         }
     }
 

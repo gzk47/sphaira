@@ -1658,13 +1658,15 @@ void App::DisplayMiscOptions(bool left_side) {
             continue;
         } else if (e.name == g_app->m_right_menu.Get()) {
             continue;
-        } else if (e.IsInstall() && !App::GetInstallEnable()) {
-            continue;
         }
 
-        options->Add<ui::SidebarEntryCallback>(i18n::get(e.title), [e](){
+        auto entry = options->Add<ui::SidebarEntryCallback>(i18n::get(e.title), [e](){
             App::Push(e.func(ui::menu::MenuFlag_None));
         }, i18n::get(e.info));
+
+        if (e.IsInstall()) {
+            entry->Depends(App::GetInstallEnable, i18n::get(App::INSTALL_DEPENDS_STR));
+        }
     }
 
     if (App::IsApplication()) {
@@ -1711,10 +1713,6 @@ void App::DisplayAdvancedOptions(bool left_side) {
     ui::SidebarEntryArray::Items menu_items;
     for (auto& e : ui::menu::main::GetMiscMenuEntries()) {
         if (!e.IsShortcut()) {
-            continue;
-        }
-
-        if (e.IsInstall() && !App::GetInstallEnable()) {
             continue;
         }
 

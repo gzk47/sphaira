@@ -339,6 +339,10 @@ public:
 
     double m_delta_time{};
 
+    static constexpr const char* INSTALL_DEPENDS_STR =
+        "Installing is disabled.\n\n"
+        "Enable in the options by selecting Menu (Y) -> Advanced -> Install options -> Enable.";
+
 private: // from nanovg decko3d example by adubbz
     static constexpr unsigned NumFramebuffers = 2;
     static constexpr unsigned StaticCmdSize = 0x1000;

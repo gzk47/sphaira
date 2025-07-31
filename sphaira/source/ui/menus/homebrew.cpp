@@ -123,22 +123,22 @@ Menu::Menu() : grid::Menu{"Homebrew"_i18n, MenuFlag_Tab} {
                     );
                 }, true);
 
-                if (App::GetInstallEnable()) {
-                    options->Add<SidebarEntryCallback>("Install Forwarder"_i18n, [this](){
-                        if (App::GetInstallPrompt()) {
-                            App::Push<OptionBox>(
-                                "WARNING: Installing forwarders will lead to a ban!"_i18n,
-                                "Back"_i18n, "Install"_i18n, 0, [this](auto op_index){
-                                    if (op_index && *op_index) {
-                                        InstallHomebrew();
-                                    }
-                                }, m_entries[m_index].image
-                            );
-                        } else {
-                            InstallHomebrew();
-                        }
-                    }, true);
-                }
+                auto forwarder_entry = options->Add<SidebarEntryCallback>("Install Forwarder"_i18n, [this](){
+                    if (App::GetInstallPrompt()) {
+                        App::Push<OptionBox>(
+                            "WARNING: Installing forwarders will lead to a ban!"_i18n,
+                            "Back"_i18n, "Install"_i18n, 0, [this](auto op_index){
+                                if (op_index && *op_index) {
+                                    InstallHomebrew();
+                                }
+                            }, m_entries[m_index].image
+                        );
+                    } else {
+                        InstallHomebrew();
+                    }
+                }, true);
+
+                forwarder_entry->Depends(App::GetInstallEnable, i18n::get(App::INSTALL_DEPENDS_STR));
             }
         }})
     );
