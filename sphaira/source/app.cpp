@@ -1621,7 +1621,7 @@ void App::DisplayThemeOptions(bool left_side) {
         App::SetThemeMusicEnable(enable);
     },  "Enable background music.\n"\
         "Each theme can have it's own music file. "\
-        "If a theme does not set a music file, then /config/sphaira/themes/default_music.bfstm is loaded instead (if it exists)."_i18n);
+        "If a theme does not set a music file, the default music is loaded instead (if it exists)."_i18n);
 
     options->Add<ui::SidebarEntryBool>("12 Hour Time"_i18n, App::Get12HourTimeEnable(), [](bool& enable){
         App::Set12HourTimeEnable(enable);
@@ -1642,7 +1642,7 @@ void App::DisplayThemeOptions(bool left_side) {
         } else {
             download_default_music();
         }
-    },  "Downloads the default background music for sphaira to /config/sphaira/themes/default_music.bfstm"_i18n);
+    },  "Downloads the default background music for sphaira."_i18n);
 }
 
 void App::DisplayNetworkOptions(bool left_side) {
