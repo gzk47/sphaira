@@ -1620,7 +1620,7 @@ void App::DisplayThemeOptions(bool left_side) {
     options->Add<ui::SidebarEntryBool>("Music"_i18n, App::GetThemeMusicEnable(), [](bool& enable){
         App::SetThemeMusicEnable(enable);
     },  "Enable background music.\n"\
-        "Each theme can have it's own music file."\
+        "Each theme can have it's own music file. "\
         "If a theme does not set a music file, then /config/sphaira/themes/default_music.bfstm is loaded instead (if it exists)."_i18n);
 
     options->Add<ui::SidebarEntryBool>("12 Hour Time"_i18n, App::Get12HourTimeEnable(), [](bool& enable){

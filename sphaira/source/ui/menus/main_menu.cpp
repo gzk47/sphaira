@@ -54,50 +54,50 @@ const MiscMenuEntry MISC_MENU_ENTRIES[] = {
         "Internet connection required." },
 
     { .name = "Games", .title = "Games", .func = MiscMenuFuncGenerator<ui::menu::game::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
-        "View all installed games."\
+        "View all installed games. "\
         "In this menu you can launch, backup, create savedata and much more." },
 
     { .name = "FileBrowser", .title = "FileBrowser", .func = MiscMenuFuncGenerator<ui::menu::filebrowser::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
-        "Browse files on you SD Card."\
+        "Browse files on you SD Card. "\
         "You can move, copy, delete, extract zip, create zip, upload and much more.\n\n"\
         "A connected USB/HDD can be opened by mounting it in the advanced options." },
 
     { .name = "Saves", .title = "Saves", .func = MiscMenuFuncGenerator<ui::menu::save::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
-        "View save data for each user."\
-        "You can backup and restore saves."\
+        "View save data for each user. "\
+        "You can backup and restore saves.\n\n"\
         "Experimental support for backing up system saves is possible." },
 
     { .name = "Themezer", .title = "Themezer", .func = MiscMenuFuncGenerator<ui::menu::themezer::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
-        "Download themes from https://themezer.net."\
-        "Themes are downloaded to /themes/sphaira"\
+        "Download themes from themezer.net. "\
+        "Themes are downloaded to /themes/sphaira\n"\
         "To install the themes, NXThemesInstaller needs to be installed (can be downloaded via the AppStore)." },
 
     { .name = "GitHub", .title = "GitHub", .func = MiscMenuFuncGenerator<ui::menu::gh::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
-        "Download releases directly from GitHub."\
+        "Download releases directly from GitHub. "\
         "Custom entries can be added to /config/sphaira/github" },
 
 #if ENABLE_NETWORK_INSTALL
     { .name = "FTP", .title = "FTP Install", .func = MiscMenuFuncGenerator<ui::menu::ftp::Menu>, .flag = MiscMenuFlag_Install, .info =
         "Install apps via FTP.\n\n"\
-        "NOTE: This feature does not always work, use at your own risk."\
+        "NOTE: This feature does not always work, use at your own risk. "\
         "If you encounter an issue, do not open an issue, it will not be fixed." },
 
     { .name = "MTP", .title = "MTP Install", .func = MiscMenuFuncGenerator<ui::menu::mtp::Menu>, .flag = MiscMenuFlag_Install, .info =
         "Install apps via MTP.\n\n"\
-        "NOTE: This feature does not always work, use at your own risk."\
+        "NOTE: This feature does not always work, use at your own risk. "\
         "If you encounter an issue, do not open an issue, it will not be fixed." },
 
     { .name = "USB", .title = "USB Install", .func = MiscMenuFuncGenerator<ui::menu::usb::Menu>, .flag = MiscMenuFlag_Install, .info =
         "Install apps via USB.\n\n"\
         "A USB client is required on PC, such as ns-usbloader and fluffy.\n\n"\
-        "NOTE: This feature does not always work, use at your own risk."\
+        "NOTE: This feature does not always work, use at your own risk. "\
         "If you encounter an issue, do not open an issue, it will not be fixed." },
 
 #endif
     { .name = "GameCard", .title = "GameCard", .func = MiscMenuFuncGenerator<ui::menu::gc::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
-        "View info on the inserted Game Card (GC)."\
-        "You can backup and install the inserted GC."\
-        "To swap GC's, simply remove the old GC and insert the new one."\
+        "View info on the inserted Game Card (GC). "\
+        "You can backup and install the inserted GC. "\
+        "To swap GC's, simply remove the old GC and insert the new one. "\
         "You do not need to exit the menu." },
 
     { .name = "IRS", .title = "IRS (Infrared Joycon Camera)", .func = MiscMenuFuncGenerator<ui::menu::irs::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
@@ -329,7 +329,7 @@ MainMenu::MainMenu() {
                 options->Add<SidebarEntryBool>("Ftp"_i18n, App::GetFtpEnable(), [](bool& enable){
                     App::SetFtpEnable(enable);
                 },  "Enable FTP server to run in the background.\n\n"\
-                    "The default port is 5000 with no user/pass set.\n"\
+                    "The default port is 5000 with no user/pass set. "\
                     "You can change this behaviour in /config/ftpsrv/config.ini"_i18n);
 
                 options->Add<SidebarEntryBool>("Mtp"_i18n, App::GetMtpEnable(), [](bool& enable){
@@ -338,13 +338,13 @@ MainMenu::MainMenu() {
 
                 options->Add<SidebarEntryBool>("Nxlink"_i18n, App::GetNxlinkEnable(), [](bool& enable){
                     App::SetNxlinkEnable(enable);
-                },  "Enable NXlink server to run in the background."\
+                },  "Enable NXlink server to run in the background. "\
                     "NXlink is used to send .nro's from PC to the switch\n\n"\
                     "If you are not a developer, you can disable this option."_i18n);
 
                 options->Add<SidebarEntryBool>("Hdd"_i18n, App::GetHddEnable(), [](bool& enable){
                     App::SetHddEnable(enable);
-                },  "Enable mounting of connected USB/HDD devices."\
+                },  "Enable mounting of connected USB/HDD devices. "\
                     "Connected devices can be used in the FileBrowser, as well as a backup location when dumping games and saves."_i18n);
 
                 options->Add<SidebarEntryBool>("Hdd write protect"_i18n, App::GetWriteProtect(), [](bool& enable){
@@ -358,7 +358,7 @@ MainMenu::MainMenu() {
             }, (s64)App::GetLanguage(),
                 "Change the language.\n\n"
                 "If your language isn't found, or translations are missing, please consider opening a PR at "\
-                "https://github.com/ITotalJustice/sphaira/pulls"_i18n);
+                "github.com/ITotalJustice/sphaira"_i18n);
 
             options->Add<SidebarEntryCallback>("Misc"_i18n, [](){
                 App::DisplayMiscOptions();
@@ -366,7 +366,7 @@ MainMenu::MainMenu() {
 
             options->Add<SidebarEntryCallback>("Advanced"_i18n, [](){
                 App::DisplayAdvancedOptions();
-            },  "Change the advanced options."\
+            },  "Change the advanced options. "\
                 "Please view the info boxes to better understand each option."_i18n);
         }}
     ));
