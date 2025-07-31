@@ -190,7 +190,7 @@ FetchContent_Declare(yyjson
 
 FetchContent_Declare(minIni
     GIT_REPOSITORY https://github.com/ITotalJustice/minIni-nx.git
-    GIT_TAG 11cac8b
+    GIT_TAG 6e952b6
 )
 
 FetchContent_Declare(zstd
