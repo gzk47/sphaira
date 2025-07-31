@@ -360,9 +360,9 @@ bool Init() {
         .func = &g_vfs_install,
     };
 
-    vfs_nx_init(&custom, mount_devices, save_writable, mount_bis);
+    vfs_nx_init(&custom, mount_devices, save_writable, mount_bis, false);
 #else
-    vfs_nx_init(NULL, mount_devices, save_writable, mount_bis);
+    vfs_nx_init(NULL, mount_devices, save_writable, mount_bis, false);
 #endif
 
     Result rc;

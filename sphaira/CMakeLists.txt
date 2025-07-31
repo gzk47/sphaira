@@ -159,14 +159,13 @@ set(FETCHCONTENT_QUIET FALSE)
 
 FetchContent_Declare(ftpsrv
     GIT_REPOSITORY https://github.com/ITotalJustice/ftpsrv.git
-    # GIT_TAG 1.2.2
-    GIT_TAG 8782f6b
+    GIT_TAG 85b3cf0
     SOURCE_SUBDIR NONE
 )
 
 FetchContent_Declare(libhaze
     GIT_REPOSITORY https://github.com/ITotalJustice/libhaze.git
-    GIT_TAG 1f11184
+    GIT_TAG 0be1523
 )
 
 FetchContent_Declare(libpulsar

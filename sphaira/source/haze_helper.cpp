@@ -27,7 +27,7 @@ struct InstallSharedData {
 };
 #endif
 
-constexpr int THREAD_PRIO = PRIO_PREEMPTIVE;
+constexpr int THREAD_PRIO = 0x20;
 constexpr int THREAD_CORE = 2;
 std::atomic_bool g_should_exit = false;
 bool g_is_running{false};
