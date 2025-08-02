@@ -252,19 +252,17 @@ SidebarEntryTextBase::SidebarEntryTextBase(const std::string& title, const std::
 void SidebarEntryTextBase::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) {
     SidebarEntryBase::Draw(vg, theme, root_pos, left);
     SidebarEntryBase::DrawEntry(vg, theme, m_title, m_value, true);
-
-    // const auto colour_id = IsEnabled() ? ThemeEntryID_TEXT : ThemeEntryID_TEXT_INFO;
-    // const auto max_w = m_pos.w - 15.f * 2;
-
-    // m_scolling_title.Draw(vg, HasFocus(), m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f), max_w, 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(colour_id), m_title);
 }
 
-SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide, const std::string& info)
-: SidebarEntryTextBase{title, value, {}, info}, m_guide{guide} {
+SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide, s64 len_min, s64 len_max, const std::string& info)
+: SidebarEntryTextBase{title, value, {}, info}
+, m_guide{guide}
+, m_len_min{len_min}
+, m_len_max{len_max} {
 
     SetCallback([this](){
         std::string out;
-        if (R_SUCCEEDED(swkbd::ShowText(out, m_guide.c_str(), GetValue().c_str()))) {
+        if (R_SUCCEEDED(swkbd::ShowText(out, m_guide.c_str(), GetValue().c_str(), m_len_min, m_len_max))) {
             SetValue(out);
         }
     });
@@ -347,30 +345,6 @@ auto Sidebar::Update(Controller* controller, TouchInfo* touch) -> void {
 }
 
 auto Sidebar::Draw(NVGcontext* vg, Theme* theme) -> void {
-    // Vec4 info_box{};
-    // info_box.y = m_top_bar.y;
-    // info_box.w = 300;
-    // info_box.h = 250;
-
-    // if (m_side == Side::LEFT) {
-    //     info_box.x = m_pos.x + m_pos.w + 10;
-    // } else {
-    //     info_box.x = m_pos.x - info_box.w - 10;
-    // }
-
-    // const float info_pad = 30;
-    // const float info_font_size = 18;
-    // const char* msg = "Skips verifying the nca header signature";
-    // float bounds[4];
-    // nvgFontSize(vg, info_font_size);
-    // nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-    // nvgTextLineHeight(vg, 1.7);
-    // nvgTextBoxBounds(vg, info_box.x + info_pad, info_box.y + info_pad, info_box.w - info_pad * 2, msg, nullptr, bounds);
-    // info_box.h = info_pad * 2 + bounds[3] - bounds[1];
-
-    // gfx::drawRect(vg, info_box, theme->GetColour(ThemeEntryID_SIDEBAR), 5);
-    // gfx::drawTextBox(vg, bounds[0], bounds[1], info_font_size, info_box.w - info_pad * 2, theme->GetColour(ThemeEntryID_TEXT), msg);
-
     gfx::drawRect(vg, m_pos, theme->GetColour(ThemeEntryID_SIDEBAR));
     gfx::drawText(vg, m_title_pos, m_title_size, theme->GetColour(ThemeEntryID_TEXT), m_title.c_str());
     if (!m_sub.empty()) {

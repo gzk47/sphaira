@@ -140,7 +140,7 @@ public:
         m_callback = cb;
     }
 
-    auto GetValue() const {
+    auto GetValue() const -> const std::string& {
         return m_value;
     }
 
@@ -155,14 +155,12 @@ private:
 
 class SidebarEntryTextInput final : public SidebarEntryTextBase {
 public:
-    explicit SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide = {}, const std::string& info = "");
-
-    void SetGuide(const std::string& guide) {
-        m_guide = guide;
-    }
+    explicit SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide = {}, s64 len_min = -1, s64 len_max = FS_MAX_PATH, const std::string& info = "");
 
 private:
-    std::string m_guide;
+    const std::string m_guide;
+    const s64 m_len_min;
+    const s64 m_len_max;
 };
 
 class SidebarEntryFilePicker final : public SidebarEntryTextBase {
@@ -178,7 +176,7 @@ private:
     std::vector<std::string> m_filter{};
 };
 
-class Sidebar final : public Widget {
+class Sidebar : public Widget {
 public:
     enum class Side { LEFT, RIGHT };
     using Items = std::vector<std::unique_ptr<SidebarEntryBase>>;
@@ -197,8 +195,8 @@ public:
     auto Add(std::unique_ptr<SidebarEntryBase>&& entry) -> SidebarEntryBase*;
 
     template<DerivedFromSidebarBase T, typename... Args>
-    auto Add(Args&&... args) -> SidebarEntryBase* {
-        return Add(std::make_unique<T>(std::forward<Args>(args)...));
+    auto Add(Args&&... args) -> T* {
+        return (T*)Add(std::make_unique<T>(std::forward<Args>(args)...));
     }
 
 private:

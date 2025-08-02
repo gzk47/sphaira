@@ -843,7 +843,7 @@ auto install_forwader_internal(ui::ProgressBox* pbox, OwoConfig& config, NcmStor
     pbox->SetImageDataConst(config.icon);
 
     R_UNLESS(!config.nro_path.empty(), Result_OwoBadArgs);
-    // R_UNLESS(!config.icon.empty(), OwoError_BadArgs);
+    R_UNLESS(!config.icon.empty(), Result_OwoBadArgs);
 
     R_TRY(splCryptoInitialize());
     ON_SCOPE_EXIT(splCryptoExit());
