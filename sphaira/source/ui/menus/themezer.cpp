@@ -397,59 +397,7 @@ Menu::Menu(u32 flags) : MenuBase{"Themezer"_i18n, flags} {
             );
         }}),
         std::make_pair(Button::X, Action{"Options"_i18n, [this](){
-            auto options = std::make_unique<Sidebar>("Themezer Options"_i18n, Sidebar::Side::RIGHT);
-            ON_SCOPE_EXIT(App::Push(std::move(options)));
-
-            SidebarEntryArray::Items sort_items;
-            sort_items.push_back("Downloads"_i18n);
-            sort_items.push_back("Updated"_i18n);
-            sort_items.push_back("Likes"_i18n);
-            sort_items.push_back("ID"_i18n);
-
-            SidebarEntryArray::Items order_items;
-            order_items.push_back("Descending (down)"_i18n);
-            order_items.push_back("Ascending (Up)"_i18n);
-
-            options->Add<SidebarEntryBool>("Nsfw"_i18n, m_nsfw.Get(), [this](bool& v_out){
-                m_nsfw.Set(v_out);
-                InvalidateAllPages();
-            });
-
-            options->Add<SidebarEntryArray>("Sort"_i18n, sort_items, [this, sort_items](s64& index_out){
-                if (m_sort.Get() != index_out) {
-                    m_sort.Set(index_out);
-                    InvalidateAllPages();
-                }
-            }, m_sort.Get());
-
-            options->Add<SidebarEntryArray>("Order"_i18n, order_items, [this, order_items](s64& index_out){
-                if (m_order.Get() != index_out) {
-                    m_order.Set(index_out);
-                    InvalidateAllPages();
-                }
-            }, m_order.Get());
-
-            options->Add<SidebarEntryCallback>("Page"_i18n, [this](){
-                s64 out;
-                if (R_SUCCEEDED(swkbd::ShowNumPad(out, "Enter Page Number"_i18n.c_str(), nullptr, -1, 3))) {
-                    if (out < m_page_index_max) {
-                        m_page_index = out;
-                        PackListDownload();
-                    } else {
-                        log_write("invalid page number\n");
-                        App::Notify("Bad Page"_i18n);
-                    }
-                }
-            });
-
-            options->Add<SidebarEntryCallback>("Search"_i18n, [this](){
-                std::string out;
-                if (R_SUCCEEDED(swkbd::ShowText(out)) && !out.empty()) {
-                    m_search = out;
-                    // PackListDownload();
-                    InvalidateAllPages();
-                }
-            });
+            DisplayOptions();
         }}),
         std::make_pair(Button::R2, Action{"Next"_i18n, [this](){
             m_page_index++;
@@ -709,6 +657,69 @@ void Menu::PackListDownload() {
             log_write("a.pagination.page_count: %zu\n", a.pagination.page_count);
         }
     });
+}
+
+void Menu::DisplayOptions() {
+    auto options = std::make_unique<Sidebar>("Themezer Options"_i18n, Sidebar::Side::RIGHT);
+    ON_SCOPE_EXIT(App::Push(std::move(options)));
+
+    SidebarEntryArray::Items sort_items;
+    sort_items.push_back("Downloads"_i18n);
+    sort_items.push_back("Updated"_i18n);
+    sort_items.push_back("Likes"_i18n);
+    sort_items.push_back("ID"_i18n);
+
+    SidebarEntryArray::Items order_items;
+    order_items.push_back("Descending (down)"_i18n);
+    order_items.push_back("Ascending (Up)"_i18n);
+
+    options->Add<SidebarEntryBool>("Nsfw"_i18n, m_nsfw.Get(), [this](bool& v_out){
+        m_nsfw.Set(v_out);
+        InvalidateAllPages();
+    });
+
+    options->Add<SidebarEntryArray>("Sort"_i18n, sort_items, [this, sort_items](s64& index_out){
+        if (m_sort.Get() != index_out) {
+            m_sort.Set(index_out);
+            InvalidateAllPages();
+        }
+    }, m_sort.Get());
+
+    options->Add<SidebarEntryArray>("Order"_i18n, order_items, [this, order_items](s64& index_out){
+        if (m_order.Get() != index_out) {
+            m_order.Set(index_out);
+            InvalidateAllPages();
+        }
+    }, m_order.Get());
+
+    options->Add<SidebarEntryCallback>("Page"_i18n, [this](){
+        s64 out;
+        if (R_SUCCEEDED(swkbd::ShowNumPad(out, "Enter Page Number"_i18n.c_str(), nullptr, -1, 3))) {
+            if (out < m_page_index_max) {
+                m_page_index = out;
+                PackListDownload();
+            } else {
+                log_write("invalid page number\n");
+                App::Notify("Bad Page"_i18n);
+            }
+        }
+    });
+
+    options->Add<SidebarEntryCallback>("Search"_i18n, [this](){
+        std::string out;
+        if (R_SUCCEEDED(swkbd::ShowText(out)) && !out.empty()) {
+            m_search = out;
+            // PackListDownload();
+            InvalidateAllPages();
+        }
+    });
+
+    if (HasNro()) {
+        options->Add<SidebarEntryCallback>("Launch NXthemes_Installer.nro"_i18n, [](){
+            const auto rc = nro_launch(GetNroPath());
+            App::PushErrorBox(rc, "Failed to launch NXthemes_Installer.nro"_i18n);
+        });
+    }
 }
 
 } // namespace sphaira::ui::menu::themezer
