@@ -661,10 +661,6 @@ auto App::GetInstallSdEnable() -> bool {
     return g_app->m_install_sd.Get();
 }
 
-auto App::GetInstallPrompt() -> bool {
-    return g_app->m_install_prompt.Get();
-}
-
 auto App::GetThemeMusicEnable() -> bool {
     return g_app->m_theme_music.Get();
 }
@@ -847,10 +843,6 @@ void App::SetInstallEmummcEnable(bool enable) {
 
 void App::SetInstallSdEnable(bool enable) {
     g_app->m_install_sd.Set(enable);
-}
-
-void App::SetInstallPrompt(bool enable) {
-    g_app->m_install_prompt.Set(enable);
 }
 
 void App::SetThemeMusicEnable(bool enable) {
@@ -1336,7 +1328,6 @@ App::App(const char* argv0) {
             else if (app->m_install_sysmmc.LoadFrom(Key, Value)) {}
             else if (app->m_install_emummc.LoadFrom(Key, Value)) {}
             else if (app->m_install_sd.LoadFrom(Key, Value)) {}
-            else if (app->m_install_prompt.LoadFrom(Key, Value)) {}
             else if (app->m_progress_boost_mode.LoadFrom(Key, Value)) {}
             else if (app->m_allow_downgrade.LoadFrom(Key, Value)) {}
             else if (app->m_skip_if_already_installed.LoadFrom(Key, Value)) {}
@@ -1665,7 +1656,7 @@ void App::DisplayMiscOptions(bool left_side) {
         }, i18n::get(e.info));
 
         if (e.IsInstall()) {
-            entry->Depends(App::GetInstallEnable, i18n::get(App::INSTALL_DEPENDS_STR));
+            entry->Depends(App::GetInstallEnable, i18n::get(App::INSTALL_DEPENDS_STR), App::ShowEnableInstallPrompt);
         }
     }
 
@@ -1809,15 +1800,12 @@ void App::DisplayInstallOptions(bool left_side) {
     install_items.push_back("microSD card"_i18n);
 
     options->Add<ui::SidebarEntryBool>("Enable sysmmc"_i18n, App::GetInstallSysmmcEnable(), [](bool& enable){
-        App::SetInstallSysmmcEnable(enable);
+        ShowEnableInstallPromptOption(g_app->m_install_sysmmc, enable);
     }, "Enables installing whilst in sysMMC mode."_i18n);
 
     options->Add<ui::SidebarEntryBool>("Enable emummc"_i18n, App::GetInstallEmummcEnable(), [](bool& enable){
-        App::SetInstallEmummcEnable(enable);
+        ShowEnableInstallPromptOption(g_app->m_install_emummc, enable);
     }, "Enables installing whilst in emuMMC mode."_i18n);
-
-    options->Add<ui::SidebarEntryBool>("Show install warning"_i18n, App::GetApp()->m_install_prompt,
-        "When enabled, a warning is show when attempting to install a forwarder."_i18n);
 
     options->Add<ui::SidebarEntryArray>("Install location"_i18n, install_items, [](s64& index_out){
         App::SetInstallSdEnable(index_out);
@@ -1919,6 +1907,44 @@ void App::DisplayDumpOptions(bool left_side) {
         "Convert to common ticket"_i18n, App::GetApp()->m_dump_convert_to_common_ticket,
         "Converts personalised ticket to a fake common ticket."_i18n
     );
+}
+
+void App::ShowEnableInstallPrompt() {
+    // warn the user the dangers of installing.
+    App::Push<ui::OptionBox>(
+        "Installing is disabled, enable now?"_i18n,
+        "Back"_i18n, "Enable"_i18n, 0, [](auto op_index){
+            if (op_index && *op_index) {
+                // get the install option based on sysmmc/emummc.
+                auto& option = IsEmummc() ? g_app->m_install_emummc : g_app->m_install_sysmmc;
+
+                // dummy ref.
+                static bool enable{};
+                enable = true;
+
+                return ShowEnableInstallPromptOption(option, enable);
+            }
+        }
+    );
+}
+
+void App::ShowEnableInstallPromptOption(option::OptionBool& option, bool& enable) {
+    if (enable) {
+        // warn the user the dangers of installing.
+        App::Push<ui::OptionBox>(
+            "WARNING: Installing apps will lead to a ban!"_i18n,
+            "Back"_i18n, "Enable"_i18n, 0, [&option, &enable](auto op_index){
+                if (op_index && *op_index) {
+                    option.Set(true);
+                    App::Notify("Installing enabled!"_i18n);
+                } else {
+                    enable = false;
+                }
+            }
+        );
+    } else {
+        option.Set(false);
+    }
 }
 
 App::~App() {

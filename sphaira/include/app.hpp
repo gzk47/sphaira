@@ -103,7 +103,6 @@ public:
     static auto GetInstallSysmmcEnable() -> bool;
     static auto GetInstallEmummcEnable() -> bool;
     static auto GetInstallSdEnable() -> bool;
-    static auto GetInstallPrompt() -> bool;
     static auto GetThemeMusicEnable() -> bool;
     static auto Get12HourTimeEnable() -> bool;
     static auto GetLanguage() -> long;
@@ -137,6 +136,11 @@ public:
     static void DisplayAdvancedOptions(bool left_side = true);
     static void DisplayInstallOptions(bool left_side = true);
     static void DisplayDumpOptions(bool left_side = true);
+
+    // helper for sidebar options to toggle install on/off
+    static void ShowEnableInstallPromptOption(option::OptionBool& option, bool& enable);
+    // displays an option box to enable installing, shows warning.
+    static void ShowEnableInstallPrompt();
 
     void Draw();
     void Update();
@@ -302,7 +306,6 @@ public:
     option::OptionBool m_install_sysmmc{INI_SECTION, "install_sysmmc", false};
     option::OptionBool m_install_emummc{INI_SECTION, "install_emummc", false};
     option::OptionBool m_install_sd{INI_SECTION, "install_sd", true};
-    option::OptionBool m_install_prompt{INI_SECTION, "install_prompt", true};
     option::OptionBool m_allow_downgrade{INI_SECTION, "allow_downgrade", false};
     option::OptionBool m_skip_if_already_installed{INI_SECTION, "skip_if_already_installed", true};
     option::OptionBool m_ticket_only{INI_SECTION, "ticket_only", false};

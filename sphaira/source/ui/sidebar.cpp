@@ -93,7 +93,9 @@ SidebarEntryBool::SidebarEntryBool(const std::string& title, bool option, Callba
     }
 
     SetAction(Button::A, Action{"OK"_i18n, [this](){
-        if (IsEnabled()) {
+        if (!IsEnabled()) {
+            DependsClick();
+        } else {
             m_option ^= 1;
             m_callback(m_option);
         } }
@@ -144,7 +146,9 @@ SidebarEntryCallback::SidebarEntryCallback(const std::string& title, Callback cb
 , m_callback{cb}
 , m_pop_on_click{pop_on_click} {
     SetAction(Button::A, Action{"OK"_i18n, [this](){
-        if (IsEnabled()) {
+        if (!IsEnabled()) {
+            DependsClick();
+        } else {
             m_callback();
             if (m_pop_on_click) {
                 SetPop();
@@ -211,7 +215,9 @@ SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& item
     };
 
     SetAction(Button::A, Action{"OK"_i18n, [this](){
-        if (IsEnabled()) {
+        if (!IsEnabled()) {
+            DependsClick();
+        } else {
             // m_callback(m_index);
             m_list_callback();
         }}

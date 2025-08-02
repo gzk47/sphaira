@@ -1689,27 +1689,16 @@ void FsView::DisplayOptions() {
             auto entry = options->Add<SidebarEntryCallback>("Install"_i18n, [this](){
                 InstallFiles();
             });
-            entry->Depends(App::GetInstallEnable, i18n::get(App::INSTALL_DEPENDS_STR));
+            entry->Depends(App::GetInstallEnable, i18n::get(App::INSTALL_DEPENDS_STR), App::ShowEnableInstallPrompt);
         }
     }
 
     if (IsSd() && m_entries_current.size() && !m_selected_count) {
         if (GetEntry().IsFile() && (IsSamePath(GetEntry().GetExtension(), "nro") || !m_menu->FindFileAssocFor().empty())) {
             auto entry = options->Add<SidebarEntryCallback>("Install Forwarder"_i18n, [this](){;
-                if (App::GetInstallPrompt()) {
-                    App::Push<OptionBox>(
-                        "WARNING: Installing forwarders will lead to a ban!"_i18n,
-                        "Back"_i18n, "Install"_i18n, 0, [this](auto op_index){
-                            if (op_index && *op_index) {
-                                InstallForwarder();
-                            }
-                        }
-                    );
-                } else {
-                    InstallForwarder();
-                }
+                InstallForwarder();
             });
-            entry->Depends(App::GetInstallEnable, i18n::get(App::INSTALL_DEPENDS_STR));
+            entry->Depends(App::GetInstallEnable, i18n::get(App::INSTALL_DEPENDS_STR), App::ShowEnableInstallPrompt);
         }
     }
 

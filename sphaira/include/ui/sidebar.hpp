@@ -13,6 +13,7 @@ namespace sphaira::ui {
 class SidebarEntryBase : public Widget {
 public:
     using DependsCallback = std::function<bool(void)>;
+    using DependsClickCallback = std::function<void(void)>;
 
 public:
     explicit SidebarEntryBase(const std::string& title, const std::string& info);
@@ -20,28 +21,37 @@ public:
     using Widget::Draw;
     virtual void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left);
 
-    void Depends(const DependsCallback& callback, const std::string& depends_info) {
+    void Depends(const DependsCallback& callback, const std::string& depends_info, const DependsClickCallback& depends_click = {}) {
         m_depends_callback = callback;
         m_depends_info = depends_info;
+        m_depends_click = depends_click;
     }
 
-    void Depends(bool& value, const std::string& depends_info) {
+    void Depends(bool& value, const std::string& depends_info, const DependsClickCallback& depends_click = {}) {
         m_depends_callback = [&value](){ return value; };
         m_depends_info = depends_info;
+        m_depends_click = depends_click;
     }
 
-    void Depends(option::OptionBool& value, const std::string& depends_info) {
+    void Depends(option::OptionBool& value, const std::string& depends_info, const DependsClickCallback& depends_click = {}) {
         m_depends_callback = [&value](){ return value.Get(); };
         m_depends_info = depends_info;
+        m_depends_click = depends_click;
     }
 
 protected:
-    auto IsEnabled() -> bool {
+    auto IsEnabled() const -> bool {
         if (m_depends_callback) {
             return m_depends_callback();
         }
 
         return true;
+    }
+
+    void DependsClick() const {
+        if (m_depends_click) {
+            m_depends_click();
+        }
     }
 
 protected:
@@ -51,6 +61,7 @@ private:
     std::string m_info{};
     std::string m_depends_info{};
     DependsCallback m_depends_callback{};
+    DependsClickCallback m_depends_click{};
     ScrollingText m_scolling_title{};
 };
 

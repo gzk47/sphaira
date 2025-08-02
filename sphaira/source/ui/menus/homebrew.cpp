@@ -493,21 +493,10 @@ void Menu::DisplayOptions() {
             "Use the FileBrowser to delete them."_i18n);
 
         auto forwarder_entry = options->Add<SidebarEntryCallback>("Install Forwarder"_i18n, [this](){
-            if (App::GetInstallPrompt()) {
-                App::Push<OptionBox>(
-                    "WARNING: Installing forwarders will lead to a ban!"_i18n,
-                    "Back"_i18n, "Install"_i18n, 0, [this](auto op_index){
-                        if (op_index && *op_index) {
-                            InstallHomebrew();
-                        }
-                    }, GetEntry().image
-                );
-            } else {
-                InstallHomebrew();
-            }
+            InstallHomebrew();
         }, true);
 
-        forwarder_entry->Depends(App::GetInstallEnable, i18n::get(App::INSTALL_DEPENDS_STR));
+        forwarder_entry->Depends(App::GetInstallEnable, i18n::get(App::INSTALL_DEPENDS_STR), App::ShowEnableInstallPrompt);
     }
 }
 
