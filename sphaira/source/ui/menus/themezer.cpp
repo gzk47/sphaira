@@ -1,4 +1,5 @@
 #include "ui/menus/themezer.hpp"
+#include "ui/menus/ghdl.hpp"
 #include "ui/progress_box.hpp"
 #include "ui/option_box.hpp"
 #include "ui/sidebar.hpp"
@@ -29,6 +30,13 @@ constexpr fs::FsPath THEME_FOLDER{"/themes/sphaira/"};
 constexpr auto CACHE_PATH = "/switch/sphaira/cache/themezer";
 constexpr auto URL_BASE = "https://switch.cdn.fortheusers.org";
 
+constexpr const char* NRO_URL = "https://github.com/exelix11/SwitchThemeInjector";
+
+constexpr const char* NRO_PATHS[]{
+    "/switch/NXThemesInstaller.nro",
+    "/switch/Switch_themes_Installer/NXThemesInstaller.nro",
+};
+
 constexpr const char* REQUEST_TARGET[]{
     "ResidentMenu",
     "Entrance",
@@ -53,6 +61,17 @@ constexpr const char* REQUEST_ORDER[]{
 
 // https://api.themezer.net/?query=query($nsfw:Boolean,$target:String,$page:Int,$limit:Int,$sort:String,$order:String,$query:String,$creators:[String!]){themeList(nsfw:$nsfw,target:$target,page:$page,limit:$limit,sort:$sort,order:$order,query:$query,creators:$creators){id,creator{id,display_name},details{name,description},last_updated,dl_count,like_count,target,preview{original,thumb}}}&variables={"nsfw":false,"target":null,"page":1,"limit":10,"sort":"updated","order":"desc","query":null,"creators":["695065006068334622"]}
 // https://api.themezer.net/?query=query($nsfw:Boolean,$page:Int,$limit:Int,$sort:String,$order:String,$query:String,$creators:[String!]){packList(nsfw:$nsfw,page:$page,limit:$limit,sort:$sort,order:$order,query:$query,creators:$creators){id,creator{id,display_name},details{name,description},last_updated,dl_count,like_count,themes{id,creator{display_name},details{name,description},last_updated,dl_count,like_count,target,preview{original,thumb}}}}&variables={"nsfw":false,"page":1,"limit":10,"sort":"updated","order":"desc","query":null,"creators":["695065006068334622"]}
+
+auto HasNro() -> bool {
+    fs::FsNativeSd fs;
+    for (auto& path : NRO_PATHS) {
+        if (fs.FileExists(path)) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 // i know, this is cursed
 // todo: send actual POST request rather than GET.
@@ -549,6 +568,28 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
 
 void Menu::OnFocusGained() {
     MenuBase::OnFocusGained();
+
+    if (!m_checked_for_nro) {
+        m_checked_for_nro = true;
+
+        // check if we have the nro, if not, then prompt the user to download from the appstore.
+        if (!HasNro()) {
+            App::Push<OptionBox>(
+                "NXthemes_Installer.nro not found, download now?"_i18n,
+                "Back"_i18n, "Download"_i18n, 1, [this](auto op_index){
+                    if (op_index && *op_index) {
+                        const gh::AssetEntry asset{
+                            .name = "NXThemesInstaller.nro",
+                            // same path as appstore
+                            .path = "/switch/Switch_themes_Installer/NXThemesInstaller.nro",
+                        };
+
+                        gh::Download(NRO_URL, asset);
+                    }
+                }
+            );
+        }
+    }
 }
 
 void Menu::InvalidateAllPages() {

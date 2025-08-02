@@ -169,6 +169,8 @@ private:
     option::OptionLong m_sort{INI_SECTION, "sort", 0};
     option::OptionLong m_order{INI_SECTION, "order", 0};
     option::OptionBool m_nsfw{INI_SECTION, "nsfw", false};
+
+    bool m_checked_for_nro{};
 };
 
 } // namespace sphaira::ui::menu::themezer
