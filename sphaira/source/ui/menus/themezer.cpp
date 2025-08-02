@@ -15,6 +15,7 @@
 #include "threaded_file_transfer.hpp"
 #include "image.hpp"
 #include "title_info.hpp"
+#include "nro.hpp"
 
 #include <minIni.h>
 #include <stb_image.h>
@@ -62,15 +63,19 @@ constexpr const char* REQUEST_ORDER[]{
 // https://api.themezer.net/?query=query($nsfw:Boolean,$target:String,$page:Int,$limit:Int,$sort:String,$order:String,$query:String,$creators:[String!]){themeList(nsfw:$nsfw,target:$target,page:$page,limit:$limit,sort:$sort,order:$order,query:$query,creators:$creators){id,creator{id,display_name},details{name,description},last_updated,dl_count,like_count,target,preview{original,thumb}}}&variables={"nsfw":false,"target":null,"page":1,"limit":10,"sort":"updated","order":"desc","query":null,"creators":["695065006068334622"]}
 // https://api.themezer.net/?query=query($nsfw:Boolean,$page:Int,$limit:Int,$sort:String,$order:String,$query:String,$creators:[String!]){packList(nsfw:$nsfw,page:$page,limit:$limit,sort:$sort,order:$order,query:$query,creators:$creators){id,creator{id,display_name},details{name,description},last_updated,dl_count,like_count,themes{id,creator{display_name},details{name,description},last_updated,dl_count,like_count,target,preview{original,thumb}}}}&variables={"nsfw":false,"page":1,"limit":10,"sort":"updated","order":"desc","query":null,"creators":["695065006068334622"]}
 
-auto HasNro() -> bool {
+auto GetNroPath() -> const char* {
     fs::FsNativeSd fs;
     for (auto& path : NRO_PATHS) {
         if (fs.FileExists(path)) {
-            return true;
+            return path;
         }
     }
 
-    return false;
+    return nullptr;
+}
+
+auto HasNro() -> bool {
+    return GetNroPath() != nullptr;
 }
 
 // i know, this is cursed
@@ -294,8 +299,51 @@ auto InstallTheme(ProgressBox* pbox, const PackListEntry& entry) -> Result {
     fs.CreateDirectoryRecursively(dir_path);
 
     // 3. extract the zip
+    std::vector<std::string> nxtheme_paths;
     if (!pbox->ShouldExit()) {
-        R_TRY(thread::TransferUnzipAll(pbox, zip_out, &fs, dir_path));
+        R_TRY(thread::TransferUnzipAll(pbox, zip_out, &fs, dir_path, [&nxtheme_paths](const fs::FsPath& name, fs::FsPath& path){
+            // just in case theme packs start adding invalid entries.
+            if (!path.ends_with(".nxtheme")) {
+                return false;
+            }
+
+            // store path for later.
+            nxtheme_paths.emplace_back(path);
+            return true;
+        }));
+    }
+
+    // ensure that we actually downloaded the theme.
+    // todo: add new error for this.
+    R_UNLESS(!nxtheme_paths.empty(), Result_ThemezerFailedToDownloadTheme);
+
+    // if we have nxtheme installed, prompt the user to install the theme now.
+    if (HasNro()) {
+        App::Push<OptionBox>(
+            "Theme downloaded, install now?"_i18n,
+            "Back"_i18n, "Install"_i18n, 1, [nxtheme_paths](auto op_index){
+                if (op_index && *op_index) {
+                    std::string args;
+
+                    for (const auto& paths : nxtheme_paths) {
+                        // add space between each arg.
+                        if (!args.empty()) {
+                            args += ' ';
+                        }
+
+                        // converts path to sdmc:/path.
+                        args += nro_add_arg_file(paths);
+                    }
+
+                    log_write("themezer nro: %s\n", GetNroPath());
+                    log_write("themezer args: %s\n", args.c_str());
+
+                    // launch nro with args to the nxthemes.
+                    const auto rc = nro_launch(GetNroPath(), args);
+                    App::PushErrorBox(rc, "Failed to launch NXthemes_Installer.nro"_i18n);
+                }
+            }
+        );
     }
 
     log_write("finished install :)\n");
