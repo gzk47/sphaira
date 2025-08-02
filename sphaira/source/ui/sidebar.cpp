@@ -3,6 +3,7 @@
 #include "ui/popup_list.hpp"
 #include "ui/nvg_util.hpp"
 #include "i18n.hpp"
+#include "swkbd.hpp"
 #include <algorithm>
 
 namespace sphaira::ui {
@@ -282,6 +283,26 @@ auto SidebarEntryArray::OnFocusGained() noexcept -> void {
 auto SidebarEntryArray::OnFocusLost() noexcept -> void {
     Widget::OnFocusLost();
     m_text_yoff = 0;
+}
+
+SidebarEntryTextInput::SidebarEntryTextInput(const std::string& text, const std::string& guide, const std::string& info)
+: SidebarEntryBase{text, info}, m_guide{guide} {
+    SetAction(Button::A, Action{"OK"_i18n, [this](){
+        std::string out;
+        if (R_SUCCEEDED(swkbd::ShowText(out, m_guide.c_str(), m_title.c_str()))) {
+            m_title = out;
+        }
+    }});
+}
+
+void SidebarEntryTextInput::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) {
+    SidebarEntryBase::Draw(vg, theme, root_pos, left);
+
+    const auto colour_id = IsEnabled() ? ThemeEntryID_TEXT : ThemeEntryID_TEXT_INFO;
+    const auto max_w = m_pos.w - 15.f * 2;
+
+    m_scolling_title.Draw(vg, HasFocus(), m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f), max_w, 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(colour_id), m_title);
+    // gfx::drawText(vg, Vec2{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f)}, 20.f, theme->GetColour(colour_id), m_title.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
 }
 
 Sidebar::Sidebar(const std::string& title, Side side, Items&& items)

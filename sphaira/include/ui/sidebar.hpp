@@ -77,10 +77,9 @@ public:
     explicit SidebarEntryBool(const std::string& title, bool& option, const std::string& info = "", const std::string& true_str = "On", const std::string& false_str = "Off");
     explicit SidebarEntryBool(const std::string& title, option::OptionBool& option, const Callback& cb, const std::string& info = "", const std::string& true_str = "On", const std::string& false_str = "Off");
     explicit SidebarEntryBool(const std::string& title, option::OptionBool& option, const std::string& info = "", const std::string& true_str = "On", const std::string& false_str = "Off");
-
-private:
     void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) override;
 
+private:
     bool m_option;
     Callback m_callback;
     std::string m_true_str;
@@ -123,6 +122,32 @@ private:
     s64 m_index;
     s64 m_tick{};
     float m_text_yoff{};
+};
+
+class SidebarEntryTextInput final : public SidebarEntryBase {
+public:
+    using Callback = std::function<void(bool&)>;
+
+public:
+    explicit SidebarEntryTextInput(const std::string& text, const std::string& guide = {}, const std::string& info = "");
+
+    void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) override;
+
+    auto GetText() const {
+        return m_title;
+    }
+
+    void SetText(const std::string& text) {
+        m_title = text;
+    }
+
+    void SetGuide(const std::string& guide) {
+        m_guide = guide;
+    }
+
+private:
+    std::string m_guide;
+    ScrollingText m_scolling_title{};
 };
 
 class Sidebar final : public Widget {
