@@ -704,12 +704,7 @@ void FsView::InstallForwarder() {
 
 void FsView::InstallFiles() {
     if (!App::GetInstallEnable()) {
-        App::Push<ui::OptionBox>(
-            "Install disabled...\n"
-            "Please enable installing via the install options."_i18n,
-            "OK"_i18n
-        );
-
+        App::ShowEnableInstallPrompt();
         return;
     }
 

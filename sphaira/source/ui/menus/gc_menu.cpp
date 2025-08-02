@@ -376,11 +376,7 @@ Menu::Menu(u32 flags) : MenuBase{"GameCard"_i18n, flags} {
 
                 if (m_option_index == 0) {
                     if (!App::GetInstallEnable()) {
-                        App::Push<ui::OptionBox>(
-                            "Install disabled...\n"
-                            "Please enable installing via the install options."_i18n,
-                            "OK"_i18n
-                        );
+                        App::ShowEnableInstallPrompt();
                     } else {
                         log_write("[GC] doing install A\n");
                         App::Push<ui::ProgressBox>(m_icon, "Installing "_i18n, m_entries[m_entry_index].lang_entry.name, [this](auto pbox) -> Result {
