@@ -20,6 +20,10 @@ public:
 
     using Widget::Draw;
     virtual void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left);
+    auto OnFocusGained() noexcept -> void override;
+    auto OnFocusLost() noexcept -> void override;
+
+    void DrawEntry(NVGcontext* vg, Theme* theme, const std::string& left, const std::string& right, bool use_selected);
 
     void Depends(const DependsCallback& callback, const std::string& depends_info, const DependsClickCallback& depends_click = {}) {
         m_depends_callback = callback;
@@ -63,6 +67,7 @@ private:
     DependsCallback m_depends_callback{};
     DependsClickCallback m_depends_click{};
     ScrollingText m_scolling_title{};
+    ScrollingText m_scolling_value{};
 };
 
 template<typename T>
@@ -110,36 +115,47 @@ public:
     explicit SidebarEntryArray(const std::string& title, const Items& items, Callback cb, s64 index = 0, const std::string& info = "");
     explicit SidebarEntryArray(const std::string& title, const Items& items, Callback cb, const std::string& index, const std::string& info = "");
     explicit SidebarEntryArray(const std::string& title, const Items& items, std::string& index, const std::string& info = "");
-
     void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) override;
-    auto OnFocusGained() noexcept -> void override;
-    auto OnFocusLost() noexcept -> void override;
 
 private:
     Items m_items;
     ListCallback m_list_callback;
     Callback m_callback;
     s64 m_index;
-    s64 m_tick{};
-    float m_text_yoff{};
 };
 
-class SidebarEntryTextInput final : public SidebarEntryBase {
+// single text entry.
+// the callback is called when the entry is clicked.
+// usually, the within the callback the text will be changed, use SetText().
+class SidebarEntryTextBase : public SidebarEntryBase {
 public:
-    using Callback = std::function<void(bool&)>;
+    using Callback = std::function<void(void)>;
 
 public:
-    explicit SidebarEntryTextInput(const std::string& text, const std::string& guide = {}, const std::string& info = "");
+    explicit SidebarEntryTextBase(const std::string& title, const std::string& value, const Callback& cb, const std::string& info = "");
 
     void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) override;
 
-    auto GetText() const {
-        return m_title;
+    void SetCallback(const Callback& cb) {
+        m_callback = cb;
     }
 
-    void SetText(const std::string& text) {
-        m_title = text;
+    auto GetValue() const {
+        return m_value;
     }
+
+    void SetValue(const std::string& value) {
+        m_value = value;
+    }
+
+private:
+    std::string m_value;
+    Callback m_callback;
+};
+
+class SidebarEntryTextInput final : public SidebarEntryTextBase {
+public:
+    explicit SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide = {}, const std::string& info = "");
 
     void SetGuide(const std::string& guide) {
         m_guide = guide;
@@ -147,7 +163,19 @@ public:
 
 private:
     std::string m_guide;
-    ScrollingText m_scolling_title{};
+};
+
+class SidebarEntryFilePicker final : public SidebarEntryTextBase {
+public:
+    explicit SidebarEntryFilePicker(const std::string& title, const std::string& value, const std::vector<std::string>& filter, const std::string& info = "");
+
+    // extension filter.
+    void SetFilter(const std::vector<std::string>& filter) {
+        m_filter = filter;
+    }
+
+private:
+    std::vector<std::string> m_filter{};
 };
 
 class Sidebar final : public Widget {

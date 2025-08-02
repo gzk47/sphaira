@@ -1,4 +1,5 @@
 #include "ui/sidebar.hpp"
+#include "ui/menus/file_picker.hpp"
 #include "app.hpp"
 #include "ui/popup_list.hpp"
 #include "ui/nvg_util.hpp"
@@ -8,14 +9,6 @@
 
 namespace sphaira::ui {
 namespace {
-
-auto GetTextScrollSpeed() -> float {
-    switch (App::GetTextScrollSpeed()) {
-        case 0: return 0.5;
-        default: case 1: return 1.0;
-        case 2: return 1.5;
-    }
-}
 
 auto DistanceBetweenY(Vec4 va, Vec4 vb) -> Vec4 {
     return Vec4{
@@ -79,6 +72,38 @@ void SidebarEntryBase::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, 
     }
 }
 
+auto SidebarEntryBase::OnFocusGained() noexcept -> void {
+    Widget::OnFocusGained();
+}
+
+auto SidebarEntryBase::OnFocusLost() noexcept -> void {
+    Widget::OnFocusLost();
+    m_scolling_value.Reset();
+}
+
+void SidebarEntryBase::DrawEntry(NVGcontext* vg, Theme* theme, const std::string& left, const std::string& right, bool use_selected) {
+    const auto colour_id = IsEnabled() ? ThemeEntryID_TEXT : ThemeEntryID_TEXT_INFO;
+
+    // scrolling text
+    float bounds[4];
+    nvgFontSize(vg, 20);
+    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    nvgTextBounds(vg, 0, 0, left.c_str(), nullptr, bounds);
+    const float start_x = bounds[2] + 50;
+    const float max_off = m_pos.w - start_x - 15.f;
+
+    nvgTextBounds(vg, 0, 0, right.c_str(), nullptr, bounds);
+
+    const Vec2 key_text_pos{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f)};
+    gfx::drawText(vg, key_text_pos, 20.f, theme->GetColour(colour_id), left.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+
+    const auto value_id = use_selected ? ThemeEntryID_TEXT_SELECTED : ThemeEntryID_TEXT;
+    const float xpos = m_pos.x + m_pos.w - 15.f - std::min(max_off, bounds[2]);
+    const float ypos = m_pos.y + (m_pos.h / 2.f);
+
+    m_scolling_value.Draw(vg, HasFocus(), xpos, ypos, max_off, 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(value_id), right);
+}
+
 SidebarEntryBool::SidebarEntryBool(const std::string& title, bool option, Callback cb, const std::string& info, const std::string& true_str, const std::string& false_str)
 : SidebarEntryBase{title, info}
 , m_option{option}
@@ -126,20 +151,7 @@ SidebarEntryBool::SidebarEntryBool(const std::string& title, option::OptionBool&
 
 void SidebarEntryBool::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) {
     SidebarEntryBase::Draw(vg, theme, root_pos, left);
-
-    // if (HasFocus()) {
-    //     gfx::drawText(vg, Vec2{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f)}, 20.f, theme->GetColour(ThemeEntryID_TEXT_SELECTED), m_title.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    // } else {
-    // }
-
-    const auto colour_id = IsEnabled() ? ThemeEntryID_TEXT : ThemeEntryID_TEXT_INFO;
-    gfx::drawText(vg, Vec2{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f)}, 20.f, theme->GetColour(colour_id), m_title.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-
-    if (m_option == true) {
-        gfx::drawText(vg, Vec2{m_pos.x + m_pos.w - 15.f, m_pos.y + (m_pos.h / 2.f)}, 20.f, theme->GetColour(ThemeEntryID_TEXT_SELECTED), m_true_str.c_str(), NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-    } else { // text info
-        gfx::drawText(vg, Vec2{m_pos.x + m_pos.w - 15.f, m_pos.y + (m_pos.h / 2.f)}, 20.f, theme->GetColour(ThemeEntryID_TEXT), m_false_str.c_str(), NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-    }
+    SidebarEntryBase::DrawEntry(vg, theme, m_title, m_option ? m_true_str : m_false_str, m_option);
 }
 
 SidebarEntryCallback::SidebarEntryCallback(const std::string& title, Callback cb, bool pop_on_click, const std::string& info)
@@ -167,11 +179,7 @@ void SidebarEntryCallback::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_p
     SidebarEntryBase::Draw(vg, theme, root_pos, left);
 
     const auto colour_id = IsEnabled() ? ThemeEntryID_TEXT : ThemeEntryID_TEXT_INFO;
-    // if (HasFocus()) {
-    //     gfx::drawText(vg, Vec2{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f)}, 20.f, theme->GetColour(ThemeEntryID_TEXT_SELECTED), m_title.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    // } else {
-        gfx::drawText(vg, Vec2{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f)}, 20.f, theme->GetColour(colour_id), m_title.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    // }
+    gfx::drawText(vg, Vec2{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f)}, 20.f, theme->GetColour(colour_id), m_title.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
 }
 
 SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& items, std::string& index, const std::string& info)
@@ -227,82 +235,53 @@ SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& item
 
 void SidebarEntryArray::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) {
     SidebarEntryBase::Draw(vg, theme, root_pos, left);
-
-    const auto colour_id = IsEnabled() ? ThemeEntryID_TEXT : ThemeEntryID_TEXT_INFO;
-    const auto& text_entry = m_items[m_index];
-
-    // scrolling text
-    // todo: move below in a flexible class and use it for all text drawing.
-    float bounds[4];
-    nvgFontSize(vg, 20);
-    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    nvgTextBounds(vg, 0, 0, m_title.c_str(), nullptr, bounds);
-    const float start_x = bounds[2] + 50;
-    const float max_off = m_pos.w - start_x - 15.f;
-
-    auto value_str = m_items[m_index];
-    nvgTextBounds(vg, 0, 0, value_str.c_str(), nullptr, bounds);
-
-    if (HasFocus()) {
-        const auto scroll_amount = GetTextScrollSpeed();
-        if (bounds[2] > max_off) {
-            value_str += "        ";
-            nvgTextBounds(vg, 0, 0, value_str.c_str(), nullptr, bounds);
-
-            if (!m_text_yoff) {
-                m_tick++;
-                if (m_tick >= 90) {
-                    m_tick = 0;
-                    m_text_yoff += scroll_amount;
-                }
-            } else if (bounds[2] > m_text_yoff) {
-                m_text_yoff += std::min(scroll_amount, bounds[2] - m_text_yoff);
-            } else {
-                m_text_yoff = 0;
-            }
-
-            value_str += text_entry;
-        }
-    }
-
-    const Vec2 key_text_pos{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f)};
-    gfx::drawText(vg, key_text_pos, 20.f, theme->GetColour(colour_id), m_title.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-
-    nvgSave(vg);
-    const float xpos = m_pos.x + m_pos.w - 15.f - std::min(max_off, bounds[2]);
-    nvgIntersectScissor(vg, xpos, GetY(), max_off, GetH());
-    const Vec2 value_text_pos{xpos - m_text_yoff, m_pos.y + (m_pos.h / 2.f)};
-    gfx::drawText(vg, value_text_pos, 20.f, theme->GetColour(ThemeEntryID_TEXT_SELECTED), value_str.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    nvgRestore(vg);
+    SidebarEntryBase::DrawEntry(vg, theme, m_title, m_items[m_index], true);
 }
 
-auto SidebarEntryArray::OnFocusGained() noexcept -> void {
-    Widget::OnFocusGained();
-}
-
-auto SidebarEntryArray::OnFocusLost() noexcept -> void {
-    Widget::OnFocusLost();
-    m_text_yoff = 0;
-}
-
-SidebarEntryTextInput::SidebarEntryTextInput(const std::string& text, const std::string& guide, const std::string& info)
-: SidebarEntryBase{text, info}, m_guide{guide} {
+SidebarEntryTextBase::SidebarEntryTextBase(const std::string& title, const std::string& value, const Callback& cb, const std::string& info)
+: SidebarEntryBase{title, info}
+, m_value{value}
+, m_callback{cb} {
     SetAction(Button::A, Action{"OK"_i18n, [this](){
-        std::string out;
-        if (R_SUCCEEDED(swkbd::ShowText(out, m_guide.c_str(), m_title.c_str()))) {
-            m_title = out;
+        if (m_callback) {
+            m_callback();
         }
     }});
 }
 
-void SidebarEntryTextInput::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) {
+void SidebarEntryTextBase::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) {
     SidebarEntryBase::Draw(vg, theme, root_pos, left);
+    SidebarEntryBase::DrawEntry(vg, theme, m_title, m_value, true);
 
-    const auto colour_id = IsEnabled() ? ThemeEntryID_TEXT : ThemeEntryID_TEXT_INFO;
-    const auto max_w = m_pos.w - 15.f * 2;
+    // const auto colour_id = IsEnabled() ? ThemeEntryID_TEXT : ThemeEntryID_TEXT_INFO;
+    // const auto max_w = m_pos.w - 15.f * 2;
 
-    m_scolling_title.Draw(vg, HasFocus(), m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f), max_w, 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(colour_id), m_title);
-    // gfx::drawText(vg, Vec2{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f)}, 20.f, theme->GetColour(colour_id), m_title.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    // m_scolling_title.Draw(vg, HasFocus(), m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f), max_w, 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(colour_id), m_title);
+}
+
+SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide, const std::string& info)
+: SidebarEntryTextBase{title, value, {}, info}, m_guide{guide} {
+
+    SetCallback([this](){
+        std::string out;
+        if (R_SUCCEEDED(swkbd::ShowText(out, m_guide.c_str(), GetValue().c_str()))) {
+            SetValue(out);
+        }
+    });
+}
+
+SidebarEntryFilePicker::SidebarEntryFilePicker(const std::string& title, const std::string& value, const std::vector<std::string>& filter, const std::string& info)
+: SidebarEntryTextBase{title, value, {}, info}, m_filter{filter} {
+
+    SetCallback([this](){
+        App::Push<menu::filepicker::Menu>(
+            [this](const fs::FsPath& path) {
+                SetValue(path);
+                return true;
+            },
+            m_filter
+        );
+    });
 }
 
 Sidebar::Sidebar(const std::string& title, Side side, Items&& items)

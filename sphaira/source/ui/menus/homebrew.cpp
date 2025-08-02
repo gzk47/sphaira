@@ -489,7 +489,7 @@ void Menu::DisplayOptions() {
                 }, GetEntry().image
             );
         },  "Perminately delete the selected homebrew.\n\n"
-            "Files and  folders created by the homebrew will still remain. "
+            "Files and folders created by the homebrew will still remain. "
             "Use the FileBrowser to delete them."_i18n);
 
         auto forwarder_entry = options->Add<SidebarEntryCallback>("Install Forwarder"_i18n, [this](){

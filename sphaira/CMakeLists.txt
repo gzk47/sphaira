@@ -36,6 +36,7 @@ add_executable(sphaira
     source/ui/menus/appstore.cpp
     source/ui/menus/file_viewer.cpp
     source/ui/menus/filebrowser.cpp
+    source/ui/menus/file_picker.cpp
     source/ui/menus/homebrew.cpp
     source/ui/menus/irs_menu.cpp
     source/ui/menus/main_menu.cpp
