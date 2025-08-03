@@ -580,7 +580,7 @@ void Menu::OnFocusGained() {
                             .path = "/switch/Switch_themes_Installer/NXThemesInstaller.nro",
                         };
 
-                        gh::Download(NRO_URL, asset);
+                        gh::Download(NRO_URL, asset, "latest");
                     }
                 }
             );

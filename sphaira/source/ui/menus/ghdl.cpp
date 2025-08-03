@@ -460,9 +460,10 @@ void DownloadEntries(const Entry& entry) {
     });
 }
 
-bool Download(const std::string& url, const std::vector<AssetEntry>& assets, const std::string& pre_install_message, const std::string& post_install_message) {
+bool Download(const std::string& url, const std::vector<AssetEntry>& assets, const std::string& tag, const std::string& pre_install_message, const std::string& post_install_message) {
     Entry entry{};
     entry.url = url;
+    entry.tag = tag;
     entry.assets = assets;
     entry.pre_install_message = pre_install_message;
     entry.post_install_message = post_install_message;
