@@ -537,6 +537,9 @@ enum class SphairaResult : Result {
     ZipOpenNewFileInZip,
     ZipWriteInFileInZip,
 
+    MmzBadLocalHeaderSig,
+    MmzBadLocalHeaderRead,
+
     FileBrowserFailedUpload,
     FileBrowserDirNotDaybreak,
 
@@ -685,6 +688,8 @@ enum : Result {
     MAKE_SPHAIRA_RESULT_ENUM(ZipOpen2_64),
     MAKE_SPHAIRA_RESULT_ENUM(ZipOpenNewFileInZip),
     MAKE_SPHAIRA_RESULT_ENUM(ZipWriteInFileInZip),
+    MAKE_SPHAIRA_RESULT_ENUM(MmzBadLocalHeaderSig),
+    MAKE_SPHAIRA_RESULT_ENUM(MmzBadLocalHeaderRead),
     MAKE_SPHAIRA_RESULT_ENUM(FileBrowserFailedUpload),
     MAKE_SPHAIRA_RESULT_ENUM(FileBrowserDirNotDaybreak),
     MAKE_SPHAIRA_RESULT_ENUM(AppstoreFailedZipDownload),

@@ -566,23 +566,11 @@ void FsView::Draw(NVGcontext* vg, Theme* theme) {
     }
 
     constexpr float text_xoffset{15.f};
+    bool got_dir_count = false;
 
-    m_list->Draw(vg, theme, m_entries_current.size(), [this, text_col](auto* vg, auto* theme, auto v, auto i) {
+    m_list->Draw(vg, theme, m_entries_current.size(), [this, text_col, &got_dir_count](auto* vg, auto* theme, auto v, auto i) {
         const auto& [x, y, w, h] = v;
         auto& e = GetEntry(i);
-
-        if (e.IsDir()) {
-            // NOTE: make this native only if hdd dir scan is too slow.
-            // if (m_fs->IsNative() && e.file_count == -1 && e.dir_count == -1) {
-            if (e.file_count == -1 && e.dir_count == -1) {
-                m_fs->DirGetEntryCount(GetNewPath(e), &e.file_count, &e.dir_count);
-            }
-        } else if (!e.checked_extension) {
-            e.checked_extension = true;
-            if (auto ext = std::strrchr(e.name, '.')) {
-                e.extension = ext+1;
-            }
-        }
 
         auto text_id = ThemeEntryID_TEXT;
         const auto selected = m_index == i;
@@ -626,8 +614,19 @@ void FsView::Draw(NVGcontext* vg, Theme* theme) {
 
         // NOTE: make this native only if i disable dir scan from above.
         if (e.IsDir()) {
-            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(text_id), "%zd files"_i18n.c_str(), e.file_count);
-            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) + 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP, theme->GetColour(text_id), "%zd dirs"_i18n.c_str(), e.dir_count);
+            // NOTE: this takes longer than 16ms when opening a new folder due to it
+            // checking all 9 folders at once.
+            if (!got_dir_count && e.file_count == -1 && e.dir_count == -1) {
+                got_dir_count = true;
+                m_fs->DirGetEntryCount(GetNewPath(e), &e.file_count, &e.dir_count);
+            }
+
+            if (e.file_count != -1) {
+                gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(text_id), "%zd files"_i18n.c_str(), e.file_count);
+            }
+            if (e.dir_count != -1) {
+                gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) + 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP, theme->GetColour(text_id), "%zd dirs"_i18n.c_str(), e.dir_count);
+            }
         } else if (e.IsFile()) {
             if (!e.time_stamp.is_valid) {
                 const auto path = GetNewPath(e);
@@ -703,24 +702,17 @@ void FsView::SetIndex(s64 index) {
         m_list->SetYoff();
     }
 
-    if (IsSd() && !m_entries_current.empty() && !GetEntry().checked_internal_extension && IsSamePath(GetEntry().extension, "zip")) {
+    if (IsSd() && !m_entries_current.empty() && !GetEntry().checked_internal_extension && IsSamePath(GetEntry().GetExtension(), "zip")) {
         GetEntry().checked_internal_extension = true;
 
-        if (auto zfile = unzOpen64(GetNewPathCurrent())) {
-            ON_SCOPE_EXIT(unzClose(zfile));
-
-            // only check first entry (i think RA does the same)
-            fs::FsPath filename_inzip{};
-            unz_file_info64 file_info{};
-            if (UNZ_OK == unzOpenCurrentFile(zfile)) {
-                ON_SCOPE_EXIT(unzCloseCurrentFile(zfile));
-                if (UNZ_OK == unzGetCurrentFileInfo64(zfile, &file_info, filename_inzip, sizeof(filename_inzip), NULL, 0, NULL, 0)) {
-                    if (auto ext = std::strrchr(filename_inzip, '.')) {
-                        GetEntry().internal_name = filename_inzip.toString();
-                        GetEntry().internal_extension = ext+1;
-                    }
-                }
+        TimeStamp ts;
+        fs::FsPath filename_inzip{};
+        if (R_SUCCEEDED(mz::PeekFirstFileName(GetFs(), GetNewPathCurrent(), filename_inzip))) {
+            if (auto ext = std::strrchr(filename_inzip, '.')) {
+                GetEntry().internal_name = filename_inzip.toString();
+                GetEntry().internal_extension = ext+1;
             }
+            log_write("\tzip, time taken: %.2fs %zums\n", ts.GetSecondsD(), ts.GetMs());
         }
     }
 
@@ -737,7 +729,7 @@ void FsView::InstallForwarder() {
 
     const auto assoc_list = m_menu->FindFileAssocFor();
     if (assoc_list.empty()) {
-        log_write("failed to find assoc for: %s ext: %s\n", GetEntry().name, GetEntry().extension.c_str());
+        log_write("failed to find assoc for: %s ext: %s\n", GetEntry().name, GetEntry().GetExtension().c_str());
         return;
     }
 
@@ -1081,9 +1073,6 @@ auto FsView::Scan(const fs::FsPath& new_path, bool is_walk_up) -> Result {
         i++;
     }
 
-    m_entries.shrink_to_fit();
-    m_entries_index.shrink_to_fit();
-    m_entries_index_hidden.shrink_to_fit();
     Sort();
 
     // quick check to see if this is an update folder
@@ -2000,8 +1989,8 @@ auto Menu::FindFileAssocFor() -> std::vector<FileAssocEntry> {
     // only support roms in correctly named folders, sorry!
     const auto db_indexs = GetRomDatabaseFromPath(view->m_path);
     const auto& entry = view->GetEntry();
-    const auto extension = entry.extension;
-    const auto internal_extension = entry.internal_extension.empty() ? entry.extension : entry.internal_extension;
+    const auto extension = entry.GetExtension();
+    const auto internal_extension = entry.GetInternalExtension();
     if (extension.empty() && internal_extension.empty()) {
         // log_write("failed to get extension for db: %s path: %s\n", database_entry.c_str(), m_path);
         return {};

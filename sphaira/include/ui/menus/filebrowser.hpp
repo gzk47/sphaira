@@ -7,7 +7,6 @@
 #include "fs.hpp"
 #include "option.hpp"
 #include "hasher.hpp"
-// #include <optional>
 #include <span>
 
 namespace sphaira::ui::menu::filebrowser {
@@ -97,6 +96,11 @@ struct FileEntry : FsDirectoryEntry {
     }
 
     auto GetExtension() const -> std::string {
+        if (!checked_extension) {
+            if (auto ext = std::strrchr(name, '.')) {
+                return ext+1;
+            }
+        }
         return extension;
     }
 
@@ -396,14 +400,6 @@ private:
     std::vector<FileAssocEntry> m_assoc_entries{};
     SelectedStash m_selected{};
 
-    // this keeps track of the highlighted file before opening a folder
-    // if the user presses B to go back to the previous dir
-    // this vector is popped, then, that entry is checked if it still exists
-    // if it does, the index becomes that file.
-    std::vector<LastFile> m_previous_highlighted_file{};
-    s64 m_index{};
-    s64 m_selected_count{};
-
     option::OptionLong m_sort{INI_SECTION, "sort", SortType::SortType_Alphabetical};
     option::OptionLong m_order{INI_SECTION, "order", OrderType::OrderType_Descending};
     option::OptionBool m_show_hidden{INI_SECTION, "show_hidden", false};
@@ -412,7 +408,6 @@ private:
     option::OptionBool m_ignore_read_only{INI_SECTION, "ignore_read_only", false};
 
     bool m_loaded_assoc_entries{};
-    bool m_is_update_folder{};
     bool m_split_screen{};
 };
 

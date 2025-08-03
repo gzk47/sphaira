@@ -71,6 +71,8 @@ auto GetCodeMessage(Result rc) -> const char* {
         case Result_ZipOpen2_64: return "SphairaError_ZipOpen2_64";
         case Result_ZipOpenNewFileInZip: return "SphairaError_ZipOpenNewFileInZip";
         case Result_ZipWriteInFileInZip: return "SphairaError_ZipWriteInFileInZip";
+        case Result_MmzBadLocalHeaderSig: return "SphairaError_MmzBadLocalHeaderSig";
+        case Result_MmzBadLocalHeaderRead: return "SphairaError_MmzBadLocalHeaderRead";
         case Result_FileBrowserFailedUpload: return "SphairaError_FileBrowserFailedUpload";
         case Result_FileBrowserDirNotDaybreak: return "SphairaError_FileBrowserDirNotDaybreak";
         case Result_AppstoreFailedZipDownload: return "SphairaError_AppstoreFailedZipDownload";

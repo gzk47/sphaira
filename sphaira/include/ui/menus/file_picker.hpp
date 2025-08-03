@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ui/menus/filebrowser.hpp"
 #include "ui/menus/menu_base.hpp"
 #include "ui/scrolling_text.hpp"
 #include "ui/list.hpp"
@@ -17,13 +18,6 @@ enum FsEntryFlag {
     FsEntryFlag_Assoc = 1 << 1,
 };
 
-enum class FsType {
-    Sd,
-    ImageNand,
-    ImageSd,
-    Stdio,
-};
-
 enum SortType {
     SortType_Size,
     SortType_Alphabetical,
@@ -34,77 +28,10 @@ enum OrderType {
     OrderType_Ascending,
 };
 
-struct FsEntry {
-    fs::FsPath name{};
-    fs::FsPath root{};
-    FsType type{};
-    u32 flags{FsEntryFlag_None};
-
-    auto IsReadOnly() const -> bool {
-        return flags & FsEntryFlag_ReadOnly;
-    }
-
-    auto IsAssoc() const -> bool {
-        return flags & FsEntryFlag_Assoc;
-    }
-
-    auto IsSame(const FsEntry& e) const {
-        return root == e.root && type == e.type;
-    }
-};
-
-// roughly 1kib in size per entry
-struct FileEntry : FsDirectoryEntry {
-    std::string extension{}; // if any
-    std::string internal_name{}; // if any
-    std::string internal_extension{}; // if any
-    s64 file_count{-1}; // number of files in a folder, non-recursive
-    s64 dir_count{-1}; // number folders in a folder, non-recursive
-    FsTimeStampRaw time_stamp{};
-    bool checked_extension{}; // did we already search for an ext?
-    bool checked_internal_extension{}; // did we already search for an ext?
-
-    auto IsFile() const -> bool {
-        return type == FsDirEntryType_File;
-    }
-
-    auto IsDir() const -> bool {
-        return !IsFile();
-    }
-
-    auto IsHidden() const -> bool {
-        return name[0] == '.';
-    }
-
-    auto GetName() const -> std::string {
-        return name;
-    }
-
-    auto GetExtension() const -> std::string {
-        return extension;
-    }
-
-    auto GetInternalName() const -> std::string {
-        if (!internal_name.empty()) {
-            return internal_name;
-        }
-        return GetName();
-    }
-
-    auto GetInternalExtension() const -> std::string {
-        if (!internal_extension.empty()) {
-            return internal_extension;
-        }
-        return GetExtension();
-    }
-};
-
-struct LastFile {
-    fs::FsPath name{};
-    s64 index{};
-    float offset{};
-    s64 entries_count{};
-};
+using FsType = filebrowser::FsType;
+using FsEntry = filebrowser::FsEntry;
+using FileEntry = filebrowser::FileEntry;
+using LastFile = filebrowser::LastFile;
 
 using Callback = std::function<bool(const fs::FsPath& path)>;
 
