@@ -87,10 +87,13 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
             NifmNetworkProfileData profile{};
             if (R_SUCCEEDED(nifmGetCurrentNetworkProfile(&profile))) {
                 const auto& settings = profile.wireless_setting_data;
-                std::string passphrase;
-                std::transform(std::cbegin(settings.passphrase), std::cend(settings.passphrase), passphrase.begin(), toascii);
+
+                // convert to ascii string.
+                char passphrase[sizeof(settings.passphrase) + 1]{};
+                std::transform(std::cbegin(settings.passphrase), std::cend(settings.passphrase), std::begin(passphrase), toascii);
+
                 draw("SSID:"_i18n, " %.*s", settings.ssid_len, settings.ssid);
-                draw("Passphrase:"_i18n, " %s", passphrase.c_str());
+                draw("Passphrase:"_i18n, " %s", passphrase);
             }
         }
     }
