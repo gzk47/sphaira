@@ -19,7 +19,11 @@ void threadFunc(void* arg) {
 
 } // namespace
 
-ProgressBox::ProgressBox(int image, const std::string& action, const std::string& title, ProgressBoxCallback callback, ProgressBoxDoneCallback done, int cpuid, int prio, int stack_size) {
+ProgressBox::ProgressBox(int image, const std::string& action, const std::string& title, const ProgressBoxCallback& callback, const ProgressBoxDoneCallback& done, int cpuid, int prio, int stack_size)
+: m_done{done}
+, m_action{action}
+, m_title{title}
+, m_image{image} {
     if (App::GetApp()->m_progress_boost_mode.Get()) {
         App::SetBoostMode(true);
     }
@@ -37,11 +41,6 @@ ProgressBox::ProgressBox(int image, const std::string& action, const std::string
     m_pos.h = 295.f;
     m_pos.x = (SCREEN_WIDTH / 2.f) - (m_pos.w / 2.f);
     m_pos.y = (SCREEN_HEIGHT / 2.f) - (m_pos.h / 2.f);
-
-    m_done = done;
-    m_title = title;
-    m_action = action;
-    m_image = image;
 
     // create cancel event.
     ueventCreate(&m_uevent, false);

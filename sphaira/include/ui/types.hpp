@@ -56,8 +56,8 @@ struct Vec2 {
 struct Vec4 {
     constexpr Vec4() = default;
     constexpr Vec4(float _x, float _y, float _w, float _h) : x{_x}, y{_y}, w{_w}, h{_h} {}
-    constexpr Vec4(Vec2 vec0, Vec2 vec1) : x{vec0.x}, y{vec0.y}, w{vec1.x}, h{vec1.y} {}
-    constexpr Vec4(Vec4 vec0, Vec4 vec1) : x{vec0.x}, y{vec0.y}, w{vec1.w}, h{vec1.h} {}
+    constexpr Vec4(const Vec2& vec0, const Vec2& vec1) : x{vec0.x}, y{vec0.y}, w{vec1.x}, h{vec1.y} {}
+    constexpr Vec4(const Vec4& vec0, const Vec4& vec1) : x{vec0.x}, y{vec0.y}, w{vec1.w}, h{vec1.h} {}
 
     float& operator[](std::size_t idx) {
         switch (idx) {
@@ -339,10 +339,10 @@ struct Action final {
         CallbackWithBool
     >;
 
-    Action(Callback cb) : Action{ActionType::DOWN, "", cb} {}
-    Action(std::string hint, Callback cb) : Action{ActionType::DOWN, hint, cb} {}
-    Action(u8 type, Callback cb) : Action{type, "", cb} {}
-    Action(u8 type, std::string hint, Callback cb) : m_type{type}, m_callback{cb}, m_hint{hint} {}
+    explicit Action(const Callback& cb) : Action{ActionType::DOWN, "", cb} {}
+    explicit Action(const std::string& hint, const Callback& cb) : Action{ActionType::DOWN, hint, cb} {}
+    explicit Action(u8 type, const Callback& cb) : Action{type, "", cb} {}
+    explicit Action(u8 type, const std::string& hint, const Callback& cb) : m_type{type}, m_callback{cb}, m_hint{hint} {}
 
     auto IsHidden() const noexcept { return m_hint.empty(); }
 

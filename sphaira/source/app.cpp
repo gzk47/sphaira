@@ -539,7 +539,7 @@ auto App::PopToMenu() -> void {
     }
 }
 
-void App::Notify(std::string text, ui::NotifEntry::Side side) {
+void App::Notify(const std::string& text, ui::NotifEntry::Side side) {
     g_app->m_notif_manager.Push({text, side});
 }
 

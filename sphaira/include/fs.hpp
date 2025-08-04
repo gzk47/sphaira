@@ -487,7 +487,7 @@ struct FsNative : Fs {
 
     FsFileSystem m_fs{};
     Result m_open_result{};
-    bool m_own{true};
+    const bool m_own{true};
 };
 
 #if 0

@@ -59,10 +59,10 @@ protected:
     }
 
 protected:
-    std::string m_title;
+    const std::string m_title;
 
 private:
-    std::string m_info{};
+    const std::string m_info;
     std::string m_depends_info{};
     DependsCallback m_depends_callback{};
     DependsClickCallback m_depends_click{};
@@ -78,7 +78,7 @@ public:
     using Callback = std::function<void(bool&)>;
 
 public:
-    explicit SidebarEntryBool(const std::string& title, bool option, Callback cb, const std::string& info = "", const std::string& true_str = "On", const std::string& false_str = "Off");
+    explicit SidebarEntryBool(const std::string& title, bool option, const Callback& cb, const std::string& info = "", const std::string& true_str = "On", const std::string& false_str = "Off");
     explicit SidebarEntryBool(const std::string& title, bool& option, const std::string& info = "", const std::string& true_str = "On", const std::string& false_str = "Off");
     explicit SidebarEntryBool(const std::string& title, option::OptionBool& option, const Callback& cb, const std::string& info = "", const std::string& true_str = "On", const std::string& false_str = "Off");
     explicit SidebarEntryBool(const std::string& title, option::OptionBool& option, const std::string& info = "", const std::string& true_str = "On", const std::string& false_str = "Off");
@@ -96,13 +96,13 @@ public:
     using Callback = std::function<void()>;
 
 public:
-    explicit SidebarEntryCallback(const std::string& title, Callback cb, const std::string& info);
-    explicit SidebarEntryCallback(const std::string& title, Callback cb, bool pop_on_click = false, const std::string& info = "");
+    explicit SidebarEntryCallback(const std::string& title, const Callback& cb, const std::string& info);
+    explicit SidebarEntryCallback(const std::string& title, const Callback& cb, bool pop_on_click = false, const std::string& info = "");
     void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) override;
 
 private:
-    Callback m_callback;
-    bool m_pop_on_click;
+    const Callback m_callback;
+    const bool m_pop_on_click;
 };
 
 class SidebarEntryArray final : public SidebarEntryBase {
@@ -112,16 +112,16 @@ public:
     using Callback = std::function<void(s64& index)>;
 
 public:
-    explicit SidebarEntryArray(const std::string& title, const Items& items, Callback cb, s64 index = 0, const std::string& info = "");
-    explicit SidebarEntryArray(const std::string& title, const Items& items, Callback cb, const std::string& index, const std::string& info = "");
+    explicit SidebarEntryArray(const std::string& title, const Items& items, const Callback& cb, s64 index = 0, const std::string& info = "");
+    explicit SidebarEntryArray(const std::string& title, const Items& items, const Callback& cb, const std::string& index, const std::string& info = "");
     explicit SidebarEntryArray(const std::string& title, const Items& items, std::string& index, const std::string& info = "");
     void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) override;
 
 private:
-    Items m_items;
-    ListCallback m_list_callback;
-    Callback m_callback;
+    const Items m_items;
+    const Callback m_callback;
     s64 m_index;
+    ListCallback m_list_callback{};
 };
 
 // single text entry.
@@ -204,9 +204,9 @@ private:
     void SetupButtons();
 
 private:
-    std::string m_title;
-    std::string m_sub;
-    Side m_side;
+    const std::string m_title;
+    const std::string m_sub;
+    const Side m_side;
     Items m_items;
     s64 m_index{};
 

@@ -10,7 +10,7 @@
 namespace sphaira::ui {
 namespace {
 
-auto DistanceBetweenY(Vec4 va, Vec4 vb) -> Vec4 {
+auto DistanceBetweenY(const Vec4& va, const Vec4& vb) -> Vec4 {
     return Vec4{
         va.x, va.y,
         va.w, vb.y - va.y
@@ -104,7 +104,7 @@ void SidebarEntryBase::DrawEntry(NVGcontext* vg, Theme* theme, const std::string
     m_scolling_value.Draw(vg, HasFocus(), xpos, ypos, max_off, 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(value_id), right);
 }
 
-SidebarEntryBool::SidebarEntryBool(const std::string& title, bool option, Callback cb, const std::string& info, const std::string& true_str, const std::string& false_str)
+SidebarEntryBool::SidebarEntryBool(const std::string& title, bool option, const Callback& cb, const std::string& info, const std::string& true_str, const std::string& false_str)
 : SidebarEntryBase{title, info}
 , m_option{option}
 , m_callback{cb}
@@ -154,7 +154,7 @@ void SidebarEntryBool::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, 
     SidebarEntryBase::DrawEntry(vg, theme, m_title, m_option ? m_true_str : m_false_str, m_option);
 }
 
-SidebarEntryCallback::SidebarEntryCallback(const std::string& title, Callback cb, bool pop_on_click, const std::string& info)
+SidebarEntryCallback::SidebarEntryCallback(const std::string& title, const Callback& cb, bool pop_on_click, const std::string& info)
 : SidebarEntryBase{title, info}
 , m_callback{cb}
 , m_pop_on_click{pop_on_click} {
@@ -170,7 +170,7 @@ SidebarEntryCallback::SidebarEntryCallback(const std::string& title, Callback cb
     });
 }
 
-SidebarEntryCallback::SidebarEntryCallback(const std::string& title, Callback cb, const std::string& info)
+SidebarEntryCallback::SidebarEntryCallback(const std::string& title, const Callback& cb, const std::string& info)
 : SidebarEntryCallback{title, cb, false, info} {
 
 }
@@ -197,7 +197,7 @@ SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& item
     };
 }
 
-SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& items, Callback cb, const std::string& index, const std::string& info)
+SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& items, const Callback& cb, const std::string& index, const std::string& info)
 : SidebarEntryArray{title, items, cb, 0, info} {
 
     const auto it = std::find(m_items.cbegin(), m_items.cend(), index);
@@ -206,7 +206,7 @@ SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& item
     }
 }
 
-SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& items, Callback cb, s64 index, const std::string& info)
+SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& items, const Callback& cb, s64 index, const std::string& info)
 : SidebarEntryBase{title, info}
 , m_items{items}
 , m_callback{cb}
@@ -355,7 +355,7 @@ auto Sidebar::Draw(NVGcontext* vg, Theme* theme) -> void {
 
     Widget::Draw(vg, theme);
 
-    m_list->Draw(vg, theme, m_items.size(), [this](auto* vg, auto* theme, auto v, auto i) {
+    m_list->Draw(vg, theme, m_items.size(), [this](auto* vg, auto* theme, auto& v, auto i) {
         const auto& [x, y, w, h] = v;
 
         if (i != m_items.size() - 1) {

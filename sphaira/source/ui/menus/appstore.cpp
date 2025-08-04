@@ -288,7 +288,7 @@ void DrawIcon(NVGcontext* vg, const LazyImage& l, const LazyImage& d, float x, f
     }
 }
 
-void DrawIcon(NVGcontext* vg, const LazyImage& l, const LazyImage& d, Vec4 vec, bool rounded = true, float scale = 1.0) {
+void DrawIcon(NVGcontext* vg, const LazyImage& l, const LazyImage& d, const Vec4& vec, bool rounded = true, float scale = 1.0) {
     DrawIcon(vg, l, d, vec.x, vec.y, vec.w, vec.h, rounded, scale);
 }
 

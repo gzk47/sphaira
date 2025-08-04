@@ -70,7 +70,7 @@ auto Widget::HasAction(Button button) const -> bool {
     return m_actions.contains(button);
 }
 
-void Widget::SetAction(Button button, Action action) {
+void Widget::SetAction(Button button, const Action& action) {
     m_actions.insert_or_assign(button, action);
 }
 

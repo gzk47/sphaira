@@ -406,7 +406,7 @@ void Exit() {
 }
 
 #if ENABLE_NETWORK_INSTALL
-void InitInstallMode(OnInstallStart on_start, OnInstallWrite on_write, OnInstallClose on_close) {
+void InitInstallMode(const OnInstallStart& on_start, const OnInstallWrite& on_write, const OnInstallClose& on_close) {
     SCOPED_MUTEX(&g_shared_data.mutex);
     g_shared_data.on_start = on_start;
     g_shared_data.on_write = on_write;

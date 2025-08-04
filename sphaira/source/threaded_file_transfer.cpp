@@ -72,7 +72,7 @@ public:
 };
 
 struct ThreadData {
-    ThreadData(ui::ProgressBox* _pbox, s64 size, ReadCallback _rfunc, WriteCallback _wfunc, u64 buffer_size);
+    ThreadData(ui::ProgressBox* _pbox, s64 size, const ReadCallback& _rfunc, const WriteCallback& _wfunc, u64 buffer_size);
 
     auto GetResults() volatile -> Result;
     void WakeAllThreads();
@@ -131,8 +131,8 @@ private:
 private:
     // these need to be copied
     ui::ProgressBox* const pbox;
-    const ReadCallback rfunc;
-    const WriteCallback wfunc;
+    const ReadCallback& rfunc;
+    const WriteCallback& wfunc;
 
     // these need to be created
     Mutex mutex{};
@@ -165,7 +165,7 @@ private:
     std::atomic_bool write_running{true};
 };
 
-ThreadData::ThreadData(ui::ProgressBox* _pbox, s64 size, ReadCallback _rfunc, WriteCallback _wfunc, u64 buffer_size)
+ThreadData::ThreadData(ui::ProgressBox* _pbox, s64 size, const ReadCallback& _rfunc, const WriteCallback& _wfunc, u64 buffer_size)
 : pbox{_pbox}
 , rfunc{_rfunc}
 , wfunc{_wfunc}
@@ -355,7 +355,7 @@ auto GetAlternateCore(int id) {
     return id == 1 ? 2 : 1;
 }
 
-Result TransferInternal(ui::ProgressBox* pbox, s64 size, ReadCallback rfunc, WriteCallback wfunc, StartCallback2 sfunc, Mode mode, u64 buffer_size = NORMAL_BUFFER_SIZE) {
+Result TransferInternal(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfunc, const WriteCallback& wfunc, const StartCallback2& sfunc, Mode mode, u64 buffer_size = NORMAL_BUFFER_SIZE) {
     const auto is_file_based_emummc = App::IsFileBaseEmummc();
 
     if (is_file_based_emummc) {
@@ -480,18 +480,18 @@ Result TransferInternal(ui::ProgressBox* pbox, s64 size, ReadCallback rfunc, Wri
 
 } // namespace
 
-Result Transfer(ui::ProgressBox* pbox, s64 size, ReadCallback rfunc, WriteCallback wfunc, Mode mode) {
+Result Transfer(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfunc, const WriteCallback& wfunc, Mode mode) {
     return TransferInternal(pbox, size, rfunc, wfunc, nullptr, mode);
 }
 
-Result TransferPull(ui::ProgressBox* pbox, s64 size, ReadCallback rfunc, StartCallback sfunc, Mode mode) {
+Result TransferPull(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfunc, const StartCallback& sfunc, Mode mode) {
     return TransferInternal(pbox, size, rfunc, nullptr, [sfunc](StartThreadCallback start, PullCallback pull) -> Result {
         R_TRY(start());
         return sfunc(pull);
     }, mode);
 }
 
-Result TransferPull(ui::ProgressBox* pbox, s64 size, ReadCallback rfunc, StartCallback2 sfunc, Mode mode) {
+Result TransferPull(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfunc, const StartCallback2& sfunc, Mode mode) {
     return TransferInternal(pbox, size, rfunc, nullptr, sfunc, mode);
 }
 
@@ -575,7 +575,7 @@ Result TransferZip(ui::ProgressBox* pbox, void* zfile, fs::Fs* fs, const fs::FsP
     );
 }
 
-Result TransferUnzipAll(ui::ProgressBox* pbox, void* zfile, fs::Fs* fs, const fs::FsPath& base_path, UnzipAllFilter filter, Mode mode) {
+Result TransferUnzipAll(ui::ProgressBox* pbox, void* zfile, fs::Fs* fs, const fs::FsPath& base_path, const UnzipAllFilter& filter, Mode mode) {
     unz_global_info64 ginfo;
     if (UNZ_OK != unzGetGlobalInfo64(zfile, &ginfo)) {
         R_THROW(Result_UnzGetGlobalInfo64);
@@ -632,7 +632,7 @@ Result TransferUnzipAll(ui::ProgressBox* pbox, void* zfile, fs::Fs* fs, const fs
     R_SUCCEED();
 }
 
-Result TransferUnzipAll(ui::ProgressBox* pbox, const fs::FsPath& zip_out, fs::Fs* fs, const fs::FsPath& base_path, UnzipAllFilter filter, Mode mode) {
+Result TransferUnzipAll(ui::ProgressBox* pbox, const fs::FsPath& zip_out, fs::Fs* fs, const fs::FsPath& base_path, const UnzipAllFilter& filter, Mode mode) {
     zlib_filefunc64_def file_func;
     mz::FileFuncStdio(&file_func);
 

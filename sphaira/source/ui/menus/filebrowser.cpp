@@ -568,7 +568,7 @@ void FsView::Draw(NVGcontext* vg, Theme* theme) {
     constexpr float text_xoffset{15.f};
     bool got_dir_count = false;
 
-    m_list->Draw(vg, theme, m_entries_current.size(), [this, text_col, &got_dir_count](auto* vg, auto* theme, auto v, auto i) {
+    m_list->Draw(vg, theme, m_entries_current.size(), [this, text_col, &got_dir_count](auto* vg, auto* theme, auto& v, auto i) {
         const auto& [x, y, w, h] = v;
         auto& e = GetEntry(i);
 

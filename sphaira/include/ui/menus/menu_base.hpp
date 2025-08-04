@@ -33,9 +33,17 @@ struct MenuBase : Widget {
         return true;
     }
 
-    void SetTitle(std::string title);
-    void SetTitleSubHeading(std::string sub_heading);
-    void SetSubHeading(std::string sub_heading);
+    void SetTitle(const std::string& title) {
+        m_title = title;
+    }
+
+    void SetTitleSubHeading(const std::string& sub_heading) {
+        m_title_sub_heading = sub_heading;
+    }
+
+    void SetSubHeading(const std::string& sub_heading) {
+        m_sub_heading = sub_heading;
+    }
 
     auto GetTitle() const {
         return m_title;

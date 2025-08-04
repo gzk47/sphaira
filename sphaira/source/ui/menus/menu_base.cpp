@@ -110,16 +110,4 @@ void MenuBase::Draw(NVGcontext* vg, Theme* theme) {
     m_scroll_sub_heading.Draw(vg, true, 80, 685, text_w - 160, 18, NVG_ALIGN_LEFT, theme->GetColour(ThemeEntryID_TEXT), m_sub_heading.c_str());
 }
 
-void MenuBase::SetTitle(std::string title) {
-    m_title = title;
-}
-
-void MenuBase::SetTitleSubHeading(std::string sub_heading) {
-    m_title_sub_heading = sub_heading;
-}
-
-void MenuBase::SetSubHeading(std::string sub_heading) {
-    m_sub_heading = sub_heading;
-}
-
 } // namespace sphaira::ui::menu

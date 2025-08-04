@@ -17,7 +17,7 @@ struct ProgressBox final : Widget {
         int image,
         const std::string& action,
         const std::string& title,
-        ProgressBoxCallback callback, ProgressBoxDoneCallback done = [](Result rc){},
+        const ProgressBoxCallback& callback, const ProgressBoxDoneCallback& done = [](Result rc){},
         int cpuid = 1, int prio = PRIO_PREEMPTIVE, int stack_size = 1024*128
     );
     ~ProgressBox();

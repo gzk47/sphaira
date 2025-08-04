@@ -71,7 +71,7 @@ public:
     static void PopToMenu();
 
     // this is thread safe
-    static void Notify(std::string text, ui::NotifEntry::Side side = ui::NotifEntry::Side::RIGHT);
+    static void Notify(const std::string& text, ui::NotifEntry::Side side = ui::NotifEntry::Side::RIGHT);
     static void Notify(ui::NotifEntry entry);
     static void NotifyPop(ui::NotifEntry::Side side = ui::NotifEntry::Side::RIGHT);
     static void NotifyClear(ui::NotifEntry::Side side = ui::NotifEntry::Side::RIGHT);
