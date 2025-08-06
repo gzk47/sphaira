@@ -397,10 +397,6 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
                     );
                 });
 
-                options->Add<SidebarEntryBool>("Title cache"_i18n, m_title_cache.Get(), [this](bool& v_out){
-                    m_title_cache.Set(v_out);
-                });
-
                 options->Add<SidebarEntryCallback>("Delete title cache"_i18n, [this](){
                     App::Push<OptionBox>(
                         "Are you sure you want to delete the title cache?"_i18n,

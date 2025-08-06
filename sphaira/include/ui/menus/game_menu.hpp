@@ -102,7 +102,6 @@ private:
     option::OptionLong m_order{INI_SECTION, "order", OrderType::OrderType_Descending};
     option::OptionLong m_layout{INI_SECTION, "layout", LayoutType::LayoutType_Grid};
     option::OptionBool m_hide_forwarders{INI_SECTION, "hide_forwarders", false};
-    option::OptionBool m_title_cache{INI_SECTION, "title_cache", true};
 };
 
 struct NcmMetaData {
