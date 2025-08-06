@@ -181,7 +181,15 @@ struct Header {
     u64 size;
     u64 program_id;
     u32 context_id;
-    u32 sdk_version;
+    union {
+        u32 sdk_version;
+        struct {
+            u8 sdk_revision;
+            u8 sdk_micro;
+            u8 sdk_minor;
+            u8 sdk_major;
+        };
+    };
     u8 key_gen;                // see KeyGeneration.
     u8 sig_key_gen;
     u8 _0x222[0xE];            // empty.
@@ -214,6 +222,9 @@ struct Header {
     }
 };
 static_assert(sizeof(Header) == 0xC00);
+
+auto GetContentTypeStr(u8 content_type) -> const char*;
+auto GetDistributionTypeStr(u8 distribution_type) -> const char*;
 
 Result DecryptKeak(const keys::Keys& keys, Header& header);
 Result EncryptKeak(const keys::Keys& keys, Header& header, u8 key_generation);

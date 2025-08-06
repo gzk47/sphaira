@@ -327,6 +327,13 @@ Sidebar::Sidebar(const std::string& title, const std::string& sub, Side side)
 auto Sidebar::Update(Controller* controller, TouchInfo* touch) -> void {
     Widget::Update(controller, touch);
 
+    // pop if we have no more entries.
+    if (m_items.empty()) {
+        App::Notify("Closing empty sidebar"_i18n);
+        SetPop();
+        return;
+    }
+
     // if touched out of bounds, pop the sidebar and all widgets below it.
     if (touch->is_clicked && !touch->in_range(GetPos())) {
         App::PopToMenu();

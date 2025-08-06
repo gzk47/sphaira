@@ -4,8 +4,10 @@
 #include "yati/nx/service_guard.h"
 #include "defines.hpp"
 #include "log.hpp"
+
 #include <memory>
 #include <cstring>
+#include <ranges>
 
 namespace sphaira::es {
 namespace {
@@ -327,6 +329,58 @@ Result PatchTicket(std::vector<u8>& ticket, std::span<const u8> cert_chain, u8 k
     std::memcpy(ticket.data(), &out, sizeof(out));
 
     R_SUCCEED();
+}
+
+Result GetCommonTickets(std::vector<FsRightsId>& out) {
+    s32 count;
+    R_TRY(es::CountCommonTicket(&count));
+
+    s32 written;
+    out.resize(count);
+    R_TRY(es::ListCommonTicket(&written, out.data(), out.size()));
+    out.resize(written);
+
+    R_SUCCEED();
+}
+
+Result GetPersonalisedTickets(std::vector<FsRightsId>& out) {
+    s32 count;
+    R_TRY(es::CountPersonalizedTicket(&count));
+
+    s32 written;
+    out.resize(count);
+    R_TRY(es::ListPersonalizedTicket(&written, out.data(), out.size()));
+    out.resize(written);
+
+    R_SUCCEED();
+}
+
+Result IsRightsIdCommon(const FsRightsId& id, bool* out) {
+    std::vector<FsRightsId> ids;
+    R_TRY(GetCommonTickets(ids));
+
+    *out = IsRightsIdFound(id, ids);
+    R_SUCCEED();
+}
+
+Result IsRightsIdPersonalised(const FsRightsId& id, bool* out) {
+    std::vector<FsRightsId> ids;
+    R_TRY(GetPersonalisedTickets(ids));
+
+    *out = IsRightsIdFound(id, ids);
+    R_SUCCEED();
+}
+
+bool IsRightsIdValid(const FsRightsId& id) {
+    const FsRightsId empty_id{};
+    return 0 != std::memcmp(std::addressof(id), std::addressof(empty_id), sizeof(id));
+}
+
+bool IsRightsIdFound(const FsRightsId& id, std::span<const FsRightsId> ids) {
+    const auto it = std::ranges::find_if(ids, [&id](auto& e){
+        return !std::memcmp(&id, &e, sizeof(e));
+    });
+    return it != ids.end();
 }
 
 } // namespace sphaira::es

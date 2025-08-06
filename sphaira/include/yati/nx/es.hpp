@@ -203,4 +203,16 @@ Result ShouldPatchTicket(const TicketData& data, std::span<const u8> ticket, std
 Result ShouldPatchTicket(std::span<const u8> ticket, std::span<const u8> cert_chain, bool patch_personalised, bool& should_patch);
 Result PatchTicket(std::vector<u8>& ticket, std::span<const u8> cert_chain, u8 key_gen, const keys::Keys& keys, bool patch_personalised);
 
+// fills out with the list of common / personalised rights ids.
+Result GetCommonTickets(std::vector<FsRightsId>& out);
+Result GetPersonalisedTickets(std::vector<FsRightsId>& out);
+
+// checks if the rights id is found in common / personalised.
+Result IsRightsIdCommon(const FsRightsId& id, bool* out);
+Result IsRightsIdPersonalised(const FsRightsId& id, bool* out);
+
+// helper for the above if the db has already been parsed.
+bool IsRightsIdValid(const FsRightsId& id);
+bool IsRightsIdFound(const FsRightsId& id, std::span<const FsRightsId> ids);
+
 } // namespace sphaira::es

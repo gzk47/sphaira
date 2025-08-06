@@ -96,6 +96,28 @@ const unsigned char acid_fixed_key_moduli_retail[0x2][0x100] = { /* Fixed RSA ke
 
 } // namespace
 
+auto GetContentTypeStr(u8 content_type) -> const char* {
+    switch (content_type) {
+        case ContentType_Program: return "Program";
+        case ContentType_Meta: return "Meta";
+        case ContentType_Control: return "Control";
+        case ContentType_Manual: return "Manual";
+        case ContentType_Data: return "Data";
+        case ContentType_PublicData: return "PublicData";
+    }
+
+    return "Unknown";
+}
+
+auto GetDistributionTypeStr(u8 distribution_type) -> const char* {
+    switch (distribution_type) {
+        case DistributionType_System: return "System";
+        case DistributionType_GameCard: return "GameCard";
+    }
+
+    return "Unknown";
+}
+
 Result DecryptKeak(const keys::Keys& keys, Header& header) {
     const auto key_generation = header.GetKeyGeneration();
 
@@ -209,46 +231,34 @@ Result ParseControl(const fs::FsPath& path, u64 program_id, void* nacp_out, s64 
             }
         }
 
-        static const char* icon_names[] = {
+        static const char* icon_names[SetLanguage_Total] = {
             [SetLanguage_JA] = "icon_Japanese.dat",
             [SetLanguage_ENUS] = "icon_AmericanEnglish.dat",
             [SetLanguage_FR] = "icon_French.dat",
             [SetLanguage_DE] = "icon_German.dat",
             [SetLanguage_IT] = "icon_Italian.dat",
             [SetLanguage_ES] = "icon_Spanish.dat",
-            [SetLanguage_ZHCN] = "icon_Chinese.dat",
+            [SetLanguage_ZHCN] = "icon_SimplifiedChinese.dat",
             [SetLanguage_KO] = "icon_Korean.dat",
             [SetLanguage_NL] = "icon_Dutch.dat",
             [SetLanguage_PT] = "icon_Portuguese.dat",
             [SetLanguage_RU] = "icon_Russian.dat",
-            [SetLanguage_ZHTW] = "icon_Taiwanese.dat",
+            [SetLanguage_ZHTW] = "icon_TraditionalChinese.dat",
             [SetLanguage_ENGB] = "icon_BritishEnglish.dat",
             [SetLanguage_FRCA] = "icon_CanadianFrench.dat",
             [SetLanguage_ES419] = "icon_LatinAmericanSpanish.dat",
+            [SetLanguage_ZHHANS] = "icon_SimplifiedChinese.dat",
+            [SetLanguage_ZHHANT] = "icon_TraditionalChinese.dat",
+            [SetLanguage_PTBR] = "icon_BrazilianPortuguese.dat",
         };
 
-        // load all icon entries and try and find the one that we want.
-        fs::Dir dir;
-        R_TRY(fs.OpenDirectory("/", FsDirOpenMode_ReadFiles, &dir));
-
-        std::vector<FsDirectoryEntry> entries;
-        R_TRY(dir.ReadAll(entries));
-
-        for (const auto& e : entries) {
-            if (!std::strcmp(e.name, icon_names[setLanguage])) {
-                fs::File file;
-                R_TRY(fs.OpenFile(fs::AppendPath("/", e.name), FsOpenMode_Read, &file));
-                icon_out->resize(e.file_size);
-
-                u64 bytes_read;
-                R_TRY(file.Read(0, icon_out->data(), icon_out->size(), 0, &bytes_read));
-                R_SUCCEED();
-            }
-        }
-
-        // otherwise, fallback to US icon.
+        // try and open the icon for the specific langauge.
         fs::File file;
-        R_TRY(fs.OpenFile(fs::AppendPath("/", icon_names[SetLanguage_ENUS]), FsOpenMode_Read, &file));
+        const auto file_name = icon_names[setLanguage];
+        if (!std::strlen(file_name) || R_FAILED(fs.OpenFile(fs::AppendPath("/", file_name), FsOpenMode_Read, &file))) {
+            // otherwise, fallback to US icon.
+            R_TRY(fs.OpenFile(fs::AppendPath("/", icon_names[SetLanguage_ENUS]), FsOpenMode_Read, &file));
+        }
 
         s64 size;
         R_TRY(file.GetSize(&size));

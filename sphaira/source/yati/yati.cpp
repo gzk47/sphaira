@@ -348,7 +348,6 @@ struct Yati {
     NcmContentMetaDatabase db{};
     NcmStorageId storage_id{};
 
-    Service ns_app{};
     std::unique_ptr<container::Base> container{};
     Config config{};
     keys::Keys keys{};
@@ -382,11 +381,6 @@ Result ThreadData::Read(void* buf, s64 size, u64* bytes_read) {
     return rc;
 }
 
-auto isRightsIdValid(FsRightsId id) -> bool {
-    FsRightsId empty_id{};
-    return 0 != std::memcmp(std::addressof(id), std::addressof(empty_id), sizeof(id));
-}
-
 struct HashStr {
     char str[0x21];
 };
@@ -402,7 +396,7 @@ HashStr hexIdToStr(auto id) {
 auto GetTicketCollection(const nca::Header& header, std::span<TikCollection> tik) -> TikCollection* {
     TikCollection* ticket{};
 
-    if (isRightsIdValid(header.rights_id)) {
+    if (es::IsRightsIdValid(header.rights_id)) {
         auto it = std::ranges::find_if(tik, [&header](auto& e){
             return !std::memcmp(&header.rights_id, &e.rights_id, sizeof(e.rights_id));
         });
@@ -418,7 +412,7 @@ auto GetTicketCollection(const nca::Header& header, std::span<TikCollection> tik
 }
 
 Result HasRequiredTicket(const nca::Header& header, TikCollection* ticket) {
-    if (isRightsIdValid(header.rights_id)) {
+    if (es::IsRightsIdValid(header.rights_id)) {
         log_write("looking for ticket %s\n", hexIdToStr(header.rights_id).str);
         R_UNLESS(ticket, Result_YatiTicketNotFound);
         log_write("ticket found\n");
@@ -879,8 +873,7 @@ Yati::Yati(ui::ProgressBox* _pbox, source::Base* _source) : pbox{_pbox}, source{
 
 Yati::~Yati() {
     splCryptoExit();
-    serviceClose(std::addressof(ns_app));
-    nsExit();
+    ns::Exit();
     es::Exit();
 
     for (size_t i = 0; i < std::size(NCM_STORAGE_IDS); i++) {
@@ -913,8 +906,7 @@ Result Yati::Setup(const ConfigOverride& override) {
 
     R_TRY(source->GetOpenResult());
     R_TRY(splCryptoInitialize());
-    R_TRY(nsInitialize());
-    R_TRY(nsGetApplicationManagerInterface(std::addressof(ns_app)));
+    R_TRY(ns::Initialize());
     R_TRY(es::Initialize());
 
     for (size_t i = 0; i < std::size(NCM_STORAGE_IDS); i++) {
@@ -1373,7 +1365,7 @@ Result Yati::RegisterNcasAndPushRecord(const CnmtCollection& cnmt, u32 latest_ve
     content_storage_record.storage_id = storage_id;
     pbox->NewTransfer("Pushing application record"_i18n);
 
-    R_TRY(ns::PushApplicationRecord(std::addressof(ns_app), app_id, std::addressof(content_storage_record), 1));
+    R_TRY(ns::PushApplicationRecord(app_id, std::addressof(content_storage_record), 1));
     if (hosversionAtLeast(6,0,0)) {
         R_TRY(avmInitialize());
         ON_SCOPE_EXIT(avmExit());

@@ -2,6 +2,10 @@
 
 #include "ui/menus/grid_menu_base.hpp"
 #include "ui/list.hpp"
+
+#include "yati/container/base.hpp"
+#include "yati/nx/keys.hpp"
+
 #include "title_info.hpp"
 #include "fs.hpp"
 #include "option.hpp"
@@ -100,5 +104,70 @@ private:
     option::OptionBool m_hide_forwarders{INI_SECTION, "hide_forwarders", false};
     option::OptionBool m_title_cache{INI_SECTION, "title_cache", true};
 };
+
+struct NcmMetaData {
+    // points to global service, do not close manually!
+    NcmContentStorage* cs{};
+    NcmContentMetaDatabase* db{};
+    u64 app_id{};
+    NcmContentMetaKey key{};
+};
+
+Result GetMetaEntries(const Entry& e, title::MetaEntries& out, u32 flags = title::ContentFlag_All);
+
+Result GetNcmMetaFromMetaStatus(const NsApplicationContentMetaStatus& status, NcmMetaData& out);
+void DeleteMetaEntries(u64 app_id, int image, const std::string& name, const title::MetaEntries& entries);
+
+struct TikEntry {
+    FsRightsId id{};
+    u8 key_gen{};
+    std::vector<u8> tik_data{};
+    std::vector<u8> cert_data{};
+};
+
+struct NspEntry {
+    // application name.
+    std::string application_name{};
+    // name of the nsp (name [id][v0][BASE].nsp).
+    fs::FsPath path{};
+    // tickets and cert data, will be empty if title key crypto isn't used.
+    std::vector<TikEntry> tickets{};
+    // all the collections for this nsp, such as nca's and tickets.
+    std::vector<yati::container::CollectionEntry> collections{};
+    // raw nsp data (header, file table and string table).
+    std::vector<u8> nsp_data{};
+    // size of the entier nsp.
+    s64 nsp_size{};
+    // copy of ncm cs, it is not closed.
+    NcmContentStorage cs{};
+    // copy of the icon, if invalid, it will use the default icon.
+    int icon{};
+
+    Result Read(void* buf, s64 off, s64 size, u64* bytes_read);
+
+private:
+    static auto InRange(s64 off, s64 offset, s64 size) -> bool {
+        return off < offset + size && off >= offset;
+    }
+
+    static auto ClipSize(s64 off, s64 size, s64 file_size) -> s64 {
+        return std::min(size, file_size - off);
+    }
+};
+
+struct ContentInfoEntry {
+    NsApplicationContentMetaStatus status{};
+    std::vector<NcmContentInfo> content_infos{};
+    std::vector<NcmRightsId> ncm_rights_id{};
+};
+
+auto BuildNspPath(const Entry& e, const NsApplicationContentMetaStatus& status) -> fs::FsPath;
+Result BuildContentEntry(const NsApplicationContentMetaStatus& status, ContentInfoEntry& out);
+Result BuildNspEntry(const Entry& e, const ContentInfoEntry& info, const keys::Keys& keys, NspEntry& out);
+Result BuildNspEntries(Entry& e, const title::MetaEntries& meta_entries, std::vector<NspEntry>& out);
+Result BuildNspEntries(Entry& e, u32 flags, std::vector<NspEntry>& out);
+
+// dumps the array of nsp entries.
+void DumpNsp(const std::vector<NspEntry>& entries);
 
 } // namespace sphaira::ui::menu::game

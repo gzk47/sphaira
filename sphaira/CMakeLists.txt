@@ -49,6 +49,8 @@ add_executable(sphaira
     source/ui/menus/mtp_menu.cpp
     source/ui/menus/gc_menu.cpp
     source/ui/menus/game_menu.cpp
+    source/ui/menus/game_meta_menu.cpp
+    source/ui/menus/game_nca_menu.cpp
     source/ui/menus/grid_menu_base.cpp
     source/ui/menus/install_stream_menu_base.cpp
 
@@ -207,7 +209,7 @@ FetchContent_Declare(libusbhsfs
 
 FetchContent_Declare(libnxtc
     GIT_REPOSITORY https://github.com/ITotalJustice/libnxtc.git
-    GIT_TAG 0d369b8
+    GIT_TAG 88ce3d8
 )
 
 FetchContent_Declare(nvjpg

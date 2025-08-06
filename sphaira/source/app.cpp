@@ -520,6 +520,12 @@ void App::Loop() {
 auto App::Push(std::unique_ptr<ui::Widget>&& widget) -> void {
     log_write("[Mui] pushing widget\n");
 
+    // check if the widget wants to pop before adding.
+    // this can happen if something failed in the constructor and the widget wants to exit.
+    if (widget->ShouldPop()) {
+        return;
+    }
+
     if (!g_app->m_widgets.empty()) {
         g_app->m_widgets.back()->OnFocusLost();
     }
@@ -1767,9 +1773,9 @@ void App::DisplayAdvancedOptions(bool left_side) {
     },  "Change the install options.\n"\
         "You can enable installing from here."_i18n);
 
-    options->Add<ui::SidebarEntryCallback>("Dump options"_i18n, [left_side](){
+    options->Add<ui::SidebarEntryCallback>("Export options"_i18n, [left_side](){
         App::DisplayDumpOptions(left_side);
-    },  "Change the dump options."_i18n);
+    },  "Change the export options."_i18n);
 
     static const char* erpt_path = "/atmosphere/erpt_reports";
     options->Add<ui::SidebarEntryBool>("Disable erpt_reports"_i18n, fs::FsNativeSd().FileExists(erpt_path), [](bool& enable){
@@ -1879,7 +1885,7 @@ void App::DisplayInstallOptions(bool left_side) {
 }
 
 void App::DisplayDumpOptions(bool left_side) {
-    auto options = std::make_unique<ui::Sidebar>("Dump Options"_i18n, left_side ? ui::Sidebar::Side::LEFT : ui::Sidebar::Side::RIGHT);
+    auto options = std::make_unique<ui::Sidebar>("Export Options"_i18n, left_side ? ui::Sidebar::Side::LEFT : ui::Sidebar::Side::RIGHT);
     ON_SCOPE_EXIT(App::Push(std::move(options)));
 
     options->Add<ui::SidebarEntryBool>(

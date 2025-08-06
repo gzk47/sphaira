@@ -99,6 +99,10 @@ struct ThreadData {
 
     void SetReadResult(Result result) {
         read_result = result;
+
+        // wake up write thread as it may be waiting on data that never comes.
+        condvarWakeOne(std::addressof(can_write));
+
         if (R_FAILED(result)) {
             ueventSignal(GetDoneEvent());
         }

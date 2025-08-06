@@ -8,6 +8,7 @@
 #include "swkbd.hpp"
 
 #include "ui/menus/game_menu.hpp"
+#include "ui/menus/game_meta_menu.hpp"
 #include "ui/menus/save_menu.hpp"
 #include "ui/sidebar.hpp"
 #include "ui/error_box.hpp"
@@ -18,6 +19,7 @@
 
 #include "yati/nx/ncm.hpp"
 #include "yati/nx/nca.hpp"
+#include "yati/nx/ns.hpp"
 #include "yati/nx/es.hpp"
 #include "yati/container/base.hpp"
 #include "yati/container/nsp.hpp"
@@ -29,87 +31,6 @@
 
 namespace sphaira::ui::menu::game {
 namespace {
-
-struct ContentInfoEntry {
-    NsApplicationContentMetaStatus status{};
-    std::vector<NcmContentInfo> content_infos{};
-    std::vector<NcmRightsId> ncm_rights_id{};
-};
-
-struct TikEntry {
-    FsRightsId id{};
-    u8 key_gen{};
-    std::vector<u8> tik_data{};
-    std::vector<u8> cert_data{};
-};
-
-struct NspEntry {
-    // application name.
-    std::string application_name{};
-    // name of the nsp (name [id][v0][BASE].nsp).
-    fs::FsPath path{};
-    // tickets and cert data, will be empty if title key crypto isn't used.
-    std::vector<TikEntry> tickets{};
-    // all the collections for this nsp, such as nca's and tickets.
-    std::vector<yati::container::CollectionEntry> collections{};
-    // raw nsp data (header, file table and string table).
-    std::vector<u8> nsp_data{};
-    // size of the entier nsp.
-    s64 nsp_size{};
-    // copy of ncm cs, it is not closed.
-    NcmContentStorage cs{};
-    // copy of the icon, if invalid, it will use the default icon.
-    int icon{};
-
-    // todo: benchmark manual sdcard read and decryption vs ncm.
-    Result Read(void* buf, s64 off, s64 size, u64* bytes_read) {
-        if (off < nsp_data.size()) {
-            *bytes_read = size = ClipSize(off, size, nsp_data.size());
-            std::memcpy(buf, nsp_data.data() + off, size);
-            R_SUCCEED();
-        }
-
-        // adjust offset.
-        off -= nsp_data.size();
-
-        for (const auto& collection : collections) {
-            if (InRange(off, collection.offset, collection.size)) {
-                // adjust offset relative to the collection.
-                off -= collection.offset;
-                *bytes_read = size = ClipSize(off, size, collection.size);
-
-                if (collection.name.ends_with(".nca")) {
-                    const auto id = ncm::GetContentIdFromStr(collection.name.c_str());
-                    return ncmContentStorageReadContentIdFile(&cs, buf, size, &id, off);
-                } else if (collection.name.ends_with(".tik") || collection.name.ends_with(".cert")) {
-                    FsRightsId id;
-                    keys::parse_hex_key(&id, collection.name.c_str());
-
-                    const auto it = std::ranges::find_if(tickets, [&id](auto& e){
-                        return !std::memcmp(&id, &e.id, sizeof(id));
-                    });
-                    R_UNLESS(it != tickets.end(), Result_GameBadReadForDump);
-
-                    const auto& data = collection.name.ends_with(".tik") ? it->tik_data : it->cert_data;
-                    std::memcpy(buf, data.data() + off, size);
-                    R_SUCCEED();
-                }
-            }
-        }
-
-        log_write("did not find collection...\n");
-        return 0x1;
-    }
-
-private:
-    static auto InRange(s64 off, s64 offset, s64 size) -> bool {
-        return off < offset + size && off >= offset;
-    }
-
-    static auto ClipSize(s64 off, s64 size, s64 file_size) -> s64 {
-        return std::min(size, file_size - off);
-    }
-};
 
 struct NspSource final : dump::BaseSource {
     NspSource(const std::vector<NspEntry>& entries) : m_entries{entries} {
@@ -181,9 +102,6 @@ Result Notify(Result rc, const std::string& error_message) {
 
     return rc;
 }
-Result GetMetaEntries(const Entry& e, title::MetaEntries& out, u32 flags = title::ContentFlag_All) {
-    return title::GetMetaEntries(e.app_id, out, flags);
-}
 
 bool LoadControlImage(Entry& e, title::ThreadResultData* result) {
     if (!e.image && result && !result->icon.empty()) {
@@ -217,11 +135,6 @@ void LoadControlEntry(Entry& e, bool force_image_load = false) {
     }
 }
 
-auto isRightsIdValid(FsRightsId id) -> bool {
-    FsRightsId empty_id{};
-    return 0 != std::memcmp(std::addressof(id), std::addressof(empty_id), sizeof(id));
-}
-
 struct HashStr {
     char str[0x21];
 };
@@ -232,170 +145,6 @@ HashStr hexIdToStr(auto id) {
     const auto id_upper = std::byteswap(*(u64*)(id.c + 0x8));
     std::snprintf(str.str, 0x21, "%016lx%016lx", id_lower, id_upper);
     return str;
-}
-
-auto BuildNspPath(const Entry& e, const NsApplicationContentMetaStatus& status) -> fs::FsPath {
-    fs::FsPath name_buf = e.GetName();
-    title::utilsReplaceIllegalCharacters(name_buf, true);
-
-    char version[sizeof(NacpStruct::display_version) + 1]{};
-    if (status.meta_type == NcmContentMetaType_Patch) {
-        u64 program_id;
-        fs::FsPath path;
-        if (R_SUCCEEDED(title::GetControlPathFromStatus(status, &program_id, &path))) {
-            char display_version[0x10];
-            if (R_SUCCEEDED(nca::ParseControl(path, program_id, display_version, sizeof(display_version), nullptr, offsetof(NacpStruct, display_version)))) {
-                std::snprintf(version, sizeof(version), "%s ", display_version);
-            }
-        }
-    }
-
-    fs::FsPath path;
-    if (App::GetApp()->m_dump_app_folder.Get()) {
-        std::snprintf(path, sizeof(path), "%s/%s %s[%016lX][v%u][%s].nsp", name_buf.s, name_buf.s, version, status.application_id, status.version, ncm::GetMetaTypeShortStr(status.meta_type));
-    } else {
-        std::snprintf(path, sizeof(path), "%s %s[%016lX][v%u][%s].nsp", name_buf.s, version, status.application_id, status.version, ncm::GetMetaTypeShortStr(status.meta_type));
-    }
-
-    return path;
-}
-
-Result BuildContentEntry(const NsApplicationContentMetaStatus& status, ContentInfoEntry& out) {
-    auto& cs = title::GetNcmCs(status.storageID);
-    auto& db = title::GetNcmDb(status.storageID);
-    const auto app_id = ncm::GetAppId(status.meta_type, status.application_id);
-
-    auto id_min = status.application_id;
-    auto id_max = status.application_id;
-    // workaround N bug where they don't check the full range in the ID filter.
-    // https://github.com/Atmosphere-NX/Atmosphere/blob/1d3f3c6e56b994b544fc8cd330c400205d166159/libraries/libstratosphere/source/ncm/ncm_on_memory_content_meta_database_impl.cpp#L22
-    if (status.storageID == NcmStorageId_None || status.storageID == NcmStorageId_GameCard) {
-        id_min -= 1;
-        id_max += 1;
-    }
-
-    s32 meta_total;
-    s32 meta_entries_written;
-    NcmContentMetaKey key;
-    R_TRY(ncmContentMetaDatabaseList(std::addressof(db), std::addressof(meta_total), std::addressof(meta_entries_written), std::addressof(key), 1, (NcmContentMetaType)status.meta_type, app_id, id_min, id_max, NcmContentInstallType_Full));
-    log_write("ncmContentMetaDatabaseList(): AppId: %016lX Id: %016lX total: %d written: %d storageID: %u key.id %016lX\n", app_id, status.application_id, meta_total, meta_entries_written, status.storageID, key.id);
-    R_UNLESS(meta_total == 1, Result_GameMultipleKeysFound);
-    R_UNLESS(meta_entries_written == 1, Result_GameMultipleKeysFound);
-
-    std::vector<NcmContentInfo> cnmt_infos;
-    for (s32 i = 0; ; i++) {
-        s32 entries_written;
-        NcmContentInfo info_out;
-        R_TRY(ncmContentMetaDatabaseListContentInfo(std::addressof(db), std::addressof(entries_written), std::addressof(info_out), 1, std::addressof(key), i));
-
-        if (!entries_written) {
-            break;
-        }
-
-        // check if we need to fetch tickets.
-        NcmRightsId ncm_rights_id;
-        R_TRY(ncmContentStorageGetRightsIdFromContentId(std::addressof(cs), std::addressof(ncm_rights_id), std::addressof(info_out.content_id), FsContentAttributes_All));
-
-        if (isRightsIdValid(ncm_rights_id.rights_id)) {
-            const auto it = std::ranges::find_if(out.ncm_rights_id, [&ncm_rights_id](auto& e){
-                return !std::memcmp(&e, &ncm_rights_id, sizeof(ncm_rights_id));
-            });
-
-            if (it == out.ncm_rights_id.end()) {
-                out.ncm_rights_id.emplace_back(ncm_rights_id);
-            }
-        }
-
-        if (info_out.content_type == NcmContentType_Meta) {
-            cnmt_infos.emplace_back(info_out);
-        } else {
-            out.content_infos.emplace_back(info_out);
-        }
-    }
-
-    // append cnmt at the end of the list, following StandardNSP spec.
-    out.content_infos.insert_range(out.content_infos.end(), cnmt_infos);
-    out.status = status;
-    R_SUCCEED();
-}
-
-Result BuildNspEntry(const Entry& e, const ContentInfoEntry& info, const keys::Keys& keys, NspEntry& out) {
-    out.application_name = e.GetName();
-    out.path = BuildNspPath(e, info.status);
-    s64 offset{};
-
-    for (auto& e : info.content_infos) {
-        char nca_name[0x200];
-        std::snprintf(nca_name, sizeof(nca_name), "%s%s", hexIdToStr(e.content_id).str, e.content_type == NcmContentType_Meta ? ".cnmt.nca" : ".nca");
-
-        u64 size;
-        ncmContentInfoSizeToU64(std::addressof(e), std::addressof(size));
-
-        out.collections.emplace_back(nca_name, offset, size);
-        offset += size;
-    }
-
-    for (auto& ncm_rights_id : info.ncm_rights_id) {
-        const auto rights_id = ncm_rights_id.rights_id;
-        const auto key_gen = ncm_rights_id.key_generation;
-
-        TikEntry entry{rights_id, key_gen};
-        log_write("rights id is valid, fetching common ticket and cert\n");
-
-        u64 tik_size;
-        u64 cert_size;
-        R_TRY(es::GetCommonTicketAndCertificateSize(&tik_size, &cert_size, &rights_id));
-        log_write("got tik_size: %zu cert_size: %zu\n", tik_size, cert_size);
-
-        entry.tik_data.resize(tik_size);
-        entry.cert_data.resize(cert_size);
-        R_TRY(es::GetCommonTicketAndCertificateData(&tik_size, &cert_size, entry.tik_data.data(), entry.tik_data.size(), entry.cert_data.data(), entry.cert_data.size(), &rights_id));
-        log_write("got tik_data: %zu cert_data: %zu\n", tik_size, cert_size);
-
-        // patch fake ticket / convert personalised to common if needed.
-        R_TRY(es::PatchTicket(entry.tik_data, entry.cert_data, key_gen, keys, App::GetApp()->m_dump_convert_to_common_ticket.Get()));
-
-        char tik_name[0x200];
-        std::snprintf(tik_name, sizeof(tik_name), "%s%s", hexIdToStr(rights_id).str, ".tik");
-
-        char cert_name[0x200];
-        std::snprintf(cert_name, sizeof(cert_name), "%s%s", hexIdToStr(rights_id).str, ".cert");
-
-        out.collections.emplace_back(tik_name, offset, entry.tik_data.size());
-        offset += entry.tik_data.size();
-
-        out.collections.emplace_back(cert_name, offset, entry.cert_data.size());
-        offset += entry.cert_data.size();
-
-        out.tickets.emplace_back(entry);
-    }
-
-    out.nsp_data = yati::container::Nsp::Build(out.collections, out.nsp_size);
-    out.cs = title::GetNcmCs(info.status.storageID);
-
-    R_SUCCEED();
-}
-
-Result BuildNspEntries(Entry& e, u32 flags, std::vector<NspEntry>& out) {
-    LoadControlEntry(e);
-
-    title::MetaEntries meta_entries;
-    R_TRY(GetMetaEntries(e, meta_entries, flags));
-
-    keys::Keys keys;
-    R_TRY(keys::parse_keys(keys, true));
-
-    for (const auto& status : meta_entries) {
-        ContentInfoEntry info;
-        R_TRY(BuildContentEntry(status, info));
-
-        NspEntry nsp;
-        R_TRY(BuildNspEntry(e, info, keys, nsp));
-        out.emplace_back(nsp).icon = e.image;
-    }
-
-    R_UNLESS(!out.empty(), Result_GameNoNspEntriesBuilt);
-    R_SUCCEED();
 }
 
 void FreeEntry(NVGcontext* vg, Entry& e) {
@@ -436,6 +185,45 @@ Result CreateSave(u64 app_id, AccountUid uid) {
 }
 
 } // namespace
+
+Result NspEntry::Read(void* buf, s64 off, s64 size, u64* bytes_read) {
+    if (off < nsp_data.size()) {
+        *bytes_read = size = ClipSize(off, size, nsp_data.size());
+        std::memcpy(buf, nsp_data.data() + off, size);
+        R_SUCCEED();
+    }
+
+    // adjust offset.
+    off -= nsp_data.size();
+
+    for (const auto& collection : collections) {
+        if (InRange(off, collection.offset, collection.size)) {
+            // adjust offset relative to the collection.
+            off -= collection.offset;
+            *bytes_read = size = ClipSize(off, size, collection.size);
+
+            if (collection.name.ends_with(".nca")) {
+                const auto id = ncm::GetContentIdFromStr(collection.name.c_str());
+                return ncmContentStorageReadContentIdFile(&cs, buf, size, &id, off);
+            } else if (collection.name.ends_with(".tik") || collection.name.ends_with(".cert")) {
+                FsRightsId id;
+                keys::parse_hex_key(&id, collection.name.c_str());
+
+                const auto it = std::ranges::find_if(tickets, [&id](auto& e){
+                    return !std::memcmp(&id, &e.id, sizeof(id));
+                });
+                R_UNLESS(it != tickets.end(), Result_GameBadReadForDump);
+
+                const auto& data = collection.name.ends_with(".tik") ? it->tik_data : it->cert_data;
+                std::memcpy(buf, data.data() + off, size);
+                R_SUCCEED();
+            }
+        }
+    }
+
+    log_write("did not find collection...\n");
+    return 0x1;
+}
 
 Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
     this->SetActions(
@@ -517,11 +305,9 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
                     });
                 });
 
-                #if 0
-                options->Add<SidebarEntryCallback>("Info"_i18n, [this](){
-
+                options->Add<SidebarEntryCallback>("View application content"_i18n, [this](){
+                    App::Push<meta::Menu>(m_entries[m_index]);
                 });
-                #endif
 
                 options->Add<SidebarEntryCallback>("Launch random game"_i18n, [this](){
                     const auto random_index = randomGet64() % std::size(m_entries);
@@ -538,61 +324,28 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
                     );
                 });
 
-                options->Add<SidebarEntryCallback>("List meta records"_i18n, [this](){
-                    title::MetaEntries meta_entries;
-                    const auto rc = GetMetaEntries(m_entries[m_index], meta_entries);
-                    if (R_FAILED(rc)) {
-                        App::Push<ui::ErrorBox>(rc,
-                            i18n::get("Failed to list application meta entries")
-                        );
-                        return;
-                    }
-
-                    if (meta_entries.empty()) {
-                        App::Notify("No meta entries found...\n"_i18n);
-                        return;
-                    }
-
-                    PopupList::Items items;
-                    for (auto& e : meta_entries) {
-                        char buf[256];
-                        std::snprintf(buf, sizeof(buf), "Type: %s Storage: %s [%016lX][v%u]", ncm::GetMetaTypeStr(e.meta_type), ncm::GetStorageIdStr(e.storageID), e.application_id, e.version);
-                        items.emplace_back(buf);
-                    }
-
-                    App::Push<PopupList>(
-                        "Entries"_i18n, items, [this, meta_entries](auto op_index){
-                            #if 0
-                            if (op_index) {
-                                const auto& e = meta_entries[*op_index];
-                            }
-                            #endif
-                        }
-                    );
-                });
-
-                options->Add<SidebarEntryCallback>("Dump"_i18n, [this](){
-                    auto options = std::make_unique<Sidebar>("Select content to dump"_i18n, Sidebar::Side::RIGHT);
+                options->Add<SidebarEntryCallback>("Export NSP"_i18n, [this](){
+                    auto options = std::make_unique<Sidebar>("Select content to export"_i18n, Sidebar::Side::RIGHT);
                     ON_SCOPE_EXIT(App::Push(std::move(options)));
 
-                    options->Add<SidebarEntryCallback>("Dump All"_i18n, [this](){
+                    options->Add<SidebarEntryCallback>("Export All"_i18n, [this](){
                         DumpGames(title::ContentFlag_All);
                     }, true);
-                    options->Add<SidebarEntryCallback>("Dump Application"_i18n, [this](){
+                    options->Add<SidebarEntryCallback>("Export Application"_i18n, [this](){
                         DumpGames(title::ContentFlag_Application);
                     }, true);
-                    options->Add<SidebarEntryCallback>("Dump Patch"_i18n, [this](){
+                    options->Add<SidebarEntryCallback>("Export Patch"_i18n, [this](){
                         DumpGames(title::ContentFlag_Patch);
                     }, true);
-                    options->Add<SidebarEntryCallback>("Dump AddOnContent"_i18n, [this](){
+                    options->Add<SidebarEntryCallback>("Export AddOnContent"_i18n, [this](){
                         DumpGames(title::ContentFlag_AddOnContent);
                     }, true);
-                    options->Add<SidebarEntryCallback>("Dump DataPatch"_i18n, [this](){
+                    options->Add<SidebarEntryCallback>("Export DataPatch"_i18n, [this](){
                         DumpGames(title::ContentFlag_DataPatch);
                     }, true);
                 }, true);
 
-                options->Add<SidebarEntryCallback>("Dump options"_i18n, [this](){
+                options->Add<SidebarEntryCallback>("Export options"_i18n, [this](){
                     App::DisplayDumpOptions(false);
                 });
 
@@ -666,7 +419,7 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
 
     OnLayoutChange();
 
-    nsInitialize();
+    ns::Initialize();
     es::Initialize();
     title::Init();
 }
@@ -675,7 +428,7 @@ Menu::~Menu() {
     title::Exit();
 
     FreeEntries();
-    nsExit();
+    ns::Exit();
     es::Exit();
 }
 
@@ -893,21 +646,14 @@ void Menu::DeleteGames() {
 
 void Menu::DumpGames(u32 flags) {
     auto targets = GetSelectedEntries();
+    ClearSelection();
 
     std::vector<NspEntry> nsp_entries;
     for (auto& e : targets) {
         BuildNspEntries(e, flags, nsp_entries);
     }
 
-    std::vector<fs::FsPath> paths;
-    for (auto& e : nsp_entries) {
-        paths.emplace_back(fs::AppendPath("/dumps/NSP", e.path));
-    }
-
-    auto source = std::make_shared<NspSource>(nsp_entries);
-    dump::Dump(source, paths, [this](Result rc){
-        ClearSelection();
-    });
+    DumpNsp(nsp_entries);
 }
 
 void Menu::CreateSaves(AccountUid uid) {
@@ -939,6 +685,240 @@ void Menu::CreateSaves(AccountUid uid) {
             App::Notify("Save create successfull!"_i18n);
         }
     });
+}
+
+Result GetMetaEntries(const Entry& e, title::MetaEntries& out, u32 flags) {
+    return title::GetMetaEntries(e.app_id, out, flags);
+}
+
+Result GetNcmMetaFromMetaStatus(const NsApplicationContentMetaStatus& status, NcmMetaData& out) {
+    out.cs = &title::GetNcmCs(status.storageID);
+    out.db = &title::GetNcmDb(status.storageID);
+    out.app_id = ncm::GetAppId(status.meta_type, status.application_id);
+
+    auto id_min = status.application_id;
+    auto id_max = status.application_id;
+    // workaround N bug where they don't check the full range in the ID filter.
+    // https://github.com/Atmosphere-NX/Atmosphere/blob/1d3f3c6e56b994b544fc8cd330c400205d166159/libraries/libstratosphere/source/ncm/ncm_on_memory_content_meta_database_impl.cpp#L22
+    if (status.storageID == NcmStorageId_None || status.storageID == NcmStorageId_GameCard) {
+        id_min -= 1;
+        id_max += 1;
+    }
+
+    s32 meta_total;
+    s32 meta_entries_written;
+    R_TRY(ncmContentMetaDatabaseList(out.db, &meta_total, &meta_entries_written, &out.key, 1, (NcmContentMetaType)status.meta_type, out.app_id, id_min, id_max, NcmContentInstallType_Full));
+    // log_write("ncmContentMetaDatabaseList(): AppId: %016lX Id: %016lX total: %d written: %d storageID: %u key.id %016lX\n", out.app_id, status.application_id, meta_total, meta_entries_written, status.storageID, out.key.id);
+    R_UNLESS(meta_total == 1, Result_GameMultipleKeysFound);
+    R_UNLESS(meta_entries_written == 1, Result_GameMultipleKeysFound);
+
+    R_SUCCEED();
+}
+
+// deletes the array of entries (remove nca, remove ncm db, remove ns app records).
+void DeleteMetaEntries(u64 app_id, int image, const std::string& name, const title::MetaEntries& entries) {
+    App::Push<ProgressBox>(image, "Delete"_i18n, name, [app_id, entries](ProgressBox* pbox) -> Result {
+        R_TRY(ns::Initialize());
+        ON_SCOPE_EXIT(ns::Exit());
+
+        // fetch current app records.
+        std::vector<ncm::ContentStorageRecord> records;
+        R_TRY(ns::GetApplicationRecords(app_id, records));
+
+        // on exit, delete old record list and push the new one.
+        ON_SCOPE_EXIT(
+            R_TRY(ns::DeleteApplicationRecord(app_id));
+            return ns::PushApplicationRecord(app_id, records.data(), records.size());
+        )
+
+        // on exit, set the new lowest version.
+        ON_SCOPE_EXIT(
+            ns::SetLowestLaunchVersion(app_id, records);
+        )
+
+        for (u32 i = 0; i < std::size(entries); i++) {
+            const auto& status = entries[i];
+
+            // check if the user wants to exit, only in-between each successful delete.
+            R_TRY(pbox->ShouldExitResult());
+
+            char transfer_str[33];
+            std::snprintf(transfer_str, sizeof(transfer_str), "%016lX", status.application_id);
+            pbox->NewTransfer(transfer_str).UpdateTransfer(i, std::size(entries));
+
+            NcmMetaData meta;
+            R_TRY(GetNcmMetaFromMetaStatus(status, meta));
+
+            // only delete form non read-only storage.
+            if (status.storageID == NcmStorageId_BuiltInUser || status.storageID == NcmStorageId_SdCard) {
+                R_TRY(ncm::DeleteKey(meta.cs, meta.db, &meta.key));
+            }
+
+            // find and remove record.
+            std::erase_if(records, [&meta](auto& e){
+                return meta.key.id == e.key.id;
+            });
+        }
+
+        R_SUCCEED();
+    }, [](Result rc){
+        App::PushErrorBox(rc, "Failed to delete meta entry");
+    });
+}
+
+auto BuildNspPath(const Entry& e, const NsApplicationContentMetaStatus& status) -> fs::FsPath {
+    fs::FsPath name_buf = e.GetName();
+    title::utilsReplaceIllegalCharacters(name_buf, true);
+
+    char version[sizeof(NacpStruct::display_version) + 1]{};
+    if (status.meta_type == NcmContentMetaType_Patch) {
+        u64 program_id;
+        fs::FsPath path;
+        if (R_SUCCEEDED(title::GetControlPathFromStatus(status, &program_id, &path))) {
+            char display_version[0x10];
+            if (R_SUCCEEDED(nca::ParseControl(path, program_id, display_version, sizeof(display_version), nullptr, offsetof(NacpStruct, display_version)))) {
+                std::snprintf(version, sizeof(version), "%s ", display_version);
+            }
+        }
+    }
+
+    fs::FsPath path;
+    if (App::GetApp()->m_dump_app_folder.Get()) {
+        std::snprintf(path, sizeof(path), "%s/%s %s[%016lX][v%u][%s].nsp", name_buf.s, name_buf.s, version, status.application_id, status.version, ncm::GetMetaTypeShortStr(status.meta_type));
+    } else {
+        std::snprintf(path, sizeof(path), "%s %s[%016lX][v%u][%s].nsp", name_buf.s, version, status.application_id, status.version, ncm::GetMetaTypeShortStr(status.meta_type));
+    }
+
+    return path;
+}
+
+Result BuildContentEntry(const NsApplicationContentMetaStatus& status, ContentInfoEntry& out) {
+    NcmMetaData meta;
+    R_TRY(GetNcmMetaFromMetaStatus(status, meta));
+
+    std::vector<NcmContentInfo> infos;
+    R_TRY(ncm::GetContentInfos(meta.db, &meta.key, infos));
+
+    std::vector<NcmContentInfo> cnmt_infos;
+    for (const auto& info : infos) {
+        // check if we need to fetch tickets.
+        NcmRightsId ncm_rights_id;
+        R_TRY(ncmContentStorageGetRightsIdFromContentId(meta.cs, std::addressof(ncm_rights_id), std::addressof(info.content_id), FsContentAttributes_All));
+
+        if (es::IsRightsIdValid(ncm_rights_id.rights_id)) {
+            const auto it = std::ranges::find_if(out.ncm_rights_id, [&ncm_rights_id](auto& e){
+                return !std::memcmp(&e, &ncm_rights_id, sizeof(ncm_rights_id));
+            });
+
+            if (it == out.ncm_rights_id.end()) {
+                out.ncm_rights_id.emplace_back(ncm_rights_id);
+            }
+        }
+
+        if (info.content_type == NcmContentType_Meta) {
+            cnmt_infos.emplace_back(info);
+        } else {
+            out.content_infos.emplace_back(info);
+        }
+    }
+
+    // append cnmt at the end of the list, following StandardNSP spec.
+    out.content_infos.insert_range(out.content_infos.end(), cnmt_infos);
+    out.status = status;
+    R_SUCCEED();
+}
+
+Result BuildNspEntry(const Entry& e, const ContentInfoEntry& info, const keys::Keys& keys, NspEntry& out) {
+    out.application_name = e.GetName();
+    out.path = BuildNspPath(e, info.status);
+    s64 offset{};
+
+    for (auto& e : info.content_infos) {
+        char nca_name[64];
+        std::snprintf(nca_name, sizeof(nca_name), "%s%s", hexIdToStr(e.content_id).str, e.content_type == NcmContentType_Meta ? ".cnmt.nca" : ".nca");
+
+        u64 size;
+        ncmContentInfoSizeToU64(std::addressof(e), std::addressof(size));
+
+        out.collections.emplace_back(nca_name, offset, size);
+        offset += size;
+    }
+
+    for (auto& ncm_rights_id : info.ncm_rights_id) {
+        const auto rights_id = ncm_rights_id.rights_id;
+        const auto key_gen = ncm_rights_id.key_generation;
+
+        TikEntry entry{rights_id, key_gen};
+        log_write("rights id is valid, fetching common ticket and cert\n");
+
+        u64 tik_size;
+        u64 cert_size;
+        R_TRY(es::GetCommonTicketAndCertificateSize(&tik_size, &cert_size, &rights_id));
+        log_write("got tik_size: %zu cert_size: %zu\n", tik_size, cert_size);
+
+        entry.tik_data.resize(tik_size);
+        entry.cert_data.resize(cert_size);
+        R_TRY(es::GetCommonTicketAndCertificateData(&tik_size, &cert_size, entry.tik_data.data(), entry.tik_data.size(), entry.cert_data.data(), entry.cert_data.size(), &rights_id));
+        log_write("got tik_data: %zu cert_data: %zu\n", tik_size, cert_size);
+
+        // patch fake ticket / convert personalised to common if needed.
+        R_TRY(es::PatchTicket(entry.tik_data, entry.cert_data, key_gen, keys, App::GetApp()->m_dump_convert_to_common_ticket.Get()));
+
+        char tik_name[0x200];
+        std::snprintf(tik_name, sizeof(tik_name), "%s%s", hexIdToStr(rights_id).str, ".tik");
+
+        char cert_name[0x200];
+        std::snprintf(cert_name, sizeof(cert_name), "%s%s", hexIdToStr(rights_id).str, ".cert");
+
+        out.collections.emplace_back(tik_name, offset, entry.tik_data.size());
+        offset += entry.tik_data.size();
+
+        out.collections.emplace_back(cert_name, offset, entry.cert_data.size());
+        offset += entry.cert_data.size();
+
+        out.tickets.emplace_back(entry);
+    }
+
+    out.nsp_data = yati::container::Nsp::Build(out.collections, out.nsp_size);
+    out.cs = title::GetNcmCs(info.status.storageID);
+
+    R_SUCCEED();
+}
+
+Result BuildNspEntries(Entry& e, const title::MetaEntries& meta_entries, std::vector<NspEntry>& out) {
+    LoadControlEntry(e);
+
+    keys::Keys keys;
+    R_TRY(keys::parse_keys(keys, true));
+
+    for (const auto& status : meta_entries) {
+        ContentInfoEntry info;
+        R_TRY(BuildContentEntry(status, info));
+
+        NspEntry nsp;
+        R_TRY(BuildNspEntry(e, info, keys, nsp));
+        out.emplace_back(nsp).icon = e.image;
+    }
+
+    R_UNLESS(!out.empty(), Result_GameNoNspEntriesBuilt);
+    R_SUCCEED();
+}
+
+Result BuildNspEntries(Entry& e, u32 flags, std::vector<NspEntry>& out) {
+    title::MetaEntries meta_entries;
+    R_TRY(GetMetaEntries(e, meta_entries, flags));
+
+    return BuildNspEntries(e, meta_entries, out);
+}
+
+void DumpNsp(const std::vector<NspEntry>& entries) {
+    std::vector<fs::FsPath> paths;
+    for (auto& e : entries) {
+        paths.emplace_back(fs::AppendPath("/dumps/NSP", e.path));
+    }
+
+    auto source = std::make_shared<NspSource>(entries);
+    dump::Dump(source, paths);
 }
 
 } // namespace sphaira::ui::menu::game

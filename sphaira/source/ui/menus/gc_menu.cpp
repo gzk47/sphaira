@@ -47,7 +47,7 @@ enum DumpFileFlag {
 
 const char *g_option_list[] = {
     "Install",
-    "Dump",
+    "Export",
     "Exit",
 };
 
@@ -401,13 +401,13 @@ Menu::Menu(u32 flags) : MenuBase{"GameCard"_i18n, flags} {
                         }, true);
                     };
 
-                    add("Dump All"_i18n, DumpFileFlag_All);
-                    add("Dump All Bins"_i18n, DumpFileFlag_AllBin);
-                    add("Dump XCI"_i18n, DumpFileFlag_XCI);
-                    add("Dump Card ID Set"_i18n, DumpFileFlag_Set);
-                    add("Dump Card UID"_i18n, DumpFileFlag_UID);
-                    add("Dump Certificate"_i18n, DumpFileFlag_Cert);
-                    add("Dump Initial Data"_i18n, DumpFileFlag_Initial);
+                    add("Export All"_i18n, DumpFileFlag_All);
+                    add("Export All Bins"_i18n, DumpFileFlag_AllBin);
+                    add("Export XCI"_i18n, DumpFileFlag_XCI);
+                    add("Export Card ID Set"_i18n, DumpFileFlag_Set);
+                    add("Export Card UID"_i18n, DumpFileFlag_UID);
+                    add("Export Certificate"_i18n, DumpFileFlag_Cert);
+                    add("Export Initial Data"_i18n, DumpFileFlag_Initial);
                 }
             }
         }}),
@@ -422,7 +422,7 @@ Menu::Menu(u32 flags) : MenuBase{"GameCard"_i18n, flags} {
                 App::DisplayInstallOptions(false);
             });
 
-            options->Add<SidebarEntryCallback>("Dump options"_i18n, [this](){
+            options->Add<SidebarEntryCallback>("Export options"_i18n, [this](){
                 App::DisplayDumpOptions(false);
             });
         }})

@@ -20,6 +20,7 @@
 #include "ui/popup_list.hpp"
 #include "ui/nvg_util.hpp"
 
+#include "yati/nx/ns.hpp"
 #include "yati/nx/ncm.hpp"
 #include "yati/nx/nca.hpp"
 
@@ -428,7 +429,7 @@ Menu::Menu(u32 flags) : grid::Menu{"Saves"_i18n, flags} {
     );
 
     OnLayoutChange();
-    nsInitialize();
+    ns::Initialize();
 
     m_accounts = App::GetAccountList();
 
@@ -457,7 +458,7 @@ Menu::~Menu() {
     title::Exit();
 
     FreeEntries();
-    nsExit();
+    ns::Exit();
 }
 
 void Menu::Update(Controller* controller, TouchInfo* touch) {

@@ -355,7 +355,7 @@ void DumpGetLocation(const std::string& title, u32 location_flags, const OnLocat
 }
 
 void Dump(const std::shared_ptr<BaseSource>& source, const DumpLocation& location, const std::vector<fs::FsPath>& paths, const OnExit& on_exit) {
-    App::Push<ui::ProgressBox>(0, "Dumping"_i18n, "", [source, paths, location](auto pbox) -> Result {
+    App::Push<ui::ProgressBox>(0, "Exporting"_i18n, "", [source, paths, location](auto pbox) -> Result {
         if (location.entry.type == DumpLocationType_Network) {
             R_TRY(DumpToNetwork(pbox, location.network[location.entry.index], source.get(), paths));
         } else if (location.entry.type == DumpLocationType_Stdio) {
@@ -372,10 +372,10 @@ void Dump(const std::shared_ptr<BaseSource>& source, const DumpLocation& locatio
 
         R_SUCCEED();
     }, [on_exit](Result rc){
-        App::PushErrorBox(rc, "Dump failed!"_i18n);
+        App::PushErrorBox(rc, "Export failed!"_i18n);
 
         if (R_SUCCEEDED(rc)) {
-            App::Notify("Dump successfull!"_i18n);
+            App::Notify("Export successfull!"_i18n);
             log_write("dump successfull!!!\n");
         }
 
@@ -384,7 +384,7 @@ void Dump(const std::shared_ptr<BaseSource>& source, const DumpLocation& locatio
 }
 
 void Dump(const std::shared_ptr<BaseSource>& source, const std::vector<fs::FsPath>& paths, const OnExit& on_exit, u32 location_flags) {
-    DumpGetLocation("Select dump location"_i18n, location_flags, [source, paths, on_exit](const DumpLocation& loc) {
+    DumpGetLocation("Select export location"_i18n, location_flags, [source, paths, on_exit](const DumpLocation& loc) {
         Dump(source, loc, paths, on_exit);
     });
 }
