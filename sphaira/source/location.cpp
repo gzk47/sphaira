@@ -2,6 +2,7 @@
 #include "fs.hpp"
 #include "app.hpp"
 
+#include <ff.h>
 #include <cstring>
 #include <minIni.h>
 #include <usbhsfs.h>
@@ -100,6 +101,22 @@ auto GetStdio(bool write) -> StdioEntries {
 
         out.emplace_back(e.name, display_name, e.write_protect);
         log_write("\t[USBHSFS] %s name: %s serial: %s man: %s\n", e.name, e.product_name, e.serial_number, e.manufacturer);
+    }
+
+    return out;
+}
+
+auto GetFat() -> StdioEntries {
+    StdioEntries out{};
+
+    for (auto& e : VolumeStr) {
+        char path[64];
+        std::snprintf(path, sizeof(path), "%s:/", e);
+
+        char display_name[0x100];
+        std::snprintf(display_name, sizeof(display_name), "%s (Read Only)", path);
+
+        out.emplace_back(path, display_name, true);
     }
 
     return out;

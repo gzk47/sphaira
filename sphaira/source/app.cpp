@@ -22,6 +22,7 @@
 #include "haze_helper.hpp"
 #include "web.hpp"
 #include "swkbd.hpp"
+#include "fatfs.hpp"
 
 #include <nanovg_dk.h>
 #include <minIni.h>
@@ -1432,6 +1433,10 @@ App::App(const char* argv0) {
         usbHsFsInitialize(1);
     }
 
+    if (R_FAILED(fatfs::MountAll())) {
+        log_write("[FAT] failed to mount bis\n");
+    }
+
     curl::Init();
 
 #ifdef USE_NVJPG
@@ -2068,6 +2073,8 @@ App::~App() {
         log_write("closing hdd\n");
         usbHsFsExit();
     }
+
+    fatfs::UnmountAll();
 
     log_write("\t[EXIT] time taken: %.2fs %zums\n", ts.GetSecondsD(), ts.GetMs());
 

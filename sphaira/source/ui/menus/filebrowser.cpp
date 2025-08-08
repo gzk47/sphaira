@@ -1040,10 +1040,13 @@ auto FsView::Scan(const fs::FsPath& new_path, bool is_walk_up) -> Result {
 
     m_path = new_path;
     m_entries.clear();
-    m_index = 0;
-    m_list->SetYoff(0);
-    m_menu->SetTitleSubHeading(m_path);
+    m_entries_index.clear();
+    m_entries_index_hidden.clear();
+    m_entries_index_search.clear();
+    m_entries_current = {};
     m_selected_count = 0;
+    SetIndex(0);
+    m_menu->SetTitleSubHeading(m_path);
 
     fs::Dir d;
     R_TRY(m_fs->OpenDirectory(new_path, FsDirOpenMode_ReadDirs | FsDirOpenMode_ReadFiles, &d));
@@ -1054,11 +1057,6 @@ auto FsView::Scan(const fs::FsPath& new_path, bool is_walk_up) -> Result {
 
     const auto count = dir_entries.size();
     m_entries.reserve(count);
-
-    m_entries_index.clear();
-    m_entries_index_hidden.clear();
-    m_entries_index_search.clear();
-
     m_entries_index.reserve(count);
     m_entries_index_hidden.reserve(count);
 
@@ -1077,8 +1075,6 @@ auto FsView::Scan(const fs::FsPath& new_path, bool is_walk_up) -> Result {
 
     // quick check to see if this is an update folder
     m_is_update_folder = R_SUCCEEDED(CheckIfUpdateFolder());
-
-    SetIndex(0);
 
     // find previous entry
     if (is_walk_up && !m_previous_highlighted_file.empty()) {
@@ -1645,16 +1641,18 @@ void FsView::DisplayOptions() {
     });
 
     if (m_entries_current.size()) {
-        options->Add<SidebarEntryCallback>("Cut"_i18n, [this](){
-            m_menu->AddSelectedEntries(SelectedType::Cut);
-        }, true);
+        if (!m_fs_entry.IsReadOnly()) {
+            options->Add<SidebarEntryCallback>("Cut"_i18n, [this](){
+                m_menu->AddSelectedEntries(SelectedType::Cut);
+            }, true);
+        }
 
         options->Add<SidebarEntryCallback>("Copy"_i18n, [this](){
             m_menu->AddSelectedEntries(SelectedType::Copy);
         }, true);
     }
 
-    if (!m_menu->m_selected.Empty() && (m_menu->m_selected.Type() == SelectedType::Cut || m_menu->m_selected.Type() == SelectedType::Copy)) {
+    if (!m_menu->m_selected.Empty() && !m_fs_entry.IsReadOnly() && (m_menu->m_selected.Type() == SelectedType::Cut || m_menu->m_selected.Type() == SelectedType::Copy)) {
         options->Add<SidebarEntryCallback>("Paste"_i18n, [this](){
             const std::string buf = "Paste file(s)?"_i18n;
             App::Push<OptionBox>(
@@ -1668,7 +1666,7 @@ void FsView::DisplayOptions() {
     }
 
     // can't rename more than 1 file
-    if (m_entries_current.size() && !m_selected_count) {
+    if (m_entries_current.size() && !m_selected_count && !m_fs_entry.IsReadOnly()) {
         options->Add<SidebarEntryCallback>("Rename"_i18n, [this](){
             std::string out;
             const auto& entry = GetEntry();
@@ -1696,7 +1694,7 @@ void FsView::DisplayOptions() {
         });
     }
 
-    if (m_entries_current.size()) {
+    if (m_entries_current.size() && !m_fs_entry.IsReadOnly()) {
         options->Add<SidebarEntryCallback>("Delete"_i18n, [this](){
             m_menu->AddSelectedEntries(SelectedType::Delete);
 
@@ -1744,7 +1742,7 @@ void FsView::DisplayOptions() {
     }
 
     if (m_entries_current.size()) {
-        if (check_all_ext(ZIP_EXTENSIONS)) {
+        if (check_all_ext(ZIP_EXTENSIONS) && !m_fs_entry.IsReadOnly()) {
             options->Add<SidebarEntryCallback>("Extract zip"_i18n, [this](){
                 auto options = std::make_unique<Sidebar>("Extract Options"_i18n, Sidebar::Side::RIGHT);
                 ON_SCOPE_EXIT(App::Push(std::move(options)));
@@ -1771,7 +1769,7 @@ void FsView::DisplayOptions() {
             });
         }
 
-        if (!check_all_ext(ZIP_EXTENSIONS) || m_selected_count) {
+        if ((!check_all_ext(ZIP_EXTENSIONS) || m_selected_count) && !m_fs_entry.IsReadOnly()) {
             options->Add<SidebarEntryCallback>("Compress to zip"_i18n, [this](){
                 auto options = std::make_unique<Sidebar>("Compress Options"_i18n, Sidebar::Side::RIGHT);
                 ON_SCOPE_EXIT(App::Push(std::move(options)));
@@ -1818,53 +1816,66 @@ void FsView::DisplayAdvancedOptions() {
         mount_items.push_back(i18n::get(e.name));
     }
 
+    const auto fat_entries = location::GetFat();
+    for (const auto& e: fat_entries) {
+        u32 flags{};
+        if (e.write_protect) {
+            flags |= FsEntryFlag_ReadOnly;
+        }
+
+        fs_entries.emplace_back(e.name, e.mount, FsType::Stdio, flags);
+        mount_items.push_back(e.name);
+    }
+
     options->Add<SidebarEntryArray>("Mount"_i18n, mount_items, [this, fs_entries](s64& index_out){
         App::PopToMenu();
         SetFs(fs_entries[index_out].root, fs_entries[index_out]);
     }, i18n::get(m_fs_entry.name));
 
-    options->Add<SidebarEntryCallback>("Create File"_i18n, [this](){
-        std::string out;
-        if (R_SUCCEEDED(swkbd::ShowText(out, "Set File Name"_i18n.c_str(), fs::AppendPath(m_path, ""))) && !out.empty()) {
-            App::PopToMenu();
+    if (!m_fs_entry.IsReadOnly()) {
+        options->Add<SidebarEntryCallback>("Create File"_i18n, [this](){
+            std::string out;
+            if (R_SUCCEEDED(swkbd::ShowText(out, "Set File Name"_i18n.c_str(), fs::AppendPath(m_path, ""))) && !out.empty()) {
+                App::PopToMenu();
 
-            fs::FsPath full_path;
-            if (out.starts_with(m_fs_entry.root.s)) {
-                full_path = out;
-            } else {
-                full_path = fs::AppendPath(m_path, out);
+                fs::FsPath full_path;
+                if (out.starts_with(m_fs_entry.root.s)) {
+                    full_path = out;
+                } else {
+                    full_path = fs::AppendPath(m_path, out);
+                }
+
+                m_fs->CreateDirectoryRecursivelyWithPath(full_path);
+                if (R_SUCCEEDED(m_fs->CreateFile(full_path, 0, 0))) {
+                    log_write("created file: %s\n", full_path.s);
+                    Scan(m_path);
+                } else {
+                    log_write("failed to create file: %s\n", full_path.s);
+                }
             }
+        });
 
-            m_fs->CreateDirectoryRecursivelyWithPath(full_path);
-            if (R_SUCCEEDED(m_fs->CreateFile(full_path, 0, 0))) {
-                log_write("created file: %s\n", full_path.s);
-                Scan(m_path);
-            } else {
-                log_write("failed to create file: %s\n", full_path.s);
+        options->Add<SidebarEntryCallback>("Create Folder"_i18n, [this](){
+            std::string out;
+            if (R_SUCCEEDED(swkbd::ShowText(out, "Set Folder Name"_i18n.c_str(), fs::AppendPath(m_path, ""))) && !out.empty()) {
+                App::PopToMenu();
+
+                fs::FsPath full_path;
+                if (out.starts_with(m_fs_entry.root.s)) {
+                    full_path = out;
+                } else {
+                    full_path = fs::AppendPath(m_path, out);
+                }
+
+                if (R_SUCCEEDED(m_fs->CreateDirectoryRecursively(full_path))) {
+                    log_write("created dir: %s\n", full_path.s);
+                    Scan(m_path);
+                } else {
+                    log_write("failed to create dir: %s\n", full_path.s);
+                }
             }
-        }
-    });
-
-    options->Add<SidebarEntryCallback>("Create Folder"_i18n, [this](){
-        std::string out;
-        if (R_SUCCEEDED(swkbd::ShowText(out, "Set Folder Name"_i18n.c_str(), fs::AppendPath(m_path, ""))) && !out.empty()) {
-            App::PopToMenu();
-
-            fs::FsPath full_path;
-            if (out.starts_with(m_fs_entry.root.s)) {
-                full_path = out;
-            } else {
-                full_path = fs::AppendPath(m_path, out);
-            }
-
-            if (R_SUCCEEDED(m_fs->CreateDirectoryRecursively(full_path))) {
-                log_write("created dir: %s\n", full_path.s);
-                Scan(m_path);
-            } else {
-                log_write("failed to create dir: %s\n", full_path.s);
-            }
-        }
-    });
+        });
+    }
 
     if (IsSd() && m_entries_current.size() && !m_selected_count && GetEntry().IsFile() && GetEntry().file_size < 1024*64) {
         options->Add<SidebarEntryCallback>("View as text (unfinished)"_i18n, [this](){

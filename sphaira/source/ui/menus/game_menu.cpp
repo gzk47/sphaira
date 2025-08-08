@@ -847,23 +847,18 @@ Result BuildNspEntry(const Entry& e, const ContentInfoEntry& info, const keys::K
         TikEntry entry{rights_id, key_gen};
         log_write("rights id is valid, fetching common ticket and cert\n");
 
-        u64 tik_size;
-        u64 cert_size;
-        R_TRY(es::GetCommonTicketAndCertificateSize(&tik_size, &cert_size, &rights_id));
-        log_write("got tik_size: %zu cert_size: %zu\n", tik_size, cert_size);
-
-        entry.tik_data.resize(tik_size);
-        entry.cert_data.resize(cert_size);
-        R_TRY(es::GetCommonTicketAndCertificateData(&tik_size, &cert_size, entry.tik_data.data(), entry.tik_data.size(), entry.cert_data.data(), entry.cert_data.size(), &rights_id));
-        log_write("got tik_data: %zu cert_data: %zu\n", tik_size, cert_size);
+        // todo: fetch array of tickets to know where the ticket is stored.
+        if (R_FAILED(es::GetCommonTicketAndCertificate(rights_id, entry.tik_data, entry.cert_data))) {
+            R_TRY(es::GetPersonalisedTicketAndCertificate(rights_id, entry.tik_data, entry.cert_data));
+        }
 
         // patch fake ticket / convert personalised to common if needed.
         R_TRY(es::PatchTicket(entry.tik_data, entry.cert_data, key_gen, keys, App::GetApp()->m_dump_convert_to_common_ticket.Get()));
 
-        char tik_name[0x200];
+        char tik_name[64];
         std::snprintf(tik_name, sizeof(tik_name), "%s%s", hexIdToStr(rights_id).str, ".tik");
 
-        char cert_name[0x200];
+        char cert_name[64];
         std::snprintf(cert_name, sizeof(cert_name), "%s%s", hexIdToStr(rights_id).str, ".cert");
 
         out.collections.emplace_back(tik_name, offset, entry.tik_data.size());

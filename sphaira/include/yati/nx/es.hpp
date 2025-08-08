@@ -215,4 +215,9 @@ Result IsRightsIdPersonalised(const FsRightsId& id, bool* out);
 bool IsRightsIdValid(const FsRightsId& id);
 bool IsRightsIdFound(const FsRightsId& id, std::span<const FsRightsId> ids);
 
+// wrapper around ipc.
+Result GetCommonTicketAndCertificate(const FsRightsId& rights_id, std::vector<u8>& tik_out, std::vector<u8>& cert_out);
+// fetches data from system es save.
+Result GetPersonalisedTicketAndCertificate(const FsRightsId& rights_id, std::vector<u8>& tik_out, std::vector<u8>& cert_out);
+
 } // namespace sphaira::es

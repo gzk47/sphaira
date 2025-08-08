@@ -88,6 +88,7 @@ add_executable(sphaira
     source/threaded_file_transfer.cpp
     source/title_info.cpp
     source/minizip_helper.cpp
+    source/fatfs.cpp
 
     source/usb/base.cpp
     source/usb/usbds.cpp
@@ -345,6 +346,14 @@ if (NOT USE_NEW_ZSTD)
     find_library(zstd_lib zstd REQUIRED)
 endif()
 
+add_library(fatfs
+    source/ff16/diskio.c
+    source/ff16/ff.c
+    source/ff16/ffunicode.c
+)
+
+target_include_directories(fatfs PUBLIC source/ff16)
+
 set_target_properties(sphaira PROPERTIES
     C_STANDARD 23
     C_EXTENSIONS ON
@@ -362,6 +371,7 @@ target_link_libraries(sphaira PRIVATE
     yyjson
     # libusbhsfs
     libnxtc
+    fatfs
 
     ${minizip_lib}
     ZLIB::ZLIB

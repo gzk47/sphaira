@@ -107,8 +107,10 @@ auto Menu::Scan(const fs::FsPath& new_path, bool is_walk_up) -> Result {
 
     m_path = new_path;
     m_entries.clear();
-    m_index = 0;
-    m_list->SetYoff(0);
+    m_entries_index.clear();
+    m_entries_index_hidden.clear();
+    m_entries_current = {};
+    SetIndex(0);
     SetTitleSubHeading(m_path);
 
     fs::Dir d;
@@ -120,10 +122,6 @@ auto Menu::Scan(const fs::FsPath& new_path, bool is_walk_up) -> Result {
 
     const auto count = dir_entries.size();
     m_entries.reserve(count);
-
-    m_entries_index.clear();
-    m_entries_index_hidden.clear();
-
     m_entries_index.reserve(count);
     m_entries_index_hidden.reserve(count);
 
@@ -154,7 +152,6 @@ auto Menu::Scan(const fs::FsPath& new_path, bool is_walk_up) -> Result {
     }
 
     Sort();
-    SetIndex(0);
 
     // find previous entry
     if (is_walk_up && !m_previous_highlighted_file.empty()) {

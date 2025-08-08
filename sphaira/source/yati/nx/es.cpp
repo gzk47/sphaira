@@ -3,6 +3,7 @@
 #include "yati/nx/nxdumptool_rsa.h"
 #include "yati/nx/service_guard.h"
 #include "defines.hpp"
+#include "ui/types.hpp"
 #include "log.hpp"
 
 #include <memory>
@@ -381,6 +382,47 @@ bool IsRightsIdFound(const FsRightsId& id, std::span<const FsRightsId> ids) {
         return !std::memcmp(&id, &e, sizeof(e));
     });
     return it != ids.end();
+}
+
+Result GetCommonTicketAndCertificate(const FsRightsId& rights_id, std::vector<u8>& tik_out, std::vector<u8>& cert_out) {
+    u64 tik_size, cert_size;
+    R_TRY(es::GetCommonTicketAndCertificateSize(&tik_size, &cert_size, &rights_id));
+
+    tik_out.resize(tik_size);
+    cert_out.resize(cert_size);
+
+    return GetCommonTicketAndCertificateData(&tik_size, &cert_size, tik_out.data(), tik_out.size(), cert_out.data(), cert_out.size(), &rights_id);
+}
+
+Result GetPersonalisedTicketAndCertificate(const FsRightsId& rights_id, std::vector<u8>& tik_out, std::vector<u8>& cert_out) {
+    R_THROW(0x1);
+
+    #if 0
+    fs::FsStdio fs;
+
+    TimeStamp ts;
+    std::vector<u8> tik_buf;
+    // R_TRY(fs.read_entire_file("system:/save/80000000000000e1", tik_buf));
+    R_TRY(fs.read_entire_file("SYSTEM:/save/80000000000000e2", tik_buf));
+    log_write("[ES] size: %zu\n", tik_buf.size());
+    log_write("\t\t[ticket read] time taken: %.2fs %zums\n", ts.GetSecondsD(), ts.GetMs());
+    ts.Update();
+
+    for (u32 i = 0; i < tik_buf.size() - 0x400; i += 0x400) {
+        const auto tikRsa2048 = (const TicketRsa2048*)(tik_buf.data() + i);
+        if (tikRsa2048->signature_block.sig_type != SigType_Rsa2048Sha256) {
+            continue;
+        }
+
+        if (!std::memcmp(&rights_id, &tikRsa2048->data.rights_id, sizeof(rights_id))) {
+            log_write("\t[ES] tikRsa2048, found at: %u\n", i);
+        }
+    }
+
+    log_write("[ES] finished es search\n");
+    log_write("\t\t[ticket search] time taken: %.2fs %zums\n", ts.GetSecondsD(), ts.GetMs());
+    R_THROW(0x1);
+    #endif
 }
 
 } // namespace sphaira::es
