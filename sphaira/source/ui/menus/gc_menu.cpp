@@ -1,4 +1,6 @@
 #include "ui/menus/gc_menu.hpp"
+#include "ui/menus/filebrowser.hpp"
+
 #include "ui/nvg_util.hpp"
 #include "ui/sidebar.hpp"
 #include "ui/popup_list.hpp"
@@ -24,6 +26,7 @@ namespace {
 
 constexpr u32 XCI_MAGIC = std::byteswap(0x48454144);
 constexpr u32 REMOUNT_ATTEMPT_MAX = 8; // same as nxdumptool.
+constexpr const char* DUMP_BASE_PATH = "/dumps/Gamecard";
 
 enum DumpFileType {
     DumpFileType_XCI,
@@ -48,6 +51,7 @@ enum DumpFileFlag {
 const char *g_option_list[] = {
     "Install",
     "Export",
+    "Mount",
     "Exit",
 };
 
@@ -120,11 +124,11 @@ auto BuildFilePath(DumpFileType type, std::span<const ApplicationEntry> entries)
 #endif
 
 // builds path suiteable for file dumps.
-auto BuildFullDumpPath(DumpFileType type, std::span<const ApplicationEntry> entries) -> fs::FsPath {
+auto BuildFullDumpPath(DumpFileType type, std::span<const ApplicationEntry> entries, bool use_folder) -> fs::FsPath {
     const auto base_path = BuildXciBasePath(entries);
     fs::FsPath out;
 
-    if (App::GetApp()->m_dump_app_folder.Get()) {
+    if (use_folder) {
         if (App::GetApp()->m_dump_append_folder_with_xci.Get()) {
             out = base_path + ".xci/" + base_path + GetDumpTypeStr(type);
         } else {
@@ -134,7 +138,37 @@ auto BuildFullDumpPath(DumpFileType type, std::span<const ApplicationEntry> entr
         out = base_path + GetDumpTypeStr(type);
     }
 
-    return fs::AppendPath("/dumps/Gamecard", out);
+    return fs::AppendPath(DUMP_BASE_PATH, out);
+}
+
+auto BuildFullDumpPath(DumpFileType type, std::span<const ApplicationEntry> entries) -> fs::FsPath {
+    // check if the base path is too long.
+    const auto max_len = fs::FsPathReal::FS_REAL_MAX_LENGTH - std::strlen(DUMP_BASE_PATH) - 30;
+    auto use_folder = App::GetApp()->m_dump_app_folder.Get();
+
+    for (;;) {
+        const auto mult = use_folder ? 2 : 1;
+
+        for (size_t i = entries.size(); i > 0; i--) {
+            // see how many entries we can append to the file name.
+            const auto span = entries.subspan(0, i);
+            const auto base_path = BuildXciBasePath(span);
+
+            if (std::strlen(base_path) * mult < max_len) {
+                return BuildFullDumpPath(type, span, use_folder);
+            }
+        }
+
+        if (!use_folder) {
+            // if we get here, the game name is *really* long. Give up.
+            log_write("[GC] huge game name, giving up: %s\n", BuildXciBasePath(entries).s);
+            return {};
+        } else {
+            // try again, but without the folder.
+            use_folder = false;
+            log_write("[GC] huge game name trying again without the folder: %s\n", BuildXciBasePath(entries).s);
+        }
+    }
 }
 
 // @Gc is the mount point, S is for secure partion, the remaining is the
@@ -367,7 +401,7 @@ auto ApplicationEntry::GetSize() const -> s64 {
 Menu::Menu(u32 flags) : MenuBase{"GameCard"_i18n, flags} {
     this->SetActions(
         std::make_pair(Button::A, Action{"OK"_i18n, [this](){
-            if (m_option_index == 2) {
+            if (m_option_index == 3) {
                 SetPop();
             } else {
                 if (!m_mounted) {
@@ -390,7 +424,7 @@ Menu::Menu(u32 flags) : MenuBase{"GameCard"_i18n, flags} {
                             }
                         });
                     }
-                } else {
+                } else if (m_option_index == 1) {
                     auto options = std::make_unique<Sidebar>("Select content to dump"_i18n, Sidebar::Side::RIGHT);
                     ON_SCOPE_EXIT(App::Push(std::move(options)));
 
@@ -408,6 +442,9 @@ Menu::Menu(u32 flags) : MenuBase{"GameCard"_i18n, flags} {
                     add("Export Card UID"_i18n, DumpFileFlag_UID);
                     add("Export Certificate"_i18n, DumpFileFlag_Cert);
                     add("Export Initial Data"_i18n, DumpFileFlag_Initial);
+                } else if (m_option_index == 2) {
+                    const auto rc = MountGcFs();
+                    App::PushErrorBox(rc, "Failed to mount GameCard filesystem"_i18n);
                 }
             }
         }}),
@@ -429,8 +466,9 @@ Menu::Menu(u32 flags) : MenuBase{"GameCard"_i18n, flags} {
     );
 
     const Vec4 v{485, 275, 720, 70};
-    const Vec2 pad{0, 125 - v.h};
-    m_list = std::make_unique<List>(1, 3, m_pos, v, pad);
+    const Vec2 pad{0, 23.75};
+
+    m_list = std::make_unique<List>(1, 4, m_pos, v, pad);
 
     fsOpenDeviceOperator(std::addressof(m_dev_op));
     fsOpenGameCardDetectionEventNotifier(std::addressof(m_event_notifier));
@@ -513,7 +551,7 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
             gfx::drawRect(vg, 490, text_y - 45.f / 2.f, 2, 45, theme->GetColour(ThemeEntryID_TEXT_SELECTED));
             colour = ThemeEntryID_TEXT_SELECTED;
         }
-        if (i != 2 && !m_mounted) {
+        if (i != 3 && !m_mounted) {
             colour = ThemeEntryID_TEXT_INFO;
         }
 
@@ -1064,6 +1102,23 @@ Result Menu::GcGetSecurityInfo(GameCardSecurityInformation& out) {
     }
 
     R_THROW(Result_GcFailedToGetSecurityInfo);
+}
+
+Result Menu::MountGcFs() {
+    const auto& e = m_entries[m_entry_index];
+
+    auto fs = std::make_shared<fs::FsNative>(&m_fs->m_fs, false);
+    R_TRY(m_fs->GetFsOpenResult());
+
+    const filebrowser::FsEntry fs_entry{
+        .name = e.lang_entry.name,
+        .root = "/",
+        .type = filebrowser::FsType::Custom,
+        .flags = filebrowser::FsEntryFlag_ReadOnly,
+    };
+
+    App::Push<filebrowser::Menu>(fs, fs_entry, "/");
+    R_SUCCEED();
 }
 
 } // namespace sphaira::ui::menu::gc

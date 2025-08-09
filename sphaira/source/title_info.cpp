@@ -486,7 +486,7 @@ Result GetControlPathFromStatus(const NsApplicationContentMetaStatus& status, u6
     NcmContentId content_id;
     R_TRY(ncmContentMetaDatabaseGetContentIdByType(&db, &content_id, &key, NcmContentType_Control));
 
-    return ncm::GetControlPathFromContentId(&cs, key, content_id, out_program_id, out_path);
+    return ncm::GetFsPathFromContentId(&cs, key, content_id, out_program_id, out_path);
 }
 
 // taken from nxdumptool.

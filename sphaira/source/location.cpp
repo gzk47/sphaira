@@ -109,6 +109,9 @@ auto GetStdio(bool write) -> StdioEntries {
 auto GetFat() -> StdioEntries {
     StdioEntries out{};
 
+    // todo: move this somewhere else.
+    out.emplace_back("Qlaunch_romfs:/", "Qlaunch RomFS (Read Only)", true);
+
     for (auto& e : VolumeStr) {
         char path[64];
         std::snprintf(path, sizeof(path), "%s:/", e);

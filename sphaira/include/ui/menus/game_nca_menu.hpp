@@ -77,6 +77,7 @@ private:
     }
 
     void DumpNcas();
+    Result MountNcaFs();
 
 private:
     Entry& m_entry;

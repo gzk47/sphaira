@@ -199,6 +199,8 @@ private:
     void OnChangeIndex(s64 new_index);
     Result DumpGames(u32 flags);
 
+    Result MountGcFs();
+
 private:
     FsDeviceOperator m_dev_op{};
     FsGameCardHandle m_handle{};

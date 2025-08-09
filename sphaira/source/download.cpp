@@ -313,8 +313,8 @@ struct ThreadQueueEntry {
 };
 
 struct ThreadQueue {
-    std::deque<ThreadQueueEntry> m_entries;
-    Thread m_thread;
+    std::deque<ThreadQueueEntry> m_entries{};
+    Thread m_thread{};
     Mutex m_mutex{};
     UEvent m_uevent{};
 
@@ -1066,7 +1066,6 @@ void ThreadQueue::ThreadFunc(void* p) {
         }
 
         // find the next avaliable thread
-        u32 pop_count{};
         for (auto& entry : data->m_entries) {
             if (!g_running) {
                 return;
@@ -1080,13 +1079,14 @@ void ThreadQueue::ThreadFunc(void* p) {
                 }
 
                 if (!thread.InProgress()) {
-                    thread.Setup(entry.api);
-                    // log_write("[dl queue] starting download\n");
-                    // mark entry for deletion
-                    entry.m_delete = true;
-                    pop_count++;
-                    keep_going = true;
-                    break;
+                    if (thread.Setup(entry.api)) {
+                        // log_write("[dl queue] starting download\n");
+                        // mark entry for deletion
+                        entry.m_delete = true;
+                        // pop_count++;
+                        keep_going = true;
+                        break;
+                    }
                 }
             }
 
@@ -1096,9 +1096,9 @@ void ThreadQueue::ThreadFunc(void* p) {
         }
 
         // delete all entries marked for deletion
-        for (u32 i = 0; i < pop_count; i++) {
-            data->m_entries.pop_front();
-        }
+        std::erase_if(data->m_entries, [](auto& e){
+            return e.m_delete;
+        });
     }
 
     log_write("exited download thread queue\n");

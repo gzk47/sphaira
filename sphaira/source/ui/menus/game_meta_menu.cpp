@@ -40,7 +40,7 @@ constexpr u64 MINI_NACP_OFFSET = offsetof(NacpStruct, display_version);
 Result GetMiniNacpFromContentId(NcmContentStorage* cs, const NcmContentMetaKey& key, const NcmContentId& id, MiniNacp& out) {
     u64 program_id;
     fs::FsPath path;
-    R_TRY(ncm::GetControlPathFromContentId(cs, key, id, &program_id, &path));
+    R_TRY(ncm::GetFsPathFromContentId(cs, key, id, &program_id, &path));
 
     return nca::ParseControl(path, program_id, &out, sizeof(out), nullptr, MINI_NACP_OFFSET);
 }

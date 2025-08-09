@@ -182,15 +182,37 @@ inline FsPath operator+(const std::string_view& v, const FsPath& fp) {
     return r += fp;
 }
 
-static_assert(FsPath::Test("abc"));
-static_assert(FsPath::Test(std::string_view{"abc"}));
-static_assert(FsPath::Test(std::string{"abc"}));
-static_assert(FsPath::Test(FsPath{"abc"}));
+// Fs seems to be limted to file paths of 255 characters.
+struct FsPathReal {
+    static constexpr inline size_t FS_REAL_MAX_LENGTH = 255;
 
-static_assert(FsPath::TestFrom("abc"));
-static_assert(FsPath::TestFrom(std::string_view{"abc"}));
-static_assert(FsPath::TestFrom(std::string{"abc"}));
-static_assert(FsPath::TestFrom(FsPath{"abc"}));
+    constexpr FsPathReal(const FsPath& str) : FsPathReal{str.s} { }
+    explicit constexpr FsPathReal(const char* str) {
+        size_t real = 0;
+        for (size_t i = 0; str[i]; i++) {
+            // skip multiple slashes.
+            if (i && str[i] == '/' && str[i - 1] == '/') {
+                continue;
+            }
+
+            // save single char.
+            s[real++] = str[i];
+
+            // check if we have exceeded the path.
+            if (real >= FS_REAL_MAX_LENGTH) {
+                break;
+            }
+        }
+
+        // null the end.
+        s[real] = '\0';
+    }
+
+    constexpr operator const char*() const { return s; }
+    constexpr operator std::string_view() const { return s; }
+
+    char s[FS_MAX_PATH];
+};
 
 // fwd
 struct Fs;
@@ -227,44 +249,38 @@ struct Dir {
 
 FsPath AppendPath(const fs::FsPath& root_path, const fs::FsPath& file_path);
 
-Result CreateFile(FsFileSystem* fs, const FsPath& path, u64 size = 0, u32 option = 0, bool ignore_read_only = true);
-Result CreateDirectory(FsFileSystem* fs, const FsPath& path, bool ignore_read_only = true);
+Result CreateFile(FsFileSystem* fs, const FsPathReal& path, u64 size = 0, u32 option = 0, bool ignore_read_only = true);
+Result CreateDirectory(FsFileSystem* fs, const FsPathReal& path, bool ignore_read_only = true);
 Result CreateDirectoryRecursively(FsFileSystem* fs, const FsPath& path, bool ignore_read_only = true);
 Result CreateDirectoryRecursivelyWithPath(FsFileSystem* fs, const FsPath& path, bool ignore_read_only = true);
-Result DeleteFile(FsFileSystem* fs, const FsPath& path, bool ignore_read_only = true);
-Result DeleteDirectory(FsFileSystem* fs, const FsPath& path, bool ignore_read_only = true);
-Result DeleteDirectoryRecursively(FsFileSystem* fs, const FsPath& path, bool ignore_read_only = true);
-Result RenameFile(FsFileSystem* fs, const FsPath& src, const FsPath& dst, bool ignore_read_only = true);
-Result RenameDirectory(FsFileSystem* fs, const FsPath& src, const FsPath& dst, bool ignore_read_only = true);
-Result GetEntryType(FsFileSystem* fs, const FsPath& path, FsDirEntryType* out);
-Result GetFileTimeStampRaw(FsFileSystem* fs, const FsPath& path, FsTimeStampRaw *out);
-Result SetTimestamp(FsFileSystem* fs, const FsPath& path, const FsTimeStampRaw* ts);
+Result DeleteFile(FsFileSystem* fs, const FsPathReal& path, bool ignore_read_only = true);
+Result DeleteDirectory(FsFileSystem* fs, const FsPathReal& path, bool ignore_read_only = true);
+Result DeleteDirectoryRecursively(FsFileSystem* fs, const FsPathReal& path, bool ignore_read_only = true);
+Result RenameFile(FsFileSystem* fs, const FsPathReal& src, const FsPathReal& dst, bool ignore_read_only = true);
+Result RenameDirectory(FsFileSystem* fs, const FsPathReal& src, const FsPathReal& dst, bool ignore_read_only = true);
+Result GetEntryType(FsFileSystem* fs, const FsPathReal& path, FsDirEntryType* out);
+Result GetFileTimeStampRaw(FsFileSystem* fs, const FsPathReal& path, FsTimeStampRaw *out);
+Result SetTimestamp(FsFileSystem* fs, const FsPathReal& path, const FsTimeStampRaw* ts);
 bool FileExists(FsFileSystem* fs, const FsPath& path);
 bool DirExists(FsFileSystem* fs, const FsPath& path);
-Result read_entire_file(FsFileSystem* fs, const FsPath& path, std::vector<u8>& out);
-Result write_entire_file(FsFileSystem* fs, const FsPath& path, const std::vector<u8>& in, bool ignore_read_only = true);
-Result copy_entire_file(FsFileSystem* fs, const FsPath& dst, const FsPath& src, bool ignore_read_only = true);
 
-Result CreateFile(const FsPath& path, u64 size = 0, u32 option = 0, bool ignore_read_only = true);
-Result CreateDirectory(const FsPath& path, bool ignore_read_only = true);
+Result CreateFile(const FsPathReal& path, u64 size = 0, u32 option = 0, bool ignore_read_only = true);
+Result CreateDirectory(const FsPathReal& path, bool ignore_read_only = true);
 Result CreateDirectoryRecursively(const FsPath& path, bool ignore_read_only = true);
 Result CreateDirectoryRecursivelyWithPath(const FsPath& path, bool ignore_read_only = true);
-Result DeleteFile(const FsPath& path, bool ignore_read_only = true);
-Result DeleteDirectory(const FsPath& path, bool ignore_read_only = true);
+Result DeleteFile(const FsPathReal& path, bool ignore_read_only = true);
+Result DeleteDirectory(const FsPathReal& path, bool ignore_read_only = true);
 Result DeleteDirectoryRecursively(const FsPath& path, bool ignore_read_only = true);
-Result RenameFile(const FsPath& src, const FsPath& dst, bool ignore_read_only = true);
-Result RenameDirectory(const FsPath& src, const FsPath& dst, bool ignore_read_only = true);
-Result GetEntryType(const FsPath& path, FsDirEntryType* out);
-Result GetFileTimeStampRaw(const FsPath& path, FsTimeStampRaw *out);
-Result SetTimestamp(const FsPath& path, const FsTimeStampRaw* ts);
+Result RenameFile(const FsPathReal& src, const FsPathReal& dst, bool ignore_read_only = true);
+Result RenameDirectory(const FsPathReal& src, const FsPathReal& dst, bool ignore_read_only = true);
+Result GetEntryType(const FsPathReal& path, FsDirEntryType* out);
+Result GetFileTimeStampRaw(const FsPathReal& path, FsTimeStampRaw *out);
+Result SetTimestamp(const FsPathReal& path, const FsTimeStampRaw* ts);
 bool FileExists(const FsPath& path);
 bool DirExists(const FsPath& path);
-Result read_entire_file(const FsPath& path, std::vector<u8>& out);
-Result write_entire_file(const FsPath& path, const std::vector<u8>& in, bool ignore_read_only = true);
-Result copy_entire_file(const FsPath& dst, const FsPath& src, bool ignore_read_only = true);
 
-Result OpenFile(fs::Fs* fs, const fs::FsPath& path, u32 mode, File* f);
-Result OpenDirectory(fs::Fs* fs, const fs::FsPath& path, u32 mode, Dir* d);
+Result OpenFile(fs::Fs* fs, const FsPathReal& path, u32 mode, File* f);
+Result OpenDirectory(fs::Fs* fs, const FsPathReal& path, u32 mode, Dir* d);
 
 // opens dir, fetches count for all entries.
 // NOTE: this function will be slow on non-native fs, due to multiple
@@ -280,6 +296,11 @@ Result DirGetEntryCount(fs::Fs* fs, const fs::FsPath& path, s64* file_count, s64
 // but can avoid the second (expensive) stat call.
 Result FileGetSizeAndTimestamp(fs::Fs* fs, const FsPath& path, FsTimeStampRaw* ts, s64* size);
 Result IsDirEmpty(fs::Fs* m_fs, const fs::FsPath& path, bool* out);
+
+// helpers.
+Result read_entire_file(Fs* fs, const FsPath& path, std::vector<u8>& out);
+Result write_entire_file(Fs* fs, const FsPath& path, const std::vector<u8>& in, bool ignore_read_only = true);
+Result copy_entire_file(Fs* fs, const FsPath& dst, const FsPath& src, bool ignore_read_only = true);
 
 struct Fs {
     Fs(bool ignore_read_only = true) : m_ignore_read_only{ignore_read_only} {}
@@ -302,9 +323,6 @@ struct Fs {
     virtual bool DirExists(const FsPath& path) = 0;
     virtual bool IsNative() const = 0;
     virtual FsPath Root() const { return "/"; }
-    virtual Result read_entire_file(const FsPath& path, std::vector<u8>& out) = 0;
-    virtual Result write_entire_file(const FsPath& path, const std::vector<u8>& in) = 0;
-    virtual Result copy_entire_file(const FsPath& dst, const FsPath& src) = 0;
 
     Result OpenFile(const fs::FsPath& path, u32 mode, File* f) {
         return fs::OpenFile(this, path, mode, f);
@@ -323,6 +341,15 @@ struct Fs {
     }
     Result IsDirEmpty(const fs::FsPath& path, bool* out) {
         return fs::IsDirEmpty(this, path, out);
+    }
+    Result read_entire_file(const FsPath& path, std::vector<u8>& out) {
+        return fs::read_entire_file(this, path, out);
+    }
+    Result write_entire_file(const FsPath& path, const std::vector<u8>& in) {
+        return fs::write_entire_file(this, path, in, m_ignore_read_only);
+    }
+    Result copy_entire_file(const FsPath& dst, const FsPath& src) {
+        return fs::copy_entire_file(this, dst, src, m_ignore_read_only);
     }
 
     void SetIgnoreReadOnly(bool enable) {
@@ -387,15 +414,6 @@ struct FsStdio : Fs {
     }
     FsPath Root() const override {
         return m_root;
-    }
-    Result read_entire_file(const FsPath& path, std::vector<u8>& out) override {
-        return fs::read_entire_file(path, out);
-    }
-    Result write_entire_file(const FsPath& path, const std::vector<u8>& in) override {
-        return fs::write_entire_file(path, in, m_ignore_read_only);
-    }
-    Result copy_entire_file(const FsPath& dst, const FsPath& src) override {
-        return fs::copy_entire_file(dst, src, m_ignore_read_only);
     }
 
     const FsPath m_root;
@@ -474,15 +492,6 @@ struct FsNative : Fs {
     }
     bool IsNative() const override {
         return true;
-    }
-    Result read_entire_file(const FsPath& path, std::vector<u8>& out) override {
-        return fs::read_entire_file(&m_fs, path, out);
-    }
-    Result write_entire_file(const FsPath& path, const std::vector<u8>& in) override {
-        return fs::write_entire_file(&m_fs, path, in, m_ignore_read_only);
-    }
-    Result copy_entire_file(const FsPath& dst, const FsPath& src) override {
-        return fs::copy_entire_file(&m_fs, dst, src, m_ignore_read_only);
     }
 
     FsFileSystem m_fs{};

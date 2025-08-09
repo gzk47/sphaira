@@ -11,12 +11,35 @@
 
 namespace sphaira::ui::menu::filebrowser {
 
+enum FsOption : u32 {
+    FsOption_NONE,
+
+    // can split screen.
+    FsOption_CanSplit = BIT(0),
+    // can upload files.
+    FsOption_CanUpload = BIT(1),
+    // can selected multiple files.
+    FsOption_CanSelect = BIT(2),
+    // shows the option to install.
+    FsOption_CanInstall = BIT(3),
+    // loads file assoc.
+    FsOption_LoadAssoc = BIT(4),
+    // do not prompt on exit even if not tabbed.
+    FsOption_DoNotPrompt = BIT(5),
+
+    FsOption_Normal = FsOption_LoadAssoc | FsOption_CanInstall | FsOption_CanSplit | FsOption_CanUpload | FsOption_CanSelect,
+    FsOption_All = FsOption_DoNotPrompt | FsOption_Normal,
+    FsOption_Picker = FsOption_NONE,
+};
+
 enum FsEntryFlag {
     FsEntryFlag_None,
     // write protected.
     FsEntryFlag_ReadOnly = 1 << 0,
     // supports file assoc.
     FsEntryFlag_Assoc = 1 << 1,
+    // this is an sd card, files can be launched from here.
+    FsEntryFlag_IsSd = 1 << 2,
 };
 
 enum class FsType {
@@ -24,6 +47,7 @@ enum class FsType {
     ImageNand,
     ImageSd,
     Stdio,
+    Custom,
 };
 
 enum class SelectedType {
@@ -62,13 +86,17 @@ struct FsEntry {
         return flags & FsEntryFlag_Assoc;
     }
 
+    auto IsSd() const -> bool {
+        return flags & FsEntryFlag_IsSd;
+    }
+
     auto IsSame(const FsEntry& e) const {
         return root == e.root && type == e.type;
     }
 };
 
 // roughly 1kib in size per entry
-struct FileEntry : FsDirectoryEntry {
+struct FileEntry final : FsDirectoryEntry {
     std::string extension{}; // if any
     std::string internal_name{}; // if any
     std::string internal_extension{}; // if any
@@ -161,13 +189,14 @@ using FsDirCollections = std::vector<FsDirCollection>;
 
 void SignalChange();
 
-struct Menu;
+struct Base;
 
 struct FsView final : Widget {
-    friend class Menu;
+    friend class Base;
 
-    FsView(Menu* menu, ViewSide side);
-    FsView(Menu* menu, const fs::FsPath& path, const FsEntry& entry, ViewSide side);
+    FsView(FsView* view, ViewSide side);
+    FsView(Base* menu, ViewSide side);
+    FsView(Base* menu, const std::shared_ptr<fs::Fs>& fs, const fs::FsPath& path, const FsEntry& entry, ViewSide side);
     ~FsView();
 
     void Update(Controller* controller, TouchInfo* touch) override;
@@ -192,7 +221,9 @@ struct FsView final : Widget {
     static auto get_collection(fs::Fs* fs, const fs::FsPath& path, const fs::FsPath& parent_name, FsDirCollection& out, bool inc_file, bool inc_dir, bool inc_size) -> Result;
     static auto get_collections(fs::Fs* fs, const fs::FsPath& path, const fs::FsPath& parent_name, FsDirCollections& out, bool inc_size = false) -> Result;
 
-private:
+// private:
+    void OnClick();
+
     void SetIndex(s64 index);
     void InstallForwarder();
 
@@ -201,7 +232,7 @@ private:
     void ZipFiles(fs::FsPath zip_path);
     void UploadFiles();
 
-    auto Scan(const fs::FsPath& new_path, bool is_walk_up = false) -> Result;
+    auto Scan(fs::FsPath new_path, bool is_walk_up = false) -> Result;
 
     auto GetNewPath(const FileEntry& entry) const -> fs::FsPath {
         return GetNewPath(m_path, entry.name);
@@ -248,7 +279,7 @@ private:
     }
 
     auto IsSd() const -> bool {
-        return m_fs_entry.type == FsType::Sd;
+        return m_fs_entry.IsSd();
     }
 
     void Sort();
@@ -263,7 +294,7 @@ private:
     auto get_collection(const fs::FsPath& path, const fs::FsPath& parent_name, FsDirCollection& out, bool inc_file, bool inc_dir, bool inc_size) -> Result;
     auto get_collections(const fs::FsPath& path, const fs::FsPath& parent_name, FsDirCollections& out, bool inc_size = false) -> Result;
 
-    void SetFs(const fs::FsPath& new_path, const FsEntry& new_entry);
+    void SetFs(const std::shared_ptr<fs::Fs>& fs, const fs::FsPath& new_path, const FsEntry& new_entry);
 
     auto GetNative() -> fs::FsNative* {
         return (fs::FsNative*)m_fs.get();
@@ -274,11 +305,11 @@ private:
     void DisplayOptions();
     void DisplayAdvancedOptions();
 
-private:
-    Menu* m_menu{};
+// private:
+    Base* m_menu{};
     ViewSide m_side{};
 
-    std::unique_ptr<fs::Fs> m_fs{};
+    std::shared_ptr<fs::Fs> m_fs{};
     FsEntry m_fs_entry{};
     fs::FsPath m_path{};
     std::vector<FileEntry> m_entries{};
@@ -345,22 +376,28 @@ struct SelectedStash {
     SelectedType m_type{SelectedType::None};
 };
 
-struct Menu final : MenuBase {
+struct Base : MenuBase {
     friend class FsView;
 
-    Menu(u32 flags);
-    ~Menu();
+    Base(u32 flags, u32 options);
+    Base(const std::shared_ptr<fs::Fs>& fs, const FsEntry& fs_entry, const fs::FsPath& path, bool is_custom, u32 flags, u32 options);
+
+    void SetFilter(const std::vector<std::string>& filter) {
+        m_filter = filter;
+    }
 
     auto GetShortTitle() const -> const char* override { return "Files"; };
     void Update(Controller* controller, TouchInfo* touch) override;
     void Draw(NVGcontext* vg, Theme* theme) override;
-    void OnFocusGained() override;
+    virtual void OnFocusGained() override;
 
     static auto GetNewPath(const fs::FsPath& root_path, const fs::FsPath& file_path) -> fs::FsPath {
         return fs::AppendPath(root_path, file_path);
     }
 
-private:
+    virtual void OnClick(FsView* view, const FsEntry& fs_entry, const FileEntry& entry, const fs::FsPath& path);
+
+protected:
     auto IsSplitScreen() const {
         return m_split_screen;
     }
@@ -390,8 +427,19 @@ private:
 
     void PromptIfShouldExit();
 
-private:
+    auto CanInstall() const {
+        return m_options & FsOption_CanInstall;
+    }
+
+    auto CreateFs(const FsEntry& fs_entry) -> std::shared_ptr<fs::Fs>;
+
+protected:
     static constexpr inline const char* INI_SECTION = "filebrowser";
+
+    const u32 m_options;
+
+    std::shared_ptr<fs::Fs> m_custom_fs{};
+    FsEntry m_custom_fs_entry{};
 
     FsView* view{};
     std::unique_ptr<FsView> view_left{};
@@ -399,6 +447,8 @@ private:
 
     std::vector<FileAssocEntry> m_assoc_entries{};
     SelectedStash m_selected{};
+
+    std::vector<std::string> m_filter{};
 
     option::OptionLong m_sort{INI_SECTION, "sort", SortType::SortType_Alphabetical};
     option::OptionLong m_order{INI_SECTION, "order", OrderType::OrderType_Descending};
@@ -410,5 +460,20 @@ private:
     bool m_loaded_assoc_entries{};
     bool m_split_screen{};
 };
+
+struct Menu final : Base {
+    Menu(u32 flags, u32 options = FsOption_All) : Base{flags, options} {
+    }
+
+    Menu(const std::shared_ptr<fs::Fs>& fs, const FsEntry& fs_entry, const fs::FsPath& path, u32 options = FsOption_All)
+    : Base{fs, fs_entry, path, true, MenuFlag_None, options} {
+
+    }
+};
+
+// case insensitive check
+auto IsSamePath(std::string_view a, std::string_view b) -> bool;
+auto IsExtension(std::string_view ext1, std::string_view ext2) -> bool;
+auto IsExtension(std::string_view ext, std::span<const std::string_view> list) -> bool;
 
 } // namespace sphaira::ui::menu::filebrowser

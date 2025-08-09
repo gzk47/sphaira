@@ -272,7 +272,7 @@ SidebarEntryFilePicker::SidebarEntryFilePicker(const std::string& title, const s
 : SidebarEntryTextBase{title, value, {}, info}, m_filter{filter} {
 
     SetCallback([this](){
-        App::Push<menu::filepicker::Menu>(
+        App::Push<menu::filebrowser::picker::Menu>(
             [this](const fs::FsPath& path) {
                 SetValue(path);
                 return true;

@@ -80,12 +80,16 @@ private:
         m_selected_count = 0;
     }
 
+    void DisplayOptions();
+
     void BackupSaves(std::vector<std::reference_wrapper<Entry>>& entries);
     void RestoreSave();
 
     auto BuildSavePath(const Entry& e, bool is_auto) const -> fs::FsPath;
     Result RestoreSaveInternal(ProgressBox* pbox, const Entry& e, const fs::FsPath& path) const;
     Result BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& location, const Entry& e, bool compressed, bool is_auto = false) const;
+
+    Result MountSaveFs();
 
 private:
     static constexpr inline const char* INI_SECTION = "saves";

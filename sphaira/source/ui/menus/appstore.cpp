@@ -634,7 +634,7 @@ EntryMenu::EntryMenu(Entry& entry, const LazyImage& default_icon, Menu& menu)
                 const auto path = BuildManifestCachePath(m_entry);
                 std::vector<u8> data;
 
-                if (R_SUCCEEDED(fs::read_entire_file(path, data))) {
+                if (R_SUCCEEDED(fs::FsNativeSd().read_entire_file(path, data))) {
                     m_file_list_state = ImageDownloadState::Done;
                     data.push_back('\0');
                     m_manifest_list = std::make_unique<ScrollableText>((const char*)data.data(), 0, 374, 250, 768, 18);

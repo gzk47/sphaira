@@ -80,6 +80,6 @@ static constexpr inline bool HasRequiredSystemVersion(const NcmContentMetaKey *k
 }
 
 // fills program id and out path of the control nca.
-Result GetControlPathFromContentId(NcmContentStorage* cs, const NcmContentMetaKey& key, const NcmContentId& id, u64* out_program_id, fs::FsPath* out_path);
+Result GetFsPathFromContentId(NcmContentStorage* cs, const NcmContentMetaKey& key, const NcmContentId& id, u64* out_program_id, fs::FsPath* out_path);
 
 } // namespace sphaira::ncm

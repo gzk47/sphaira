@@ -329,102 +329,7 @@ Menu::Menu(u32 flags) : grid::Menu{"Saves"_i18n, flags} {
             SetPop();
         }}),
         std::make_pair(Button::X, Action{"Options"_i18n, [this](){
-            auto options = std::make_unique<Sidebar>("Save Options"_i18n, Sidebar::Side::RIGHT);
-            ON_SCOPE_EXIT(App::Push(std::move(options)));
-
-            SidebarEntryArray::Items account_items;
-            for (const auto& e : m_accounts) {
-                account_items.emplace_back(e.nickname);
-            }
-
-            PopupList::Items data_type_items;
-            data_type_items.emplace_back("System"_i18n);
-            data_type_items.emplace_back("Account"_i18n);
-            data_type_items.emplace_back("BCAT"_i18n);
-            data_type_items.emplace_back("Device"_i18n);
-            data_type_items.emplace_back("Temporary"_i18n);
-            data_type_items.emplace_back("Cache"_i18n);
-            data_type_items.emplace_back("System BCAT"_i18n);
-
-            options->Add<SidebarEntryCallback>("Sort By"_i18n, [this](){
-                auto options = std::make_unique<Sidebar>("Sort Options"_i18n, Sidebar::Side::RIGHT);
-                ON_SCOPE_EXIT(App::Push(std::move(options)));
-
-                SidebarEntryArray::Items sort_items;
-                sort_items.push_back("Updated"_i18n);
-
-                SidebarEntryArray::Items order_items;
-                order_items.push_back("Descending"_i18n);
-                order_items.push_back("Ascending"_i18n);
-
-                SidebarEntryArray::Items layout_items;
-                layout_items.push_back("List"_i18n);
-                layout_items.push_back("Icon"_i18n);
-                layout_items.push_back("Grid"_i18n);
-
-                options->Add<SidebarEntryArray>("Sort"_i18n, sort_items, [this](s64& index_out){
-                    m_sort.Set(index_out);
-                    SortAndFindLastFile(false);
-                }, m_sort.Get());
-
-                options->Add<SidebarEntryArray>("Order"_i18n, order_items, [this](s64& index_out){
-                    m_order.Set(index_out);
-                    SortAndFindLastFile(false);
-                }, m_order.Get());
-
-                options->Add<SidebarEntryArray>("Layout"_i18n, layout_items, [this](s64& index_out){
-                    m_layout.Set(index_out);
-                    OnLayoutChange();
-                }, m_layout.Get());
-            });
-
-            options->Add<SidebarEntryArray>("Account"_i18n, account_items, [this](s64& index_out){
-                m_account_index = index_out;
-                m_dirty = true;
-                App::PopToMenu();
-            }, m_account_index);
-
-            options->Add<SidebarEntryArray>("Data Type"_i18n, data_type_items, [this](s64& index_out){
-                m_data_type = index_out;
-                m_dirty = true;
-                App::PopToMenu();
-            }, m_data_type);
-
-            if (m_entries.size()) {
-                options->Add<SidebarEntryCallback>("Backup"_i18n, [this](){
-                    std::vector<std::reference_wrapper<Entry>> entries;
-                    if (m_selected_count) {
-                        for (auto& e : m_entries) {
-                            if (e.selected) {
-                                entries.emplace_back(e);
-                            }
-                        }
-                    } else {
-                        entries.emplace_back(m_entries[m_index]);
-                    }
-
-                    BackupSaves(entries);
-                }, true);
-
-                if (m_entries[m_index].save_data_type == FsSaveDataType_Account || m_entries[m_index].save_data_type == FsSaveDataType_Bcat) {
-                    options->Add<SidebarEntryCallback>("Restore"_i18n, [this](){
-                        RestoreSave();
-                    }, true);
-                }
-            }
-
-            options->Add<SidebarEntryCallback>("Advanced"_i18n, [this](){
-                auto options = std::make_unique<Sidebar>("Advanced Options"_i18n, Sidebar::Side::RIGHT);
-                ON_SCOPE_EXIT(App::Push(std::move(options)));
-
-                options->Add<SidebarEntryBool>("Auto backup on restore"_i18n, m_auto_backup_on_restore.Get(), [this](bool& v_out){
-                    m_auto_backup_on_restore.Set(v_out);
-                });
-
-                options->Add<SidebarEntryBool>("Compress backup"_i18n, m_compress_save_backup.Get(), [this](bool& v_out){
-                    m_compress_save_backup.Set(v_out);
-                });
-            });
+            DisplayOptions();
         }})
     );
 
@@ -676,6 +581,110 @@ void Menu::FreeEntries() {
 void Menu::OnLayoutChange() {
     m_index = 0;
     grid::Menu::OnLayoutChange(m_list, m_layout.Get());
+}
+
+void Menu::DisplayOptions() {
+    auto options = std::make_unique<Sidebar>("Save Options"_i18n, Sidebar::Side::RIGHT);
+    ON_SCOPE_EXIT(App::Push(std::move(options)));
+
+    SidebarEntryArray::Items account_items;
+    for (const auto& e : m_accounts) {
+        account_items.emplace_back(e.nickname);
+    }
+
+    PopupList::Items data_type_items;
+    data_type_items.emplace_back("System"_i18n);
+    data_type_items.emplace_back("Account"_i18n);
+    data_type_items.emplace_back("BCAT"_i18n);
+    data_type_items.emplace_back("Device"_i18n);
+    data_type_items.emplace_back("Temporary"_i18n);
+    data_type_items.emplace_back("Cache"_i18n);
+    data_type_items.emplace_back("System BCAT"_i18n);
+
+    options->Add<SidebarEntryCallback>("Sort By"_i18n, [this](){
+        auto options = std::make_unique<Sidebar>("Sort Options"_i18n, Sidebar::Side::RIGHT);
+        ON_SCOPE_EXIT(App::Push(std::move(options)));
+
+        SidebarEntryArray::Items sort_items;
+        sort_items.push_back("Updated"_i18n);
+
+        SidebarEntryArray::Items order_items;
+        order_items.push_back("Descending"_i18n);
+        order_items.push_back("Ascending"_i18n);
+
+        SidebarEntryArray::Items layout_items;
+        layout_items.push_back("List"_i18n);
+        layout_items.push_back("Icon"_i18n);
+        layout_items.push_back("Grid"_i18n);
+
+        options->Add<SidebarEntryArray>("Sort"_i18n, sort_items, [this](s64& index_out){
+            m_sort.Set(index_out);
+            SortAndFindLastFile(false);
+        }, m_sort.Get());
+
+        options->Add<SidebarEntryArray>("Order"_i18n, order_items, [this](s64& index_out){
+            m_order.Set(index_out);
+            SortAndFindLastFile(false);
+        }, m_order.Get());
+
+        options->Add<SidebarEntryArray>("Layout"_i18n, layout_items, [this](s64& index_out){
+            m_layout.Set(index_out);
+            OnLayoutChange();
+        }, m_layout.Get());
+    });
+
+    options->Add<SidebarEntryArray>("Account"_i18n, account_items, [this](s64& index_out){
+        m_account_index = index_out;
+        m_dirty = true;
+        App::PopToMenu();
+    }, m_account_index);
+
+    options->Add<SidebarEntryArray>("Data Type"_i18n, data_type_items, [this](s64& index_out){
+        m_data_type = index_out;
+        m_dirty = true;
+        App::PopToMenu();
+    }, m_data_type);
+
+    if (m_entries.size()) {
+        options->Add<SidebarEntryCallback>("Backup"_i18n, [this](){
+            std::vector<std::reference_wrapper<Entry>> entries;
+            if (m_selected_count) {
+                for (auto& e : m_entries) {
+                    if (e.selected) {
+                        entries.emplace_back(e);
+                    }
+                }
+            } else {
+                entries.emplace_back(m_entries[m_index]);
+            }
+
+            BackupSaves(entries);
+        }, true);
+
+        if (m_entries[m_index].save_data_type == FsSaveDataType_Account || m_entries[m_index].save_data_type == FsSaveDataType_Bcat) {
+            options->Add<SidebarEntryCallback>("Restore"_i18n, [this](){
+                RestoreSave();
+            }, true);
+        }
+
+        options->Add<SidebarEntryCallback>("Mount Fs"_i18n, [this](){
+            const auto rc = MountSaveFs();
+            App::PushErrorBox(rc, "Failed to mount save filesystem"_i18n);
+        });
+    }
+
+    options->Add<SidebarEntryCallback>("Advanced"_i18n, [this](){
+        auto options = std::make_unique<Sidebar>("Advanced Options"_i18n, Sidebar::Side::RIGHT);
+        ON_SCOPE_EXIT(App::Push(std::move(options)));
+
+        options->Add<SidebarEntryBool>("Auto backup on restore"_i18n, m_auto_backup_on_restore.Get(), [this](bool& v_out){
+            m_auto_backup_on_restore.Set(v_out);
+        });
+
+        options->Add<SidebarEntryBool>("Compress backup"_i18n, m_compress_save_backup.Get(), [this](bool& v_out){
+            m_compress_save_backup.Set(v_out);
+        });
+    });
 }
 
 void Menu::BackupSaves(std::vector<std::reference_wrapper<Entry>>& entries) {
@@ -1089,6 +1098,32 @@ Result Menu::BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& loc
     fs->DeleteFile(path);
     R_TRY(fs->RenameFile(temp_path, path));
 
+    R_SUCCEED();
+}
+
+Result Menu::MountSaveFs() {
+    const auto& e = m_entries[m_index];
+    const auto save_data_space_id = (FsSaveDataSpaceId)e.save_data_space_id;
+
+    FsSaveDataAttribute attr{};
+    attr.application_id = e.application_id;
+    attr.uid = e.uid;
+    attr.system_save_data_id = e.system_save_data_id;
+    attr.save_data_type = e.save_data_type;
+    attr.save_data_rank = e.save_data_rank;
+    attr.save_data_index = e.save_data_index;
+
+    auto fs = std::make_shared<fs::FsNativeSave>((FsSaveDataType)e.save_data_type, save_data_space_id, &attr, true);
+    R_TRY(fs->GetFsOpenResult());
+
+    const filebrowser::FsEntry fs_entry{
+        .name = e.GetName(),
+        .root = "/",
+        .type = filebrowser::FsType::Custom,
+        .flags = filebrowser::FsEntryFlag_ReadOnly,
+    };
+
+    App::Push<filebrowser::Menu>(fs, fs_entry, "/");
     R_SUCCEED();
 }
 

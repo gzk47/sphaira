@@ -1,4 +1,6 @@
 #include "ui/menus/game_nca_menu.hpp"
+#include "ui/menus/filebrowser.hpp"
+
 #include "ui/nvg_util.hpp"
 #include "ui/sidebar.hpp"
 #include "ui/option_box.hpp"
@@ -116,6 +118,25 @@ private:
     bool m_is_file_based_emummc{};
 };
 
+Result GetFsFileSystemType(u8 content_type, FsFileSystemType& out) {
+    switch (content_type) {
+        case nca::ContentType_Meta:
+            out = FsFileSystemType_ContentMeta;
+            R_SUCCEED();
+        case nca::ContentType_Control:
+            out = FsFileSystemType_ContentControl;
+            R_SUCCEED();
+        case nca::ContentType_Manual:
+            out = FsFileSystemType_ContentManual;
+            R_SUCCEED();
+        case nca::ContentType_Data:
+            out = FsFileSystemType_ContentData;
+            R_SUCCEED();
+    }
+
+    R_THROW(0x1);
+}
+
 } // namespace
 
 Menu::Menu(Entry& entry, const meta::MetaEntry& meta_entry)
@@ -147,6 +168,10 @@ Menu::Menu(Entry& entry, const meta::MetaEntry& meta_entry)
                     m_selected_count--;
                 }
             }
+        }}),
+        std::make_pair(Button::A, Action{"Mount Fs"_i18n, [this](){
+            // todo: handle error here.
+            MountNcaFs();
         }}),
         std::make_pair(Button::B, Action{"Back"_i18n, [this](){
             SetPop();
@@ -367,6 +392,32 @@ void Menu::DumpNcas() {
 
     auto source = std::make_shared<NcaSource>(m_meta.cs, m_entry.image, entries);
     dump::Dump(source, paths, [](Result){}, dump::DumpLocationFlag_All &~ dump::DumpLocationFlag_UsbS2S);
+}
+
+Result Menu::MountNcaFs() {
+    const auto& e = GetEntry();
+
+    FsFileSystemType type;
+    R_TRY(GetFsFileSystemType(e.header.content_type, type));
+
+    // get fs path from ncm.
+    u64 program_id;
+    fs::FsPath path;
+    R_TRY(ncm::GetFsPathFromContentId(m_meta.cs, m_meta.key, e.content_id, &program_id, &path));
+
+    // ensure that mounting worked.
+    auto fs = std::make_shared<fs::FsNativeId>(program_id, type, path);
+    R_TRY(fs->GetFsOpenResult());
+
+    const filebrowser::FsEntry fs_entry{
+        .name = "NCA",
+        .root = "/",
+        .type = filebrowser::FsType::Custom,
+        .flags = filebrowser::FsEntryFlag_ReadOnly,
+    };
+
+    App::Push<filebrowser::Menu>(fs, fs_entry, "/");
+    R_SUCCEED();
 }
 
 } // namespace sphaira::ui::menu::game::meta_nca

@@ -1512,10 +1512,9 @@ App::App(const char* argv0) {
         plsrPlayerInit();
     }
 
-    if (R_SUCCEEDED(romfsMountDataStorageFromProgram(0x0100000000001000, "qlaunch"))) {
-        ON_SCOPE_EXIT(romfsUnmount("qlaunch"));
+    if (R_SUCCEEDED(romfsMountDataStorageFromProgram(0x0100000000001000, "Qlaunch_romfs"))) {
         PLSR_BFSAR qlaunch_bfsar;
-        if (R_SUCCEEDED(plsrBFSAROpen("qlaunch:/sound/qlaunch.bfsar", &qlaunch_bfsar))) {
+        if (R_SUCCEEDED(plsrBFSAROpen("Qlaunch_romfs:/sound/qlaunch.bfsar", &qlaunch_bfsar))) {
             ON_SCOPE_EXIT(plsrBFSARClose(&qlaunch_bfsar));
 
             const auto load_sound = [&](const char* name, u32 id) {
@@ -2075,6 +2074,7 @@ App::~App() {
     }
 
     fatfs::UnmountAll();
+    romfsUnmount("Qlaunch_romfs");
 
     log_write("\t[EXIT] time taken: %.2fs %zums\n", ts.GetSecondsD(), ts.GetMs());
 
