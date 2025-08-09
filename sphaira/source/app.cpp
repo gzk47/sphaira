@@ -1974,7 +1974,10 @@ App::~App() {
 
     // this has to be called before any cleanup to ensure the lifetime of
     // nvg is still active as some widgets may need to free images.
-    m_widgets.clear();
+    // clear in reverse order as the widgets are a stack (todo: just use a stack?)
+    while (!m_widgets.empty()) {
+        m_widgets.pop_back();
+    }
     nvgDeleteImage(vg, m_default_image);
 
     i18n::exit();
