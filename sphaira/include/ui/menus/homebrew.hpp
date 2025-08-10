@@ -71,6 +71,8 @@ private:
         return m_sort.Get() >= SortType_UpdatedStar;
     }
 
+    Result MountRomfsFs();
+
 private:
     static constexpr inline const char* INI_SECTION = "homebrew";
 

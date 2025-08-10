@@ -90,6 +90,10 @@ add_executable(sphaira
     source/minizip_helper.cpp
     source/fatfs.cpp
 
+    source/utils/devoptab_save.cpp
+    # todo:
+    # source/utils/devoptab_zip.cpp
+
     source/usb/base.cpp
     source/usb/usbds.cpp
     source/usb/usbhs.cpp
@@ -108,7 +112,9 @@ add_executable(sphaira
     source/yati/nx/nca.cpp
     source/yati/nx/ncm.cpp
     source/yati/nx/ns.cpp
+
     source/yati/nx/nxdumptool_rsa.c
+    source/yati/nx/nxdumptool/save.c
 )
 
 target_compile_definitions(sphaira PRIVATE
@@ -397,6 +403,7 @@ target_include_directories(sphaira PRIVATE
     include
     ${minizip_inc}
     ${mbedtls_inc}
+    include/yati/nx/nxdumptool
 )
 
 # copy the romfs

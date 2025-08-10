@@ -171,7 +171,9 @@ Menu::Menu(Entry& entry, const meta::MetaEntry& meta_entry)
         }}),
         std::make_pair(Button::A, Action{"Mount Fs"_i18n, [this](){
             // todo: handle error here.
-            MountNcaFs();
+            if (!m_entries.empty() && !GetEntry().missing) {
+                MountNcaFs();
+            }
         }}),
         std::make_pair(Button::B, Action{"Back"_i18n, [this](){
             SetPop();

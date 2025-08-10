@@ -2,6 +2,7 @@
 #include "log.hpp"
 #include "fs.hpp"
 #include "ui/menus/homebrew.hpp"
+#include "ui/menus/filebrowser.hpp"
 #include "ui/sidebar.hpp"
 #include "ui/error_box.hpp"
 #include "ui/option_box.hpp"
@@ -469,7 +470,16 @@ void Menu::DisplayOptions() {
             ScanHomebrew();
             App::PopToMenu();
         },  "Hides the selected homebrew.\n\n"
-            "To Unhide homebrew, enable \"Show hidden\" in the sort options."_i18n);
+            "To unhide homebrew, enable \"Show hidden\" in the sort options."_i18n);
+
+        auto mount_option = options->Add<SidebarEntryCallback>("Mount RomFS"_i18n, [this](){
+            const auto rc = MountRomfsFs();
+            App::PushErrorBox(rc, "Failed to mount NRO RomFS"_i18n);
+        },  "Mounts the homebrew RomFS"_i18n);
+
+        mount_option->Depends([this](){
+            return GetEntry().romfs_offset && GetEntry().romfs_size;
+        },  "This homebrew does not have a RomFS"_i18n);
 
         options->Add<SidebarEntryCallback>("Delete"_i18n, [this](){
             const auto buf = "Are you sure you want to delete "_i18n + GetEntry().path.toString() + "?";
@@ -498,6 +508,49 @@ void Menu::DisplayOptions() {
 
         forwarder_entry->Depends(App::GetInstallEnable, i18n::get(App::INSTALL_DEPENDS_STR), App::ShowEnableInstallPrompt);
     }
+}
+
+struct NroRomFS final : fs::FsStdio {
+    NroRomFS(const fs::FsPath& name, const fs::FsPath& root) : FsStdio{true, root}, m_name{name} {
+
+    }
+
+    ~NroRomFS() {
+        romfsUnmount(m_name);
+    }
+
+    const fs::FsPath m_name;
+};
+
+Result Menu::MountRomfsFs() {
+    const char* name = "nro_romfs";
+    const char* root = "nro_romfs:/";
+    const auto& e = GetEntry();
+
+    // todo: add errors for when nro doesn't have romfs.
+    R_UNLESS(e.romfs_offset, 0x1);
+    R_UNLESS(e.romfs_size, 0x1);
+
+    FsFile file;
+    R_TRY(fsFsOpenFile(fsdevGetDeviceFileSystem("sdmc"), e.path, FsOpenMode_Read, &file));
+
+    const auto rc = romfsMountFromFile(file, e.romfs_offset, name);
+    if (R_FAILED(rc)) {
+        fsFileClose(&file);
+        R_THROW(rc);
+    }
+
+    auto fs = std::make_shared<NroRomFS>(name, root);
+
+    const filebrowser::FsEntry fs_entry{
+        .name = e.GetName(),
+        .root = root,
+        .type = filebrowser::FsType::Custom,
+        .flags = filebrowser::FsEntryFlag_ReadOnly,
+    };
+
+    App::Push<filebrowser::Menu>(fs, fs_entry, root);
+    R_SUCCEED();
 }
 
 } // namespace sphaira::ui::menu::homebrew

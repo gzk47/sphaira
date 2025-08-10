@@ -1,0 +1,375 @@
+
+#include "utils/devoptab.hpp"
+#include "defines.hpp"
+#include "log.hpp"
+
+#include "yati/nx/nxdumptool/defines.h"
+#include "yati/nx/nxdumptool/core/save.h"
+
+#include <cstring>
+#include <cstdio>
+#include <cerrno>
+#include <algorithm>
+#include <sys/iosupport.h>
+
+namespace sphaira::devoptab {
+namespace {
+
+struct Device {
+    save_ctx_t* ctx;
+    hierarchical_save_file_table_ctx_t* file_table;
+};
+
+struct File {
+    Device* device;
+    save_fs_list_entry_t entry;
+    allocation_table_storage_ctx_t storage;
+    size_t off;
+};
+
+struct DirNext {
+    u32 next_directory;
+    u32 next_file;
+};
+
+struct Dir {
+    Device* device;
+    save_fs_list_entry_t entry;
+    u32 next_directory;
+    u32 next_file;
+};
+
+bool fix_path(const char* str, char* out) {
+    // log_write("[SAVE] got path: %s\n", str);
+
+    str = std::strrchr(str, ':');
+    if (!str) {
+        return false;
+    }
+
+    // skip over ':'
+    str++;
+    size_t len = 0;
+
+    for (size_t i = 0; str[i]; i++) {
+        // skip multiple slashes.
+        if (i && str[i] == '/' && str[i - 1] == '/') {
+            continue;
+        }
+
+        // add leading slash.
+        if (!i && str[i] != '/') {
+            out[len++] = '/';
+        }
+
+        // save single char.
+        out[len++] = str[i];
+    }
+
+    // root path uses ""
+    if (len == 1 && out[0] == '/') {
+        // out[0] = '\0';
+    }
+
+    // null the end.
+    out[len] = '\0';
+
+    // log_write("[SAVE] end path: %s\n", out);
+
+    return true;
+}
+
+static int set_errno(struct _reent *r, int err) {
+    r->_errno = err;
+    return -1;
+}
+
+int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int flags, int mode) {
+    auto device = (Device*)r->deviceData;
+    auto file = static_cast<File*>(fileStruct);
+    std::memset(file, 0, sizeof(*file));
+
+    char path[FS_MAX_PATH];
+    if (!fix_path(_path, path)) {
+        return set_errno(r, ENOENT);
+    }
+
+    if (!save_hierarchical_file_table_get_file_entry_by_path(device->file_table, path, &file->entry)) {
+        return set_errno(r, ENOENT);
+    }
+
+    if (!save_open_fat_storage(&device->ctx->save_filesystem_core, &file->storage, file->entry.value.save_file_info.start_block)) {
+        return set_errno(r, ENOENT);
+    }
+
+    file->device = device;
+    return r->_errno = 0;
+}
+
+int devoptab_close(struct _reent *r, void *fd) {
+    auto file = static_cast<File*>(fd);
+    std::memset(file, 0, sizeof(*file));
+
+    return r->_errno = 0;
+}
+
+ssize_t devoptab_read(struct _reent *r, void *fd, char *ptr, size_t len) {
+    auto file = static_cast<File*>(fd);
+
+    // todo: maybe eof here?
+    const auto bytes_read = save_allocation_table_storage_read(&file->storage, ptr, file->off, len);
+    if (!bytes_read) {
+        return set_errno(r, ENOENT);
+    }
+
+    file->off += bytes_read;
+    return bytes_read;
+}
+
+off_t devoptab_seek(struct _reent *r, void *fd, off_t pos, int dir) {
+    auto file = static_cast<File*>(fd);
+
+    if (dir == SEEK_CUR) {
+        pos += file->off;
+    } else if (dir == SEEK_END) {
+        pos = file->storage._length;
+    }
+
+    r->_errno = 0;
+    return file->off = std::clamp<u64>(pos, 0, file->storage._length);
+}
+
+int devoptab_fstat(struct _reent *r, void *fd, struct stat *st) {
+    auto file = static_cast<File*>(fd);
+
+    log_write("[\t\tDEV] fstat\n");
+    std::memset(st, 0, sizeof(*st));
+    st->st_nlink = 1;
+    st->st_size = file->storage._length;
+    st->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
+    return r->_errno = 0;
+}
+
+DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_path) {
+    auto device = (Device*)r->deviceData;
+    auto dir = static_cast<Dir*>(dirState->dirStruct);
+    std::memset(dir, 0, sizeof(*dir));
+
+    char path[FS_MAX_PATH];
+    if (!fix_path(_path, path)) {
+        set_errno(r, ENOENT);
+        return NULL;
+    }
+
+    if (!std::strcmp(path, "/")) {
+        save_entry_key_t key{};
+        const auto idx = save_fs_list_get_index_from_key(&device->file_table->directory_table, &key, NULL);
+        if (idx == 0xFFFFFFFF) {
+            set_errno(r, ENOENT);
+            return NULL;
+        }
+
+        if (!save_fs_list_get_value(&device->file_table->directory_table, idx, &dir->entry)) {
+            set_errno(r, ENOENT);
+            return NULL;
+        }
+    } else if (!save_hierarchical_directory_table_get_file_entry_by_path(device->file_table, path, &dir->entry)) {
+        set_errno(r, ENOENT);
+        return NULL;
+    }
+
+    dir->device = device;
+    dir->next_file = dir->entry.value.save_find_position.next_file;
+    dir->next_directory = dir->entry.value.save_find_position.next_directory;
+
+    r->_errno = 0;
+    return dirState;
+}
+
+int devoptab_dirreset(struct _reent *r, DIR_ITER *dirState) {
+    auto dir = static_cast<Dir*>(dirState->dirStruct);
+
+    dir->next_file = dir->entry.value.save_find_position.next_file;
+    dir->next_directory = dir->entry.value.save_find_position.next_directory;
+
+    return r->_errno = 0;
+}
+
+int devoptab_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struct stat *filestat) {
+    auto dir = static_cast<Dir*>(dirState->dirStruct);
+
+    std::memset(filestat, 0, sizeof(*filestat));
+    save_fs_list_entry_t entry{};
+
+    if (dir->next_directory) {
+        // todo: use save_allocation_table_storage_read for faster reads
+        if (!save_fs_list_get_value(&dir->device->file_table->directory_table, dir->next_directory, &entry)) {
+            return set_errno(r, ENOENT);
+        }
+
+        filestat->st_mode = S_IFDIR | S_IRUSR | S_IRGRP | S_IROTH;
+        dir->next_directory = entry.value.next_sibling;
+    }
+    else if (dir->next_file) {
+        // todo: use save_allocation_table_storage_read for faster reads
+        if (!save_fs_list_get_value(&dir->device->file_table->file_table, dir->next_file, &entry)) {
+            return set_errno(r, ENOENT);
+        }
+
+        filestat->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
+        // todo: confirm this.
+        filestat->st_size = entry.value.save_file_info.length;
+        // filestat->st_size = file->storage.block_size;
+        dir->next_file = entry.value.next_sibling;
+    }
+    else {
+        return set_errno(r, ENOENT);
+    }
+
+    filestat->st_nlink = 1;
+    strcpy(filename, entry.name);
+
+    return r->_errno = 0;
+}
+
+int devoptab_dirclose(struct _reent *r, DIR_ITER *dirState) {
+    auto dir = static_cast<Dir*>(dirState->dirStruct);
+    std::memset(dir, 0, sizeof(*dir));
+
+    return r->_errno = 0;
+}
+
+int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
+    auto device = (Device*)r->deviceData;
+
+    log_write("[\t\tDEV] lstat\n");
+
+    char path[FS_MAX_PATH];
+    if (!fix_path(_path, path)) {
+        return set_errno(r, ENOENT);
+    }
+
+    std::memset(st, 0, sizeof(*st));
+    save_fs_list_entry_t entry{};
+
+    // NOTE: this is very slow.
+    if (save_hierarchical_file_table_get_file_entry_by_path(device->file_table, path, &entry)) {
+        st->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
+        st->st_size = entry.value.save_file_info.length;
+    } else if (save_hierarchical_directory_table_get_file_entry_by_path(device->file_table, path, &entry)) {
+        st->st_mode = S_IFDIR | S_IRUSR | S_IRGRP | S_IROTH;
+    } else {
+        return set_errno(r, ENOENT);
+    }
+
+    st->st_nlink = 1;
+
+    return r->_errno = 0;
+}
+
+constexpr devoptab_t DEVOPTAB = {
+    .structSize   = sizeof(File),
+    .open_r       = devoptab_open,
+    .close_r      = devoptab_close,
+    .read_r       = devoptab_read,
+    .seek_r       = devoptab_seek,
+    .fstat_r      = devoptab_fstat,
+    .stat_r       = devoptab_lstat,
+    .dirStateSize = sizeof(Dir),
+    .diropen_r    = devoptab_diropen,
+    .dirreset_r   = devoptab_dirreset,
+    .dirnext_r    = devoptab_dirnext,
+    .dirclose_r   = devoptab_dirclose,
+    .lstat_r      = devoptab_lstat,
+};
+
+struct Entry {
+    u64 id;
+    Device device;
+    devoptab_t devoptab;
+    char name[32];
+    s32 ref_count;
+};
+
+Mutex g_mutex;
+std::vector<Entry> g_entries;
+
+void MakeMountPath(u64 id, fs::FsPath& out_path) {
+    std::snprintf(out_path, sizeof(out_path), "%016lx:/", id);
+}
+
+} // namespace
+
+Result MountFromSavePath(u64 id, fs::FsPath& out_path) {
+    SCOPED_MUTEX(&g_mutex);
+
+    // check if we already have the save mounted.
+    for (auto& e : g_entries) {
+        if (e.id == id) {
+            e.ref_count++;
+            MakeMountPath(id, out_path);
+            R_SUCCEED();
+        }
+    }
+
+    char path[256];
+    std::snprintf(path, sizeof(path), "SYSTEM:/save/%016lx", id);
+
+    auto ctx = save_open_savefile(path, 0);
+    if (!ctx) {
+        R_THROW(0x1);
+    }
+
+    log_write("[SAVE] OPEN SUCCESS %s\n", path);
+
+    // create new entry.
+    auto& entry = g_entries.emplace_back();
+    std::snprintf(entry.name, sizeof(entry.name), "%016lx", id);
+
+    entry.id = id;
+    entry.device.ctx = ctx;
+    entry.device.file_table = &ctx->save_filesystem_core.file_table;
+    entry.devoptab = DEVOPTAB;
+    entry.devoptab.name = entry.name;
+    entry.devoptab.deviceData = &entry.device;
+
+    R_UNLESS(AddDevice(&entry.devoptab) >= 0, 0x1);
+    log_write("[SAVE] DEVICE SUCCESS %s %s\n", path, entry.name);
+
+    MakeMountPath(id, out_path);
+
+    entry.ref_count++;
+    R_SUCCEED();
+}
+
+void UnmountSave(u64 id) {
+    SCOPED_MUTEX(&g_mutex);
+
+    auto itr = std::ranges::find_if(g_entries, [id](auto& e){
+        return id == e.id;
+    });
+
+    if (itr == g_entries.end()) {
+        return;
+    }
+
+    if (itr->ref_count) {
+        itr->ref_count--;
+    }
+
+    if (!itr->ref_count) {
+        fs::FsPath path;
+        MakeMountPath(id, path);
+
+        // todo: verify this actually works.
+        RemoveDevice(path);
+
+        if (itr->device.ctx) {
+            save_close_savefile(&itr->device.ctx);
+        }
+
+        g_entries.erase(itr);
+    }
+}
+
+} // namespace sphaira::devoptab

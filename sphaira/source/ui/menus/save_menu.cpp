@@ -10,6 +10,8 @@
 #include "minizip_helper.hpp"
 #include "dumper.hpp"
 
+#include "utils/devoptab.hpp"
+
 #include "ui/menus/save_menu.hpp"
 #include "ui/menus/filebrowser.hpp"
 
@@ -39,6 +41,18 @@ constexpr u32 NX_SAVE_META_VERSION = 1;
 constexpr const char* NX_SAVE_META_NAME = ".nx_save_meta.bin";
 
 constinit UEvent g_change_uevent;
+
+struct SystemSaveFs final : fs::FsStdio {
+    SystemSaveFs(u64 id, const fs::FsPath& root) : FsStdio{true, root}, m_id{id} {
+
+    }
+
+    ~SystemSaveFs() {
+        devoptab::UnmountSave(m_id);
+    }
+
+    const u64 m_id;
+};
 
 // https://github.com/J-D-K/JKSV/issues/264#issuecomment-2618962807
 struct NXSaveMeta {
@@ -323,6 +337,12 @@ Menu::Menu(u32 flags) : grid::Menu{"Saves"_i18n, flags} {
                 for (auto& e : m_entries) {
                     e.selected = true;
                 }
+            }
+        }}),
+        std::make_pair(Button::A, Action{"Mount Fs"_i18n, [this](){
+            if (!m_entries.empty()) {
+                const auto rc = MountSaveFs();
+                App::PushErrorBox(rc, "Failed to mount save filesystem"_i18n);
             }
         }}),
         std::make_pair(Button::B, Action{"Back"_i18n, [this](){
@@ -666,11 +686,6 @@ void Menu::DisplayOptions() {
                 RestoreSave();
             }, true);
         }
-
-        options->Add<SidebarEntryCallback>("Mount Fs"_i18n, [this](){
-            const auto rc = MountSaveFs();
-            App::PushErrorBox(rc, "Failed to mount save filesystem"_i18n);
-        });
     }
 
     options->Add<SidebarEntryCallback>("Advanced"_i18n, [this](){
@@ -1103,27 +1118,45 @@ Result Menu::BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& loc
 
 Result Menu::MountSaveFs() {
     const auto& e = m_entries[m_index];
-    const auto save_data_space_id = (FsSaveDataSpaceId)e.save_data_space_id;
+    fs::FsPath root;
 
-    FsSaveDataAttribute attr{};
-    attr.application_id = e.application_id;
-    attr.uid = e.uid;
-    attr.system_save_data_id = e.system_save_data_id;
-    attr.save_data_type = e.save_data_type;
-    attr.save_data_rank = e.save_data_rank;
-    attr.save_data_index = e.save_data_index;
+    if (e.system_save_data_id) {
+        R_TRY(devoptab::MountFromSavePath(e.system_save_data_id, root));
 
-    auto fs = std::make_shared<fs::FsNativeSave>((FsSaveDataType)e.save_data_type, save_data_space_id, &attr, true);
-    R_TRY(fs->GetFsOpenResult());
+        auto fs = std::make_shared<SystemSaveFs>(e.system_save_data_id, root);
 
-    const filebrowser::FsEntry fs_entry{
-        .name = e.GetName(),
-        .root = "/",
-        .type = filebrowser::FsType::Custom,
-        .flags = filebrowser::FsEntryFlag_ReadOnly,
-    };
+        const filebrowser::FsEntry fs_entry{
+            .name = e.GetName(),
+            .root = root,
+            .type = filebrowser::FsType::Custom,
+            .flags = filebrowser::FsEntryFlag_ReadOnly,
+        };
 
-    App::Push<filebrowser::Menu>(fs, fs_entry, "/");
+        App::Push<filebrowser::Menu>(fs, fs_entry, root);
+    } else {
+        const auto save_data_space_id = (FsSaveDataSpaceId)e.save_data_space_id;
+
+        FsSaveDataAttribute attr{};
+        attr.application_id = e.application_id;
+        attr.uid = e.uid;
+        attr.system_save_data_id = e.system_save_data_id;
+        attr.save_data_type = e.save_data_type;
+        attr.save_data_rank = e.save_data_rank;
+        attr.save_data_index = e.save_data_index;
+
+        auto fs = std::make_shared<fs::FsNativeSave>((FsSaveDataType)e.save_data_type, save_data_space_id, &attr, true);
+        R_TRY(fs->GetFsOpenResult());
+
+        const filebrowser::FsEntry fs_entry{
+            .name = e.GetName(),
+            .root = "/",
+            .type = filebrowser::FsType::Custom,
+            .flags = filebrowser::FsEntryFlag_ReadOnly,
+        };
+
+        App::Push<filebrowser::Menu>(fs, fs_entry, "/");
+    }
+
     R_SUCCEED();
 }
 

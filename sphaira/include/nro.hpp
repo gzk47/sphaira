@@ -27,6 +27,9 @@ struct NroEntry {
     u64 icon_size{};
     u64 icon_offset{};
 
+    u64 romfs_size{};
+    u64 romfs_offset{};
+
     FsTimeStampRaw timestamp{};
     Hbini hbini{};
 

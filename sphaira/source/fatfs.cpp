@@ -5,6 +5,7 @@
 
 #include <array>
 #include <algorithm>
+#include <span>
 
 #include <cstring>
 #include <cstdio>
@@ -14,13 +15,98 @@
 namespace sphaira::fatfs {
 namespace {
 
-// 256-512 are the best values, anything more has serious slow down
-// due to non-seq reads.
+// todo: replace with off+size and have the data be in another struct
+// in order to be more lcache efficient.
 struct BufferedFileData {
-	u8 data[1024 * 256];
-	s64 off;
-	s64 size;
+    u8* data{};
+    u64 off{};
+    u64 size{};
+
+    ~BufferedFileData() {
+        if (data) {
+            free(data);
+        }
+    }
+
+    void Allocate(u64 new_size) {
+        data = (u8*)realloc(data, new_size * sizeof(*data));
+        off = 0;
+        size = 0;
+    }
 };
+
+template<typename T>
+struct LinkedList {
+    T* data;
+    LinkedList* next;
+    LinkedList* prev;
+};
+
+constexpr u64 CACHE_LARGE_ALLOC_SIZE = 1024 * 512;
+constexpr u64 CACHE_LARGE_SIZE = 1024 * 16;
+
+template<typename T>
+struct Lru {
+    using ListEntry = LinkedList<T>;
+
+    // pass span of the data.
+    void Init(std::span<T> data) {
+        list_flat_array.clear();
+        list_flat_array.resize(data.size());
+
+        auto list_entry = list_head = list_flat_array.data();
+
+        for (size_t i = 0; i < data.size(); i++) {
+            list_entry = list_flat_array.data() + i;
+            list_entry->data = data.data() + i;
+
+            if (i + 1 < data.size()) {
+                list_entry->next = &list_flat_array[i + 1];
+            }
+            if (i) {
+                list_entry->prev = &list_flat_array[i - 1];
+            }
+        }
+
+        list_tail = list_entry->prev->next;
+    }
+
+    // moves entry to the front of the list.
+    void Update(ListEntry* entry) {
+        // only update position if we are not the head.
+        if (list_head != entry) {
+            entry->prev->next = entry->next;
+            if (entry->next) {
+                entry->next->prev = entry->prev;
+            } else {
+                list_tail = entry->prev;
+            }
+
+            // update head.
+            auto head_temp = list_head;
+            list_head = entry;
+            list_head->prev = nullptr;
+            list_head->next = head_temp;
+            head_temp->prev = list_head;
+        }
+    }
+
+    // moves last entry (tail) to the front of the list.
+    auto GetNextFree() {
+        Update(list_tail);
+        return list_head->data;
+    }
+
+    auto begin() const { return list_head; }
+    auto end() const { return list_tail; }
+
+private:
+    ListEntry* list_head{};
+    ListEntry* list_tail{};
+    std::vector<ListEntry> list_flat_array{};
+};
+
+using LruBufferedData = Lru<BufferedFileData>;
 
 enum BisMountType {
     BisMountType_PRODINFOF,
@@ -31,7 +117,10 @@ enum BisMountType {
 
 struct FatStorageEntry {
     FsStorage storage;
-    BufferedFileData buffered;
+    s64 storage_size;
+    LruBufferedData lru_cache[2];
+    BufferedFileData buffered_small[1024]; // 1MiB (usually).
+    BufferedFileData buffered_large[2];    // 1MiB
     FATFS fs;
     devoptab_t devoptab;
 };
@@ -52,35 +141,57 @@ static_assert(std::size(BIS_MOUNT_ENTRIES) == FF_VOLUMES);
 
 FatStorageEntry g_fat_storage[FF_VOLUMES];
 
-// crappy generic buffered io i wrote a while ago.
-// this allows for 3-4x speed increase reading from storage.
-// as it avoids reading very small chunks at a time.
-// note: this works best when the file is not fragmented.
-Result ReadFile(FsStorage* storage, BufferedFileData& m_buffered, void *_buffer, size_t file_off, size_t read_size) {
+Result ReadStorage(FsStorage* storage, std::span<LruBufferedData> lru_cache, void *_buffer, u64 file_off, u64 read_size, u64 capacity) {
+    // log_write("[FATFS] read offset: %zu size: %zu\n", file_off, read_size);
     auto dst = static_cast<u8*>(_buffer);
     size_t amount = 0;
 
-    // check if we already have this data buffered.
-    if (m_buffered.size) {
-        // check if we can read this data into the beginning of dst.
-        if (file_off < m_buffered.off + m_buffered.size && file_off >= m_buffered.off) {
-            const auto off = file_off - m_buffered.off;
-            const auto size = std::min<s64>(read_size, m_buffered.size - off);
-            std::memcpy(dst, m_buffered.data + off, size);
+    R_UNLESS(file_off < capacity, FsError_UnsupportedOperateRangeForFileStorage);
+    read_size = std::min(read_size, capacity - file_off);
 
-            read_size -= size;
-            file_off += size;
-            amount += size;
-            dst += size;
+    // fatfs reads in max 16k chunks.
+    // knowing this, it's possible to detect large file reads by simply checking if
+    // the read size is 16k (or more, maybe in the furter).
+    // however this would destroy random access performance, such as fetching 512 bytes.
+    // the fix was to have 2 LRU caches, one for large data and the other for small (anything below 16k).
+    // the results in file reads 32MB -> 184MB and directory listing is instant.
+    const auto large_read = read_size >= 1024 * 16;
+    auto& lru = large_read ? lru_cache[1] : lru_cache[0];
+
+    for (auto list = lru.begin(); list; list = list->next) {
+        const auto& m_buffered = list->data;
+        if (m_buffered->size) {
+            // check if we can read this data into the beginning of dst.
+            if (file_off < m_buffered->off + m_buffered->size && file_off >= m_buffered->off) {
+                const auto off = file_off - m_buffered->off;
+                const auto size = std::min<s64>(read_size, m_buffered->size - off);
+                if (size) {
+                    // log_write("[FAT] cache HIT at: %zu\n", file_off);
+                    std::memcpy(dst, m_buffered->data + off, size);
+
+                    read_size -= size;
+                    file_off += size;
+                    amount += size;
+                    dst += size;
+
+                    lru.Update(list);
+                    break;
+                }
+            }
         }
     }
 
     if (read_size) {
-        m_buffered.off = 0;
-        m_buffered.size = 0;
+        // log_write("[FAT] cache miss at: %zu %zu\n", file_off, read_size);
 
-        // if the dst dst is big enough, read data in place.
-        if (read_size >= sizeof(m_buffered.data)) {
+        auto alloc_size = large_read ? CACHE_LARGE_ALLOC_SIZE : std::max<u64>(read_size, 512);
+        alloc_size = std::min(alloc_size, capacity - file_off);
+
+        auto m_buffered = lru.GetNextFree();
+        m_buffered->Allocate(alloc_size);
+
+        // if the dst is big enough, read data in place.
+        if (read_size > alloc_size) {
             if (R_SUCCEEDED(fsStorageRead(storage, file_off, dst, read_size))) {
                 const auto bytes_read = read_size;
 				read_size -= bytes_read;
@@ -89,18 +200,18 @@ Result ReadFile(FsStorage* storage, BufferedFileData& m_buffered, void *_buffer,
                 dst += bytes_read;
 
                 // save the last chunk of data to the m_buffered io.
-                const auto max_advance = std::min(amount, sizeof(m_buffered.data));
-                m_buffered.off = file_off - max_advance;
-                m_buffered.size = max_advance;
-                std::memcpy(m_buffered.data, dst - max_advance, max_advance);
+                const auto max_advance = std::min<u64>(amount, alloc_size);
+                m_buffered->off = file_off - max_advance;
+                m_buffered->size = max_advance;
+                std::memcpy(m_buffered->data, dst - max_advance, max_advance);
             }
-        } else if (R_SUCCEEDED(fsStorageRead(storage, file_off, m_buffered.data, sizeof(m_buffered.data)))) {
-			const auto bytes_read = sizeof(m_buffered.data);
-			const auto max_advance = std::min(read_size, bytes_read);
-            std::memcpy(dst, m_buffered.data, max_advance);
+        } else if (R_SUCCEEDED(fsStorageRead(storage, file_off, m_buffered->data, alloc_size))) {
+			const auto bytes_read = alloc_size;
+			const auto max_advance = std::min<u64>(read_size, bytes_read);
+            std::memcpy(dst, m_buffered->data, max_advance);
 
-            m_buffered.off = file_off;
-            m_buffered.size = bytes_read;
+            m_buffered->off = file_off;
+            m_buffered->size = bytes_read;
 
             read_size -= max_advance;
             file_off += max_advance;
@@ -109,7 +220,7 @@ Result ReadFile(FsStorage* storage, BufferedFileData& m_buffered, void *_buffer,
         }
     }
 
-	return 0;
+    R_SUCCEED();
 }
 
 void fill_stat(const FILINFO* fno, struct stat *st) {
@@ -199,7 +310,6 @@ DIR_ITER* fat_diropen(struct _reent *r, DIR_ITER *dirState, const char *path) {
 
 int fat_dirreset(struct _reent *r, DIR_ITER *dirState) {
     if (FR_OK != f_rewinddir((FDIR*)dirState->dirStruct)) {
-        log_write("[FAT] fat_dirreset failed\n");
         return set_errno(r, ENOENT);
     }
     return r->_errno = 0;
@@ -277,11 +387,15 @@ Result MountAll() {
 
         log_write("[FAT] %s\n", bis.volume_name);
 
+        fat.lru_cache[0].Init(fat.buffered_small);
+        fat.lru_cache[1].Init(fat.buffered_large);
+
         fat.devoptab = DEVOPTAB;
         fat.devoptab.name = bis.volume_name;
         fat.devoptab.deviceData = &fat;
 
         R_TRY(fsOpenBisStorage(&fat.storage, bis.id));
+        R_TRY(fsStorageGetSize(&fat.storage, &fat.storage_size));
         log_write("[FAT] BIS SUCCESS %s\n", bis.volume_name);
 
         R_UNLESS(FR_OK == f_mount(&fat.fs, bis.mount_name, 1), 0x1);
@@ -319,7 +433,7 @@ const char* VolumeStr[] {
 Result fatfs_read(u8 num, void* dst, u64 offset, u64 size) {
     // log_write("[FAT] num: %u\n", num);
     auto& fat = sphaira::fatfs::g_fat_storage[num];
-    return sphaira::fatfs::ReadFile(&fat.storage, fat.buffered, dst, offset, size);
+    return sphaira::fatfs::ReadStorage(&fat.storage, fat.lru_cache, dst, offset, size, fat.storage_size);
 }
 
 } // extern "C"

@@ -6,12 +6,110 @@
 #include "ui/types.hpp"
 #include "log.hpp"
 
+#include "yati/nx/nxdumptool/defines.h"
+#include "yati/nx/nxdumptool/core/save.h"
+
 #include <memory>
 #include <cstring>
 #include <ranges>
 
 namespace sphaira::es {
 namespace {
+
+class CachedSave {
+public:
+    constexpr CachedSave(const char* _path) : path{_path} {}
+
+    void Close() {
+        if (ctx) {
+            save_close_savefile(&ctx);
+            ctx = nullptr;
+        }
+    }
+
+protected:
+    auto Open() {
+        if (ctx) {
+            return ctx;
+        }
+        return ctx = save_open_savefile(path, 0);
+    }
+
+private:
+    const char* path;
+    save_ctx_t* ctx{};
+};
+
+class CachedCommonSave : public CachedSave {
+public:
+    using CachedSave::CachedSave;
+
+    bool GetTicketBin(allocation_table_storage_ctx_t& storage, u64& size) {
+        return GetTicketBin(Open(), has_ticket_bin, ticket_bin_storage, ticket_bin_size, storage, size);
+    }
+
+    bool GetTicketListBin(allocation_table_storage_ctx_t& storage, u64& size) {
+        return GetTicketBin(Open(), has_ticket_list_bin, ticket_list_bin_storage, ticket_list_bin_size, storage, size);
+    }
+
+private:
+    static bool GetTicketBin(save_ctx_t* ctx, bool& m_has, allocation_table_storage_ctx_t& m_storage, u64& m_size, allocation_table_storage_ctx_t& out_storage, u64& out_size) {
+        if (!ctx) {
+            return false;
+        }
+
+        if (!m_has) {
+            if (!save_get_fat_storage_from_file_entry_by_path(ctx, "/ticket.bin", &m_storage, &m_size)) {
+                return false;
+            }
+        }
+
+        out_storage = m_storage;
+        out_size = m_size;
+        return m_has = true;
+    }
+
+private:
+    u64 ticket_bin_size{};
+    allocation_table_storage_ctx_t ticket_bin_storage{};
+    bool has_ticket_bin{};
+
+    u64 ticket_list_bin_size{};
+    allocation_table_storage_ctx_t ticket_list_bin_storage{};
+    bool has_ticket_list_bin{};
+};
+
+class CachedCertSave {
+public:
+    constexpr CachedCertSave(const char* _path) : path{_path} {}
+
+    auto Get() {
+        if (ctx) {
+            return ctx;
+        }
+        return ctx = save_open_savefile(path, 0);
+    }
+
+    void Close() {
+        if (ctx) {
+            save_close_savefile(&ctx);
+            ctx = nullptr;
+        }
+    }
+
+private:
+    const char* path;
+    save_ctx_t* ctx{};
+    u64 ticket_bin_size{};
+    allocation_table_storage_ctx_t ticket_bin_storage{};
+};
+
+// kept alive whilst es is init, closed after,
+// so only the first time opening is slow (40ms).
+// todo: set global dirty flag when a ticket has been installed.
+// todo: check if its needed to cache now that ive added lru cache to fatfs
+CachedCommonSave g_common_save{"SYSTEM:/save/80000000000000e1"};
+CachedCommonSave g_personalised_save{"SYSTEM:/save/80000000000000e2"};
 
 Service g_esSrv;
 
@@ -22,6 +120,9 @@ Result _esInitialize() {
 }
 
 void _esCleanup() {
+    // todo: add cert here when added.
+    g_common_save.Close();
+    g_personalised_save.Close();
     serviceClose(&g_esSrv);
 }
 
@@ -395,34 +496,45 @@ Result GetCommonTicketAndCertificate(const FsRightsId& rights_id, std::vector<u8
 }
 
 Result GetPersonalisedTicketAndCertificate(const FsRightsId& rights_id, std::vector<u8>& tik_out, std::vector<u8>& cert_out) {
-    R_THROW(0x1);
-
+    // todo: finish this off and fetch the cirtificate chain.
+    // todo: find out what ticket_list.bin is (offsets?)
     #if 0
-    fs::FsStdio fs;
-
     TimeStamp ts;
-    std::vector<u8> tik_buf;
-    // R_TRY(fs.read_entire_file("system:/save/80000000000000e1", tik_buf));
-    R_TRY(fs.read_entire_file("SYSTEM:/save/80000000000000e2", tik_buf));
-    log_write("[ES] size: %zu\n", tik_buf.size());
+
+    u64 ticket_bin_size;
+    allocation_table_storage_ctx_t ticket_bin_storage;
+    if (!g_common_save.GetTicketBin(ticket_bin_storage, ticket_bin_size)) {
+        log_write("\t\tFAILED TO GET SAVE\n");
+        R_THROW(0x1);
+    }
     log_write("\t\t[ticket read] time taken: %.2fs %zums\n", ts.GetSecondsD(), ts.GetMs());
     ts.Update();
 
-    for (u32 i = 0; i < tik_buf.size() - 0x400; i += 0x400) {
-        const auto tikRsa2048 = (const TicketRsa2048*)(tik_buf.data() + i);
-        if (tikRsa2048->signature_block.sig_type != SigType_Rsa2048Sha256) {
-            continue;
+    std::vector<u8> tik_buf(std::min<u64>(ticket_bin_size, 1024 * 256));
+    for (u64 off = 0; off < ticket_bin_size; off += tik_buf.size()) {
+        const auto size = save_allocation_table_storage_read(&ticket_bin_storage, tik_buf.data(), off, tik_buf.size());
+        if (!size) {
+            log_write("\t\tfailed to read ticket bin\n");
+            R_THROW(0x1);
         }
 
-        if (!std::memcmp(&rights_id, &tikRsa2048->data.rights_id, sizeof(rights_id))) {
-            log_write("\t[ES] tikRsa2048, found at: %u\n", i);
+        for (u32 i = 0; i < size - 0x400; i += 0x400) {
+            const auto tikRsa2048 = (const TicketRsa2048*)(tik_buf.data() + i);
+            if (tikRsa2048->signature_block.sig_type != SigType_Rsa2048Sha256) {
+                continue;
+            }
+
+            if (!std::memcmp(&rights_id, &tikRsa2048->data.rights_id, sizeof(rights_id))) {
+                log_write("\t[ES] tikRsa2048, found at: %zu\n", off + i);
+                // log_write("[ES] finished es search\n");
+                log_write("\t\t[ticket search] time taken: %.2fs %zums\n", ts.GetSecondsD(), ts.GetMs());
+                R_SUCCEED();
+            }
         }
     }
-
-    log_write("[ES] finished es search\n");
-    log_write("\t\t[ticket search] time taken: %.2fs %zums\n", ts.GetSecondsD(), ts.GetMs());
-    R_THROW(0x1);
     #endif
+
+    R_THROW(0x1);
 }
 
 } // namespace sphaira::es
