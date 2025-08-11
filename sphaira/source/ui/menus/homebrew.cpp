@@ -523,8 +523,8 @@ struct NroRomFS final : fs::FsStdio {
 };
 
 Result Menu::MountRomfsFs() {
-    const char* name = "nro_romfs";
-    const char* root = "nro_romfs:/";
+    static const char* name = "nro_romfs";
+    static const char* root = "nro_romfs:/";
     const auto& e = GetEntry();
 
     // todo: add errors for when nro doesn't have romfs.
@@ -540,16 +540,11 @@ Result Menu::MountRomfsFs() {
         R_THROW(rc);
     }
 
-    auto fs = std::make_shared<NroRomFS>(name, root);
+    auto fs = std::make_shared<filebrowser::FsStdioWrapper>(root, [](){
+        romfsUnmount(name);
+    });
 
-    const filebrowser::FsEntry fs_entry{
-        .name = e.GetName(),
-        .root = root,
-        .type = filebrowser::FsType::Custom,
-        .flags = filebrowser::FsEntryFlag_ReadOnly,
-    };
-
-    App::Push<filebrowser::Menu>(fs, fs_entry, root);
+    filebrowser::MountFsHelper(fs, e.GetName());
     R_SUCCEED();
 }
 

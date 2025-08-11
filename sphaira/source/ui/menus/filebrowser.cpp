@@ -7,6 +7,8 @@
 #include "ui/error_box.hpp"
 #include "ui/menus/file_viewer.hpp"
 
+#include "utils/devoptab.hpp"
+
 #include "log.hpp"
 #include "app.hpp"
 #include "ui/nvg_util.hpp"
@@ -89,6 +91,12 @@ constexpr std::string_view IMAGE_EXTENSIONS[] = {
 };
 constexpr std::string_view INSTALL_EXTENSIONS[] = {
     "nsp", "xci", "nsz", "xcz",
+};
+constexpr std::string_view NSP_EXTENSIONS[] = {
+    "nsp", "nsz",
+};
+constexpr std::string_view XCI_EXTENSIONS[] = {
+    "xci", "xcz",
 };
 // these are files that are already compressed or encrypted and should
 // be stored raw in a zip file.
@@ -678,6 +686,10 @@ void FsView::OnClick() {
                         nro_launch(GetNewPathCurrent());
                     }
                 });
+        } else if (IsExtension(entry.GetExtension(), NSP_EXTENSIONS)) {
+            MountNspFs();
+        } else if (IsExtension(entry.GetExtension(), XCI_EXTENSIONS)) {
+            MountXciFs();
         } else if (IsExtension(entry.GetExtension(), INSTALL_EXTENSIONS)) {
             InstallFiles();
         } else if (IsSd()) {
@@ -1950,6 +1962,38 @@ void FsView::DisplayAdvancedOptions() {
     });
 }
 
+void FsView::MountNspFs() {
+    fs::FsPath mount;
+    const auto rc = devoptab::MountNsp(GetFs(), GetNewPathCurrent(), mount);
+    App::PushErrorBox(rc, "Failed to mount NSP."_i18n);
+
+    if (R_SUCCEEDED(rc)) {
+        auto fs = std::make_shared<FsStdioWrapper>(mount, [mount](){
+            devoptab::UmountNsp(mount);
+        });
+
+        MountFsHelper(fs, GetEntry().GetName());
+    }
+}
+
+void FsView::MountXciFs() {
+    fs::FsPath mount;
+    const auto rc = devoptab::MountXci(GetFs(), GetNewPathCurrent(), mount);
+    App::PushErrorBox(rc, "Failed to mount XCI."_i18n);
+
+    if (R_SUCCEEDED(rc)) {
+        auto fs = std::make_shared<FsStdioWrapper>(mount, [mount](){
+            devoptab::UmountXci(mount);
+        });
+
+        MountFsHelper(fs, GetEntry().GetName());
+    }
+}
+
+void FsView::MountZipFs() {
+    //todo:
+}
+
 Base::Base(u32 flags, u32 options)
 : Base{CreateFs(FS_ENTRY_DEFAULT), FS_ENTRY_DEFAULT, {}, false, flags, options} {
 }
@@ -2297,6 +2341,17 @@ auto Base::CreateFs(const FsEntry& fs_entry) -> std::shared_ptr<fs::Fs> {
     }
 
     std::unreachable();
+}
+
+void MountFsHelper(const std::shared_ptr<fs::Fs>& fs, const fs::FsPath& name) {
+    const filebrowser::FsEntry fs_entry{
+        .name = name,
+        .root = fs->Root(),
+        .type = filebrowser::FsType::Custom,
+        .flags = filebrowser::FsEntryFlag_ReadOnly,
+    };
+
+    App::Push<filebrowser::Menu>(fs, fs_entry, fs->Root());
 }
 
 } // namespace sphaira::ui::menu::filebrowser

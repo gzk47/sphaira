@@ -58,7 +58,39 @@ Result Hfs0GetPartition(source::Base* source, s64 off, Hfs0& out) {
     R_SUCCEED();
 }
 
+Result ReadPartitionIntoCollection(source::Base* source, const Hfs0& root, u32 index, Collections& out) {
+    log_write("[XCI] fetching %s partition\n", root.string_table[index].c_str());
+
+    Hfs0 hfs0{};
+    R_TRY(Hfs0GetPartition(source, root.data_offset + root.file_table[index].data_offset, hfs0));
+    log_write("[XCI] got %s partition\n", root.string_table[index].c_str());
+
+    for (u32 i = 0; i < hfs0.header.total_files; i++) {
+        CollectionEntry entry;
+        entry.name = hfs0.string_table[i];
+        entry.offset = hfs0.data_offset + hfs0.file_table[i].data_offset;
+        entry.size = hfs0.file_table[i].data_size;
+        out.emplace_back(entry);
+    }
+
+    log_write("[XCI] read %s partition count: %zu\n", root.string_table[index].c_str(), out.size());
+    R_SUCCEED();
+}
+
 } // namespace
+
+Result Xci::GetPartitions(Partitions& out) {
+    Hfs0 root{};
+    R_TRY(Hfs0GetPartition(m_source, HFS0_HEADER_OFFSET, root));
+
+    for (u32 i = 0; i < root.header.total_files; i++) {
+        Partition partition{root.string_table[i]};
+        R_TRY(ReadPartitionIntoCollection(m_source, root, i, partition.collections));
+        out.emplace_back(partition);
+    }
+
+    R_SUCCEED();
+}
 
 Result Xci::GetCollections(Collections& out) {
     Hfs0 root{};
@@ -68,20 +100,7 @@ Result Xci::GetCollections(Collections& out) {
     for (u32 i = 0; i < root.header.total_files; i++) {
         if (root.string_table[i] == "secure") {
             log_write("[XCI] found secure partition\n");
-
-            Hfs0 secure{};
-            R_TRY(Hfs0GetPartition(m_source, root.data_offset + root.file_table[i].data_offset, secure));
-            log_write("[XCI] got secure partition\n");
-
-            for (u32 i = 0; i < secure.header.total_files; i++) {
-                CollectionEntry entry;
-                entry.name = secure.string_table[i];
-                entry.offset = secure.data_offset + secure.file_table[i].data_offset;
-                entry.size = secure.file_table[i].data_size;
-                out.emplace_back(entry);
-            }
-
-            R_SUCCEED();
+            return ReadPartitionIntoCollection(m_source, root, i, out);
         } else {
             log_write("[XCI] skipping partition %u | %s\n", i, root.string_table[i].c_str());
         }

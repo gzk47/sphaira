@@ -10,15 +10,15 @@ Result MountFromSavePath(u64 id, fs::FsPath& out_path);
 void UnmountSave(u64 id);
 
 // todo:
-void MountZip(fs::Fs* fs, const fs::FsPath& mount, fs::FsPath& out_path);
+Result MountZip(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path);
 void UmountZip(const fs::FsPath& mount);
 
-// todo:
-void MountNsp(fs::Fs* fs, const fs::FsPath& mount, fs::FsPath& out_path);
+Result MountNsp(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path);
 void UmountNsp(const fs::FsPath& mount);
 
-// todo:
-void MountXci(fs::Fs* fs, const fs::FsPath& mount, fs::FsPath& out_path);
+Result MountXci(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path);
 void UmountXci(const fs::FsPath& mount);
+
+bool fix_path(const char* str, char* out);
 
 } // namespace sphaira::devoptab

@@ -42,18 +42,6 @@ constexpr const char* NX_SAVE_META_NAME = ".nx_save_meta.bin";
 
 constinit UEvent g_change_uevent;
 
-struct SystemSaveFs final : fs::FsStdio {
-    SystemSaveFs(u64 id, const fs::FsPath& root) : FsStdio{true, root}, m_id{id} {
-
-    }
-
-    ~SystemSaveFs() {
-        devoptab::UnmountSave(m_id);
-    }
-
-    const u64 m_id;
-};
-
 // https://github.com/J-D-K/JKSV/issues/264#issuecomment-2618962807
 struct NXSaveMeta {
     u32 magic{}; // NX_SAVE_META_MAGIC
@@ -1118,21 +1106,16 @@ Result Menu::BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& loc
 
 Result Menu::MountSaveFs() {
     const auto& e = m_entries[m_index];
-    fs::FsPath root;
 
     if (e.system_save_data_id) {
+        fs::FsPath root;
         R_TRY(devoptab::MountFromSavePath(e.system_save_data_id, root));
 
-        auto fs = std::make_shared<SystemSaveFs>(e.system_save_data_id, root);
+        auto fs = std::make_shared<filebrowser::FsStdioWrapper>(root, [&e](){
+            devoptab::UnmountSave(e.system_save_data_id);
+        });
 
-        const filebrowser::FsEntry fs_entry{
-            .name = e.GetName(),
-            .root = root,
-            .type = filebrowser::FsType::Custom,
-            .flags = filebrowser::FsEntryFlag_ReadOnly,
-        };
-
-        App::Push<filebrowser::Menu>(fs, fs_entry, root);
+        filebrowser::MountFsHelper(fs, e.GetName());
     } else {
         const auto save_data_space_id = (FsSaveDataSpaceId)e.save_data_space_id;
 
@@ -1146,15 +1129,7 @@ Result Menu::MountSaveFs() {
 
         auto fs = std::make_shared<fs::FsNativeSave>((FsSaveDataType)e.save_data_type, save_data_space_id, &attr, true);
         R_TRY(fs->GetFsOpenResult());
-
-        const filebrowser::FsEntry fs_entry{
-            .name = e.GetName(),
-            .root = "/",
-            .type = filebrowser::FsType::Custom,
-            .flags = filebrowser::FsEntryFlag_ReadOnly,
-        };
-
-        App::Push<filebrowser::Menu>(fs, fs_entry, "/");
+        filebrowser::MountFsHelper(fs, e.GetName());
     }
 
     R_SUCCEED();

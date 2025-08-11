@@ -39,47 +39,7 @@ struct Dir {
     u32 next_file;
 };
 
-bool fix_path(const char* str, char* out) {
-    // log_write("[SAVE] got path: %s\n", str);
-
-    str = std::strrchr(str, ':');
-    if (!str) {
-        return false;
-    }
-
-    // skip over ':'
-    str++;
-    size_t len = 0;
-
-    for (size_t i = 0; str[i]; i++) {
-        // skip multiple slashes.
-        if (i && str[i] == '/' && str[i - 1] == '/') {
-            continue;
-        }
-
-        // add leading slash.
-        if (!i && str[i] != '/') {
-            out[len++] = '/';
-        }
-
-        // save single char.
-        out[len++] = str[i];
-    }
-
-    // root path uses ""
-    if (len == 1 && out[0] == '/') {
-        // out[0] = '\0';
-    }
-
-    // null the end.
-    out[len] = '\0';
-
-    // log_write("[SAVE] end path: %s\n", out);
-
-    return true;
-}
-
-static int set_errno(struct _reent *r, int err) {
+int set_errno(struct _reent *r, int err) {
     r->_errno = err;
     return -1;
 }
@@ -242,8 +202,6 @@ int devoptab_dirclose(struct _reent *r, DIR_ITER *dirState) {
 int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
     auto device = (Device*)r->deviceData;
 
-    log_write("[\t\tDEV] lstat\n");
-
     char path[FS_MAX_PATH];
     if (!fix_path(_path, path)) {
         return set_errno(r, ENOENT);
@@ -299,6 +257,47 @@ void MakeMountPath(u64 id, fs::FsPath& out_path) {
 }
 
 } // namespace
+
+bool fix_path(const char* str, char* out) {
+    // log_write("[SAVE] got path: %s\n", str);
+
+    str = std::strrchr(str, ':');
+    if (!str) {
+        return false;
+    }
+
+    // skip over ':'
+    str++;
+    size_t len = 0;
+
+    // todo: hanle utf8 paths.
+    for (size_t i = 0; str[i]; i++) {
+        // skip multiple slashes.
+        if (i && str[i] == '/' && str[i - 1] == '/') {
+            continue;
+        }
+
+        // add leading slash.
+        if (!i && str[i] != '/') {
+            out[len++] = '/';
+        }
+
+        // save single char.
+        out[len++] = str[i];
+    }
+
+    // skip trailing slash.
+    if (len > 1 && out[len - 1] == '/') {
+        out[len - 1] = '\0';
+    }
+
+    // null the end.
+    out[len] = '\0';
+
+    // log_write("[SAVE] end path: %s\n", out);
+
+    return true;
+}
 
 Result MountFromSavePath(u64 id, fs::FsPath& out_path) {
     SCOPED_MUTEX(&g_mutex);

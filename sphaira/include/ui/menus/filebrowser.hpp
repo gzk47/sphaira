@@ -305,6 +305,10 @@ struct FsView final : Widget {
     void DisplayOptions();
     void DisplayAdvancedOptions();
 
+    void MountNspFs();
+    void MountXciFs();
+    void MountZipFs();
+
 // private:
     Base* m_menu{};
     ViewSide m_side{};
@@ -475,5 +479,23 @@ struct Menu final : Base {
 auto IsSamePath(std::string_view a, std::string_view b) -> bool;
 auto IsExtension(std::string_view ext1, std::string_view ext2) -> bool;
 auto IsExtension(std::string_view ext, std::span<const std::string_view> list) -> bool;
+
+
+struct FsStdioWrapper final : fs::FsStdio {
+    using OnExit = std::function<void(void)>;
+    FsStdioWrapper(const fs::FsPath& root, const OnExit& on_exit) : fs::FsStdio{true, root}, m_on_exit{on_exit} {
+
+    }
+
+    ~FsStdioWrapper() {
+        if (m_on_exit) {
+            m_on_exit();
+        }
+    }
+
+    const OnExit m_on_exit;
+};
+
+void MountFsHelper(const std::shared_ptr<fs::Fs>& fs, const fs::FsPath& name);
 
 } // namespace sphaira::ui::menu::filebrowser

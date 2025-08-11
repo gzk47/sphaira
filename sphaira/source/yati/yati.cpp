@@ -646,7 +646,7 @@ Result Yati::decompressFuncInternal(ThreadData* t) {
 
                 if ((config.convert_to_standard_crypto && ticket) || config.lower_master_key) {
                     t->nca->modified = true;
-                    u8 keak_generation;
+                    u8 keak_generation = 0;
 
                     if (ticket) {
                         const auto key_gen = header.key_gen;
@@ -671,10 +671,6 @@ Result Yati::decompressFuncInternal(ThreadData* t) {
                         ticket->required = false;
                     } else if (config.lower_master_key) {
                         R_TRY(nca::DecryptKeak(keys, header));
-                    }
-
-                    if (config.lower_master_key) {
-                        keak_generation = 0;
                     }
 
                     R_TRY(nca::EncryptKeak(keys, header, keak_generation));

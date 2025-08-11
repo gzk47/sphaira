@@ -411,14 +411,7 @@ Result Menu::MountNcaFs() {
     auto fs = std::make_shared<fs::FsNativeId>(program_id, type, path);
     R_TRY(fs->GetFsOpenResult());
 
-    const filebrowser::FsEntry fs_entry{
-        .name = "NCA",
-        .root = "/",
-        .type = filebrowser::FsType::Custom,
-        .flags = filebrowser::FsEntryFlag_ReadOnly,
-    };
-
-    App::Push<filebrowser::Menu>(fs, fs_entry, "/");
+    filebrowser::MountFsHelper(fs, hexIdToStr(e.content_id).str);
     R_SUCCEED();
 }
 

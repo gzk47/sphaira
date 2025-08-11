@@ -18,7 +18,8 @@
             "inherits":["core"],
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "MinSizeRel",
-                "ENABLE_NETWORK_INSTALL": false
+                "ENABLE_NETWORK_INSTALL": false,
+                "LTO": true
             }
         },
         {
@@ -27,14 +28,19 @@
             "inherits":["core"],
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "MinSizeRel",
-                "ENABLE_NETWORK_INSTALL": true
+                "ENABLE_NETWORK_INSTALL": true,
+                "LTO": true
             }
         },
         {
-            "name": "Debug",
-            "displayName": "Debug",
+            "name": "Dev",
+            "displayName": "Dev",
             "inherits":["core"],
-            "cacheVariables": { "CMAKE_BUILD_TYPE":"Debug" }
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "MinSizeRel",
+                "ENABLE_NETWORK_INSTALL": true,
+                "LTO": false
+            }
         }
     ],
     "buildPresets": [
@@ -49,8 +55,8 @@
             "jobs": 16
         },
         {
-            "name": "Debug",
-            "configurePreset": "Debug",
+            "name": "Dev",
+            "configurePreset": "Dev",
             "jobs": 16
         }
     ]

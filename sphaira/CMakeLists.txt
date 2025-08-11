@@ -91,6 +91,8 @@ add_executable(sphaira
     source/fatfs.cpp
 
     source/utils/devoptab_save.cpp
+    source/utils/devoptab_nsp.cpp
+    source/utils/devoptab_xci.cpp
     # todo:
     # source/utils/devoptab_zip.cpp
 
@@ -143,6 +145,8 @@ target_compile_options(sphaira PRIVATE
     # disabled as it warns for strcat 2 paths together, but it will never
     # overflow due to fs enforcing a max path len anyway.
     -Wno-format-truncation
+    # many false positives when LTO is not enabled.
+    -Wno-suggest-final-types
 
     # the below are taken from my gba emulator, they've served me well ;)
     -Wformat-overflow=2
@@ -159,9 +163,7 @@ target_compile_options(sphaira PRIVATE
     -Wcast-qual
     -Wcast-align
     -Wimplicit-fallthrough=5
-    -Wsuggest-final-types
     -Wuninitialized
-    -fdiagnostics-all-candidates
 )
 
 include(FetchContent)
