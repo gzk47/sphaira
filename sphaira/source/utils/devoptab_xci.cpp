@@ -255,18 +255,18 @@ Result MountXci(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
         }
     }
 
-    // create new entry.
-    auto& entry = g_entries.emplace_back();
-
     auto source = std::make_unique<yati::source::File>(fs, path);
     yati::container::Xci xci{source.get()};
-    R_TRY(xci.GetPartitions(entry.device.partitions));
+    yati::container::Xci::Partitions partitions;
+    R_TRY(xci.GetPartitions(partitions));
 
+    auto& entry = g_entries.emplace_back();
     entry.path = path;
     entry.devoptab = DEVOPTAB;
     entry.devoptab.name = entry.name;
     entry.devoptab.deviceData = &entry.device;
     entry.device.source = std::move(source);
+    entry.device.partitions = partitions;
     std::snprintf(entry.name, sizeof(entry.name), "xci_%u", g_mount_idx);
     std::snprintf(entry.mount, sizeof(entry.mount), "xci_%u:/", g_mount_idx);
 

@@ -707,7 +707,6 @@ Result MountZip(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
     }
 
     // create new entry.
-    auto& entry = g_entries.emplace_back();
     auto source = std::make_unique<yati::source::File>(fs, path);
 
     s64 size;
@@ -723,6 +722,7 @@ Result MountZip(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
     DirectoryEntry root;
     Parse(table_entries, root);
 
+    auto& entry = g_entries.emplace_back();
     entry.path = path;
     entry.devoptab = DEVOPTAB;
     entry.devoptab.name = entry.name;

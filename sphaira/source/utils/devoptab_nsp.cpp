@@ -235,19 +235,18 @@ Result MountNsp(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
         }
     }
 
-    // create new entry.
-    auto& entry = g_entries.emplace_back();
-
     auto source = std::make_unique<yati::source::File>(fs, path);
-    // R_TRY(yati::container::Xci(source.get()).ReadAll());
     yati::container::Nsp nsp{source.get()};
-    R_TRY(nsp.GetCollections(entry.device.collections));
+    yati::container::Collections collections;
+    R_TRY(nsp.GetCollections(collections));
 
+    auto& entry = g_entries.emplace_back();
     entry.path = path;
     entry.devoptab = DEVOPTAB;
     entry.devoptab.name = entry.name;
     entry.devoptab.deviceData = &entry.device;
     entry.device.source = std::move(source);
+    entry.device.collections = collections;
     std::snprintf(entry.name, sizeof(entry.name), "nsp_%u", g_mount_idx);
     std::snprintf(entry.mount, sizeof(entry.mount), "nsp_%u:/", g_mount_idx);
 

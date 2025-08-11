@@ -321,16 +321,14 @@ Result MountFromSavePath(u64 id, fs::FsPath& out_path) {
 
     log_write("[SAVE] OPEN SUCCESS %s\n", path);
 
-    // create new entry.
     auto& entry = g_entries.emplace_back();
-    std::snprintf(entry.name, sizeof(entry.name), "%016lx", id);
-
     entry.id = id;
     entry.device.ctx = ctx;
     entry.device.file_table = &ctx->save_filesystem_core.file_table;
     entry.devoptab = DEVOPTAB;
     entry.devoptab.name = entry.name;
     entry.devoptab.deviceData = &entry.device;
+    std::snprintf(entry.name, sizeof(entry.name), "%016lx", id);
 
     R_UNLESS(AddDevice(&entry.devoptab) >= 0, 0x1);
     log_write("[SAVE] DEVICE SUCCESS %s %s\n", path, entry.name);
