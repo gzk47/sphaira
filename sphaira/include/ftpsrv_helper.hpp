@@ -6,6 +6,7 @@ namespace sphaira::ftpsrv {
 
 bool Init();
 void Exit();
+void ExitSignal();
 
 using OnInstallStart = std::function<bool(const char* path)>;
 using OnInstallWrite = std::function<bool(const void* buf, size_t size)>;

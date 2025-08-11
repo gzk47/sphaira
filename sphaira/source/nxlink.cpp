@@ -482,4 +482,9 @@ void nxlinkExit() {
     threadClose(&g_thread);
 }
 
+void nxlinkSignalExit() {
+    std::scoped_lock lock{g_mutex};
+    g_quit = true;
+}
+
 } // extern "C"

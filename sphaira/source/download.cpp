@@ -79,8 +79,7 @@ struct Cache {
     using Value = std::pair<std::string, std::string>;
 
     bool init() {
-        mutexLock(&m_mutex);
-        ON_SCOPE_EXIT(mutexUnlock(&m_mutex));
+        SCOPED_MUTEX(&m_mutex);
 
         if (m_json) {
             return true;
@@ -103,13 +102,13 @@ struct Cache {
     }
 
     void exit() {
-        mutexLock(&m_mutex);
-        ON_SCOPE_EXIT(mutexUnlock(&m_mutex));
+        SCOPED_MUTEX(&m_mutex);
 
         if (!m_json) {
             return;
         }
 
+        // note: this takes 20ms
         if (!yyjson_mut_write_file(JSON_PATH, m_json, YYJSON_WRITE_NOFLAG, nullptr, nullptr)) {
             log_write("failed to write etag json: %s\n", JSON_PATH.s);
         }
@@ -120,6 +119,8 @@ struct Cache {
     }
 
     void get(const fs::FsPath& path, curl::Header& header) {
+        ON_SCOPE_EXIT(mutexUnlock(&m_mutex));
+
         const auto [etag, last_modified] = get_internal(path);
         if (!etag.empty()) {
             header.m_map.emplace("if-none-match", etag);
@@ -131,7 +132,6 @@ struct Cache {
     }
 
     void set(const fs::FsPath& path, const curl::Header& value) {
-        mutexLock(&m_mutex);
         ON_SCOPE_EXIT(mutexUnlock(&m_mutex));
 
         std::string etag_str;

@@ -23,6 +23,7 @@
 #include "web.hpp"
 #include "swkbd.hpp"
 #include "fatfs.hpp"
+#include "utils/profile.hpp"
 
 #include <nanovg_dk.h>
 #include <minIni.h>
@@ -1966,6 +1967,10 @@ App::~App() {
 
     appletUnhook(&m_appletHookCookie);
 
+    // async exit as these threads sleep every 100ms.
+    nxlinkSignalExit();
+    ftpsrv::ExitSignal();
+
     // destroy this first as it seems to prevent a crash when exiting the appstore
     // when an image that was being drawn is displayed
     // replicate: saves -> homebrew -> misc -> appstore -> sphaira -> changelog -> exit
@@ -1975,109 +1980,133 @@ App::~App() {
     // this has to be called before any cleanup to ensure the lifetime of
     // nvg is still active as some widgets may need to free images.
     // clear in reverse order as the widgets are a stack (todo: just use a stack?)
-    while (!m_widgets.empty()) {
-        m_widgets.pop_back();
+    {
+        SCOPED_TIMESTAMP("widget exit");
+        while (!m_widgets.empty()) {
+            m_widgets.pop_back();
+        }
     }
-    nvgDeleteImage(vg, m_default_image);
 
     i18n::exit();
-    curl::Exit();
 
-    ini_puts("config", "theme", m_theme.meta.ini_path, CONFIG_PATH);
-    CloseTheme();
-
-    // Free any loaded sound from memory
-    for (auto id : m_sound_ids) {
-        if (id) {
-            plsrPlayerFree(id);
-        }
+    {
+        SCOPED_TIMESTAMP("curl exit");
+        curl::Exit();
     }
 
-	// De-initialize our player
-    plsrPlayerExit();
+    {
+        SCOPED_TIMESTAMP("theme exit");
+        ini_puts("config", "theme", m_theme.meta.ini_path, CONFIG_PATH);
+        CloseTheme();
+    }
 
-    nvgDeleteDk(this->vg);
-    this->renderer.reset();
+    // Free any loaded sound from memory
+    {
+        SCOPED_TIMESTAMP("plsr exit");
+        // for (auto id : m_sound_ids) {
+        //     if (id) {
+        //         plsrPlayerFree(id);
+        //     }
+        // }
+
+        // De-initialize our player
+        plsrPlayerExit();
+    }
+
+    {
+        SCOPED_TIMESTAMP("nvg exit");
+        nvgDeleteImage(vg, m_default_image);
+        nvgDeleteDk(this->vg);
+        this->renderer.reset();
 
 #ifdef USE_NVJPG
-    m_decoder.finalize();
-    nj::finalize();
+        m_decoder.finalize();
+        nj::finalize();
 #endif
+    }
 
     // backup hbmenu if it is not sphaira
-    if (App::GetReplaceHbmenuEnable() && !IsHbmenu()) {
-        NacpStruct hbmenu_nacp;
-        fs::FsNativeSd fs;
-        Result rc;
+    {
+        SCOPED_TIMESTAMP("nro copy");
+        if (App::GetReplaceHbmenuEnable() && !IsHbmenu()) {
+            NacpStruct hbmenu_nacp;
+            fs::FsNativeSd fs;
+            Result rc;
 
-        if (R_SUCCEEDED(rc = nro_get_nacp("/hbmenu.nro", hbmenu_nacp)) && std::strcmp(hbmenu_nacp.lang[0].name, "sphaira")) {
-            log_write("backing up hbmenu.nro\n");
-            if (R_FAILED(rc = fs.copy_entire_file("/switch/hbmenu.nro", "/hbmenu.nro"))) {
-                log_write("failed to backup  hbmenu.nro\n");
+            // todo: don't read whole nacp, only the name.
+            // todo: keep file open and use that as part of the file copy.
+            if (R_SUCCEEDED(rc = nro_get_nacp("/hbmenu.nro", hbmenu_nacp)) && std::strcmp(hbmenu_nacp.lang[0].name, "sphaira")) {
+                log_write("backing up hbmenu.nro\n");
+                if (R_FAILED(rc = fs.copy_entire_file("/switch/hbmenu.nro", "/hbmenu.nro"))) {
+                    log_write("failed to backup  hbmenu.nro\n");
+                }
+            } else {
+                log_write("not backing up\n");
             }
-        } else {
-            log_write("not backing up\n");
-        }
 
-        if (R_FAILED(rc = fs.copy_entire_file("/hbmenu.nro", GetExePath()))) {
-            log_write("failed to copy entire file: %s 0x%X module: %u desc: %u\n", GetExePath().s, rc, R_MODULE(rc), R_DESCRIPTION(rc));
-        } else {
-            log_write("success with copying over root file!\n");
-        }
-    } else if (IsHbmenu()) {
-        // check we have a version that's newer than current.
-        NacpStruct hbmenu_nacp;
-        fs::FsNativeSd fs;
-        Result rc;
+            if (R_FAILED(rc = fs.copy_entire_file("/hbmenu.nro", GetExePath()))) {
+                log_write("failed to copy entire file: %s 0x%X module: %u desc: %u\n", GetExePath().s, rc, R_MODULE(rc), R_DESCRIPTION(rc));
+            } else {
+                log_write("success with copying over root file!\n");
+            }
+        } else if (IsHbmenu()) {
+            // check we have a version that's newer than current.
+            NacpStruct hbmenu_nacp;
+            fs::FsNativeSd fs;
+            Result rc;
 
-        // ensure that are still sphaira
-        if (R_SUCCEEDED(rc = nro_get_nacp("/hbmenu.nro", hbmenu_nacp)) && !std::strcmp(hbmenu_nacp.lang[0].name, "sphaira")) {
-            NacpStruct sphaira_nacp;
-            fs::FsPath sphaira_path = "/switch/sphaira/sphaira.nro";
+            // ensure that are still sphaira
+            if (R_SUCCEEDED(rc = nro_get_nacp("/hbmenu.nro", hbmenu_nacp)) && !std::strcmp(hbmenu_nacp.lang[0].name, "sphaira")) {
+                NacpStruct sphaira_nacp;
+                fs::FsPath sphaira_path = "/switch/sphaira/sphaira.nro";
 
-            rc = nro_get_nacp(sphaira_path, sphaira_nacp);
-            if (R_FAILED(rc) || std::strcmp(sphaira_nacp.lang[0].name, "sphaira")) {
-                sphaira_path = "/switch/sphaira.nro";
                 rc = nro_get_nacp(sphaira_path, sphaira_nacp);
-            }
+                if (R_FAILED(rc) || std::strcmp(sphaira_nacp.lang[0].name, "sphaira")) {
+                    sphaira_path = "/switch/sphaira.nro";
+                    rc = nro_get_nacp(sphaira_path, sphaira_nacp);
+                }
 
-            // found sphaira, now lets get compare version
-            if (R_SUCCEEDED(rc) && !std::strcmp(sphaira_nacp.lang[0].name, "sphaira")) {
-                if (IsVersionNewer(hbmenu_nacp.display_version, sphaira_nacp.display_version)) {
-                    if (R_FAILED(rc = fs.copy_entire_file(GetExePath(), sphaira_path))) {
-                        log_write("failed to copy entire file: %s 0x%X module: %u desc: %u\n", sphaira_path.s, rc, R_MODULE(rc), R_DESCRIPTION(rc));
-                    } else {
-                        log_write("success with updating hbmenu!\n");
+                // found sphaira, now lets get compare version
+                if (R_SUCCEEDED(rc) && !std::strcmp(sphaira_nacp.lang[0].name, "sphaira")) {
+                    if (IsVersionNewer(hbmenu_nacp.display_version, sphaira_nacp.display_version)) {
+                        if (R_FAILED(rc = fs.copy_entire_file(GetExePath(), sphaira_path))) {
+                            log_write("failed to copy entire file: %s 0x%X module: %u desc: %u\n", sphaira_path.s, rc, R_MODULE(rc), R_DESCRIPTION(rc));
+                        } else {
+                            log_write("success with updating hbmenu!\n");
+                        }
                     }
                 }
+            } else {
+                log_write("no longer hbmenu!\n");
             }
-        } else {
-            log_write("no longer hbmenu!\n");
         }
     }
 
     if (App::GetMtpEnable()) {
-        log_write("closing mtp\n");
+        SCOPED_TIMESTAMP("mtp exit");
         haze::Exit();
     }
 
     if (App::GetFtpEnable()) {
-        log_write("closing ftp\n");
+        SCOPED_TIMESTAMP("ftp exit");
         ftpsrv::Exit();
     }
 
     if (App::GetNxlinkEnable()) {
-        log_write("closing nxlink\n");
+        SCOPED_TIMESTAMP("nxlink exit");
         nxlinkExit();
     }
 
     if (App::GetHddEnable()) {
-        log_write("closing hdd\n");
+        SCOPED_TIMESTAMP("hdd exit");
         usbHsFsExit();
     }
 
-    fatfs::UnmountAll();
-    romfsUnmount("Qlaunch_romfs");
+    {
+        SCOPED_TIMESTAMP("fatfs exit");
+        fatfs::UnmountAll();
+        romfsUnmount("Qlaunch_romfs");
+    }
 
     log_write("\t[EXIT] time taken: %.2fs %zums\n", ts.GetSecondsD(), ts.GetMs());
 

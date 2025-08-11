@@ -405,6 +405,11 @@ void Exit() {
     log_write("[FTP] exitied\n");
 }
 
+void ExitSignal() {
+    SCOPED_MUTEX(&g_mutex);
+    g_should_exit = true;
+}
+
 #if ENABLE_NETWORK_INSTALL
 void InitInstallMode(const OnInstallStart& on_start, const OnInstallWrite& on_write, const OnInstallClose& on_close) {
     SCOPED_MUTEX(&g_shared_data.mutex);
