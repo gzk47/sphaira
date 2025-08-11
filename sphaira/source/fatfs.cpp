@@ -192,20 +192,20 @@ Result ReadStorage(FsStorage* storage, std::span<LruBufferedData> lru_cache, voi
 
         // if the dst is big enough, read data in place.
         if (read_size > alloc_size) {
-            if (R_SUCCEEDED(fsStorageRead(storage, file_off, dst, read_size))) {
-                const auto bytes_read = read_size;
-				read_size -= bytes_read;
-                file_off += bytes_read;
-                amount += bytes_read;
-                dst += bytes_read;
+            R_TRY(fsStorageRead(storage, file_off, dst, read_size));
+            const auto bytes_read = read_size;
+            read_size -= bytes_read;
+            file_off += bytes_read;
+            amount += bytes_read;
+            dst += bytes_read;
 
-                // save the last chunk of data to the m_buffered io.
-                const auto max_advance = std::min<u64>(amount, alloc_size);
-                m_buffered->off = file_off - max_advance;
-                m_buffered->size = max_advance;
-                std::memcpy(m_buffered->data, dst - max_advance, max_advance);
-            }
-        } else if (R_SUCCEEDED(fsStorageRead(storage, file_off, m_buffered->data, alloc_size))) {
+            // save the last chunk of data to the m_buffered io.
+            const auto max_advance = std::min<u64>(amount, alloc_size);
+            m_buffered->off = file_off - max_advance;
+            m_buffered->size = max_advance;
+            std::memcpy(m_buffered->data, dst - max_advance, max_advance);
+        } else {
+            R_TRY(fsStorageRead(storage, file_off, m_buffered->data, alloc_size));
 			const auto bytes_read = alloc_size;
 			const auto max_advance = std::min<u64>(read_size, bytes_read);
             std::memcpy(dst, m_buffered->data, max_advance);

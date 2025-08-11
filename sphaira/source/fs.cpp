@@ -498,6 +498,8 @@ Result File::Read( s64 off, void* buf, u64 read_size, u32 option, u64* bytes_rea
     if (m_fs->IsNative()) {
         R_TRY(fsFileRead(&m_native, off, buf, read_size, option, bytes_read));
     } else {
+        R_UNLESS(m_stdio, Result_FsUnknownStdioError);
+
         if (m_stdio_off != off) {
             m_stdio_off = off;
             std::fseek(m_stdio, off, SEEK_SET);
@@ -524,6 +526,8 @@ Result File::Write(s64 off, const void* buf, u64 write_size, u32 option) {
     if (m_fs->IsNative()) {
         R_TRY(fsFileWrite(&m_native, off, buf, write_size, option));
     } else {
+        R_UNLESS(m_stdio, Result_FsUnknownStdioError);
+
         if (m_stdio_off != off) {
             log_write("[FS] diff seek\n");
             m_stdio_off = off;
@@ -546,6 +550,7 @@ Result File::SetSize(s64 sz) {
     if (m_fs->IsNative()) {
         R_TRY(fsFileSetSize(&m_native, sz));
     } else {
+        R_UNLESS(m_stdio, Result_FsUnknownStdioError);
         const auto fd = fileno(m_stdio);
         R_UNLESS(fd > 0, Result_FsUnknownStdioError);
         R_UNLESS(!ftruncate(fd, sz), Result_FsUnknownStdioError);
@@ -560,6 +565,8 @@ Result File::GetSize(s64* out) {
     if (m_fs->IsNative()) {
         R_TRY(fsFileGetSize(&m_native, out));
     } else {
+        R_UNLESS(m_stdio, Result_FsUnknownStdioError);
+
         struct stat st;
         R_UNLESS(!fstat(fileno(m_stdio), &st), Result_FsUnknownStdioError);
         *out = st.st_size;

@@ -690,6 +690,8 @@ void FsView::OnClick() {
             MountNspFs();
         } else if (IsExtension(entry.GetExtension(), XCI_EXTENSIONS)) {
             MountXciFs();
+        } else if (IsExtension(entry.GetExtension(), "zip")) {
+            MountZipFs();
         } else if (IsExtension(entry.GetExtension(), INSTALL_EXTENSIONS)) {
             InstallFiles();
         } else if (IsSd()) {
@@ -1991,7 +1993,17 @@ void FsView::MountXciFs() {
 }
 
 void FsView::MountZipFs() {
-    //todo:
+    fs::FsPath mount;
+    const auto rc = devoptab::MountZip(GetFs(), GetNewPathCurrent(), mount);
+    App::PushErrorBox(rc, "Failed to mount zip."_i18n);
+
+    if (R_SUCCEEDED(rc)) {
+        auto fs = std::make_shared<FsStdioWrapper>(mount, [mount](){
+            devoptab::UmountZip(mount);
+        });
+
+        MountFsHelper(fs, GetEntry().GetName());
+    }
 }
 
 Base::Base(u32 flags, u32 options)

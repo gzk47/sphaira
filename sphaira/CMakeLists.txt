@@ -93,8 +93,7 @@ add_executable(sphaira
     source/utils/devoptab_save.cpp
     source/utils/devoptab_nsp.cpp
     source/utils/devoptab_xci.cpp
-    # todo:
-    # source/utils/devoptab_zip.cpp
+    source/utils/devoptab_zip.cpp
 
     source/usb/base.cpp
     source/usb/usbds.cpp

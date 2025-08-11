@@ -18,10 +18,12 @@ struct FileSource final : BaseSource {
     }
 
     Result Size(s64* out) override {
+        R_TRY(m_open_result);
         return m_file.GetSize(out);
     }
 
     Result Read(void* buf, s64 off, s64 size, u64* bytes_read) override {
+        R_TRY(m_open_result);
         const auto rc = m_file.Read(off, buf, size, 0, bytes_read);
         if (m_fs->IsNative() && m_is_file_based_emummc) {
             svcSleepThread(2e+6); // 2ms
