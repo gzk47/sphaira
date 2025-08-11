@@ -1,5 +1,6 @@
 
 #include "utils/devoptab.hpp"
+#include "utils/devoptab_common.hpp"
 #include "defines.hpp"
 #include "log.hpp"
 
@@ -16,7 +17,7 @@ namespace sphaira::devoptab {
 namespace {
 
 struct Device {
-    std::unique_ptr<yati::source::Base> source;
+    std::unique_ptr<common::BufferedData> source;
     yati::container::Xci::Partitions partitions;
 };
 
@@ -43,7 +44,7 @@ int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int fla
     std::memset(file, 0, sizeof(*file));
 
     char path[FS_MAX_PATH];
-    if (!fix_path(_path, path)) {
+    if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
 
@@ -113,7 +114,7 @@ DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_pa
     std::memset(dir, 0, sizeof(*dir));
 
     char path[FS_MAX_PATH];
-    if (!fix_path(_path, path)) {
+    if (!common::fix_path(_path, path)) {
         set_errno(r, ENOENT);
         return NULL;
     }
@@ -183,7 +184,7 @@ int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
     auto device = (Device*)r->deviceData;
 
     char path[FS_MAX_PATH];
-    if (!fix_path(_path, path)) {
+    if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
 
@@ -256,7 +257,12 @@ Result MountXci(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
     }
 
     auto source = std::make_unique<yati::source::File>(fs, path);
-    yati::container::Xci xci{source.get()};
+
+    s64 size;
+    R_TRY(source->GetSize(&size));
+    auto buffered = std::make_unique<common::BufferedData>(std::move(source), size);
+
+    yati::container::Xci xci{buffered.get()};
     yati::container::Xci::Partitions partitions;
     R_TRY(xci.GetPartitions(partitions));
 
@@ -265,7 +271,7 @@ Result MountXci(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
     entry.devoptab = DEVOPTAB;
     entry.devoptab.name = entry.name;
     entry.devoptab.deviceData = &entry.device;
-    entry.device.source = std::move(source);
+    entry.device.source = std::move(buffered);
     entry.device.partitions = partitions;
     std::snprintf(entry.name, sizeof(entry.name), "xci_%u", g_mount_idx);
     std::snprintf(entry.mount, sizeof(entry.mount), "xci_%u:/", g_mount_idx);

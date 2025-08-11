@@ -90,6 +90,7 @@ add_executable(sphaira
     source/minizip_helper.cpp
     source/fatfs.cpp
 
+    source/utils/devoptab_common.cpp
     source/utils/devoptab_save.cpp
     source/utils/devoptab_nsp.cpp
     source/utils/devoptab_xci.cpp

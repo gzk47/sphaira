@@ -1,5 +1,6 @@
 
 #include "utils/devoptab.hpp"
+#include "utils/devoptab_common.hpp"
 #include "defines.hpp"
 #include "log.hpp"
 
@@ -50,7 +51,7 @@ int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int fla
     std::memset(file, 0, sizeof(*file));
 
     char path[FS_MAX_PATH];
-    if (!fix_path(_path, path)) {
+    if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
 
@@ -116,7 +117,7 @@ DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_pa
     std::memset(dir, 0, sizeof(*dir));
 
     char path[FS_MAX_PATH];
-    if (!fix_path(_path, path)) {
+    if (!common::fix_path(_path, path)) {
         set_errno(r, ENOENT);
         return NULL;
     }
@@ -203,7 +204,7 @@ int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
     auto device = (Device*)r->deviceData;
 
     char path[FS_MAX_PATH];
-    if (!fix_path(_path, path)) {
+    if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
 
@@ -257,47 +258,6 @@ void MakeMountPath(u64 id, fs::FsPath& out_path) {
 }
 
 } // namespace
-
-bool fix_path(const char* str, char* out) {
-    // log_write("[SAVE] got path: %s\n", str);
-
-    str = std::strrchr(str, ':');
-    if (!str) {
-        return false;
-    }
-
-    // skip over ':'
-    str++;
-    size_t len = 0;
-
-    // todo: hanle utf8 paths.
-    for (size_t i = 0; str[i]; i++) {
-        // skip multiple slashes.
-        if (i && str[i] == '/' && str[i - 1] == '/') {
-            continue;
-        }
-
-        // add leading slash.
-        if (!i && str[i] != '/') {
-            out[len++] = '/';
-        }
-
-        // save single char.
-        out[len++] = str[i];
-    }
-
-    // skip trailing slash.
-    if (len > 1 && out[len - 1] == '/') {
-        out[len - 1] = '\0';
-    }
-
-    // null the end.
-    out[len] = '\0';
-
-    // log_write("[SAVE] end path: %s\n", out);
-
-    return true;
-}
 
 Result MountFromSavePath(u64 id, fs::FsPath& out_path) {
     SCOPED_MUTEX(&g_mutex);

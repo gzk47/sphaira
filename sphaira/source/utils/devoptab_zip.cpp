@@ -1,5 +1,5 @@
-
 #include "utils/devoptab.hpp"
+#include "utils/devoptab_common.hpp"
 #include "defines.hpp"
 #include "log.hpp"
 
@@ -14,86 +14,6 @@
 
 namespace sphaira::devoptab {
 namespace {
-
-struct BufferedFileData {
-    BufferedFileData(std::unique_ptr<yati::source::Base>&& _source, u64 _size)
-    : source{std::forward<decltype(_source)>(_source)}
-    , capacity{_size} {
-
-    }
-
-    Result Read(void *_buffer, u64 file_off, u64 read_size);
-
-private:
-    std::unique_ptr<yati::source::Base> source;
-    const u64 capacity;
-
-    u64 m_off{};
-    u64 m_size{};
-    u8 m_data[1024 * 64]{};
-};
-
-Result BufferedFileData::Read(void *_buffer, u64 file_off, u64 read_size) {
-    auto dst = static_cast<u8*>(_buffer);
-    size_t amount = 0;
-
-    R_UNLESS(file_off < capacity, FsError_UnsupportedOperateRangeForFileStorage);
-    read_size = std::min(read_size, capacity - file_off);
-
-    if (m_size) {
-        // check if we can read this data into the beginning of dst.
-        if (file_off < m_off + m_size && file_off >= m_off) {
-            const auto off = file_off - m_off;
-            const auto size = std::min<s64>(read_size, m_size - off);
-            if (size) {
-                std::memcpy(dst, m_data + off, size);
-
-                read_size -= size;
-                file_off += size;
-                amount += size;
-                dst += size;
-            }
-        }
-    }
-
-    if (read_size) {
-        const auto alloc_size = sizeof(m_data);
-        m_off = 0;
-        m_size = 0;
-        u64 bytes_read;
-
-        // if the dst is big enough, read data in place.
-        if (read_size > alloc_size) {
-            R_TRY(source->Read(dst, file_off, read_size, &bytes_read));
-
-            read_size -= bytes_read;
-            file_off += bytes_read;
-            amount += bytes_read;
-            dst += bytes_read;
-
-            // save the last chunk of data to the m_buffered io.
-            const auto max_advance = std::min<u64>(amount, alloc_size);
-            m_off = file_off - max_advance;
-            m_size = max_advance;
-            std::memcpy(m_data, dst - max_advance, max_advance);
-        } else {
-            R_TRY(source->Read(m_data, file_off, alloc_size, &bytes_read));
-			const auto bytes_read = alloc_size;
-			const auto max_advance = std::min<u64>(read_size, bytes_read);
-            std::memcpy(dst, m_data, max_advance);
-
-            m_off = file_off;
-            m_size = bytes_read;
-
-            read_size -= max_advance;
-            file_off += max_advance;
-            amount += max_advance;
-            dst += max_advance;
-        }
-    }
-
-    R_SUCCEED();
-}
 
 #define LOCAL_HEADER_SIG 0x4034B50
 #define FILE_HEADER_SIG 0x2014B50
@@ -193,7 +113,7 @@ struct DirectoryEntry {
 using FileTableEntries = std::vector<FileEntry>;
 
 struct Device {
-    std::unique_ptr<BufferedFileData> source;
+    std::unique_ptr<common::BufferedData> source;
     DirectoryEntry root;
 };
 
@@ -284,7 +204,7 @@ int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int fla
     std::memset(file, 0, sizeof(*file));
 
     char path[FS_MAX_PATH]{};
-    if (!fix_path(_path, path)) {
+    if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
 
@@ -462,7 +382,7 @@ DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_pa
     std::memset(dir, 0, sizeof(*dir));
 
     char path[FS_MAX_PATH];
-    if (!fix_path(_path, path)) {
+    if (!common::fix_path(_path, path)) {
         set_errno(r, ENOENT);
         return NULL;
     }
@@ -531,7 +451,7 @@ int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
     }
 
     char path[FS_MAX_PATH];
-    if (!fix_path(_path, path)) {
+    if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
 
@@ -612,7 +532,7 @@ void Parse(const FileTableEntries& entries, DirectoryEntry& out) {
     Parse(entries, index, out);
 }
 
-Result find_central_dir_offset(BufferedFileData* source, s64 size, mmz_EndRecord* record) {
+Result find_central_dir_offset(common::BufferedData* source, s64 size, mmz_EndRecord* record) {
     // check if the record is at the end (no extra header).
     auto offset = size - sizeof(*record);
     R_TRY(source->Read(record, offset, sizeof(*record)));
@@ -640,7 +560,7 @@ Result find_central_dir_offset(BufferedFileData* source, s64 size, mmz_EndRecord
     R_THROW(0x1);
 }
 
-Result ParseZip(BufferedFileData* source, s64 size, FileTableEntries& out) {
+Result ParseZip(common::BufferedData* source, s64 size, FileTableEntries& out) {
     mmz_EndRecord end_rec;
     R_TRY(find_central_dir_offset(source, size, &end_rec));
 
@@ -706,14 +626,12 @@ Result MountZip(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
         }
     }
 
-    // create new entry.
     auto source = std::make_unique<yati::source::File>(fs, path);
 
     s64 size;
     R_TRY(source->GetSize(&size));
-    log_write("[ZIP] got size\n");
 
-    auto buffered = std::make_unique<BufferedFileData>(std::move(source), size);
+    auto buffered = std::make_unique<common::BufferedData>(std::move(source), size);
 
     FileTableEntries table_entries;
     R_TRY(ParseZip(buffered.get(), size, table_entries));

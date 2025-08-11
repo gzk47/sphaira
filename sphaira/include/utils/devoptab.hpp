@@ -19,6 +19,4 @@ void UmountNsp(const fs::FsPath& mount);
 Result MountXci(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path);
 void UmountXci(const fs::FsPath& mount);
 
-bool fix_path(const char* str, char* out);
-
 } // namespace sphaira::devoptab
