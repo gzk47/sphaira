@@ -9,8 +9,9 @@
 #include "yati/source/file.hpp"
 
 #include <cstring>
-#include <cstdio>
 #include <cerrno>
+#include <array>
+#include <memory>
 #include <algorithm>
 #include <sys/iosupport.h>
 
@@ -164,8 +165,6 @@ int devoptab_dirclose(struct _reent *r, DIR_ITER *dirState) {
 int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
     auto device = (Device*)r->deviceData;
 
-    log_write("[\t\tDEV] lstat\n");
-
     char path[FS_MAX_PATH];
     if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
@@ -210,17 +209,20 @@ constexpr devoptab_t DEVOPTAB = {
 };
 
 struct Entry {
-    Device device;
-    devoptab_t devoptab;
-    fs::FsPath path;
-    fs::FsPath mount;
-    char name[32];
-    s32 ref_count;
+    Device device{};
+    devoptab_t devoptab{};
+    fs::FsPath path{};
+    fs::FsPath mount{};
+    char name[32]{};
+    s32 ref_count{};
+
+    ~Entry() {
+        RemoveDevice(mount);
+    }
 };
 
 Mutex g_mutex;
-std::vector<Entry> g_entries;
-u32 g_mount_idx;
+std::array<std::unique_ptr<Entry>, common::MAX_ENTRIES> g_entries;
 
 } // namespace
 
@@ -229,13 +231,20 @@ Result MountNsp(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
 
     // check if we already have the save mounted.
     for (auto& e : g_entries) {
-        if (e.path == path) {
-            e.ref_count++;
-            out_path = e.mount;
+        if (e && e->path == path) {
+            e->ref_count++;
+            out_path = e->mount;
             R_SUCCEED();
         }
     }
 
+    // otherwise, find next free entry.
+    auto itr = std::ranges::find_if(g_entries, [](auto& e){
+        return !e;
+    });
+    R_UNLESS(itr != g_entries.end(), 0x1);
+
+    const auto index = std::distance(g_entries.begin(), itr);
     auto source = std::make_unique<yati::source::File>(fs, path);
 
     s64 size;
@@ -246,22 +255,22 @@ Result MountNsp(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
     yati::container::Collections collections;
     R_TRY(nsp.GetCollections(collections));
 
-    auto& entry = g_entries.emplace_back();
-    entry.path = path;
-    entry.devoptab = DEVOPTAB;
-    entry.devoptab.name = entry.name;
-    entry.devoptab.deviceData = &entry.device;
-    entry.device.source = std::move(buffered);
-    entry.device.collections = collections;
-    std::snprintf(entry.name, sizeof(entry.name), "nsp_%u", g_mount_idx);
-    std::snprintf(entry.mount, sizeof(entry.mount), "nsp_%u:/", g_mount_idx);
+    auto entry = std::make_unique<Entry>();
+    entry->path = path;
+    entry->devoptab = DEVOPTAB;
+    entry->devoptab.name = entry->name;
+    entry->devoptab.deviceData = &entry->device;
+    entry->device.source = std::move(buffered);
+    entry->device.collections = collections;
+    std::snprintf(entry->name, sizeof(entry->name), "nsp_%zu", index);
+    std::snprintf(entry->mount, sizeof(entry->mount), "nsp_%zu:/", index);
 
-    R_UNLESS(AddDevice(&entry.devoptab) >= 0, 0x1);
-    log_write("[NSP] DEVICE SUCCESS %s %s\n", path.s, entry.name);
+    R_UNLESS(AddDevice(&entry->devoptab) >= 0, 0x1);
+    log_write("[NSP] DEVICE SUCCESS %s %s\n", path.s, entry->name);
 
-    out_path = entry.mount;
-    entry.ref_count++;
-    g_mount_idx++;
+    out_path = entry->mount;
+    entry->ref_count++;
+    *itr = std::move(entry);
 
     R_SUCCEED();
 }
@@ -270,20 +279,19 @@ void UmountNsp(const fs::FsPath& mount) {
     SCOPED_MUTEX(&g_mutex);
 
     auto itr = std::ranges::find_if(g_entries, [&mount](auto& e){
-        return mount == e.mount;
+        return e && e->mount == mount;
     });
 
     if (itr == g_entries.end()) {
         return;
     }
 
-    if (itr->ref_count) {
-        itr->ref_count--;
+    if ((*itr)->ref_count) {
+        (*itr)->ref_count--;
     }
 
-    if (!itr->ref_count) {
-        RemoveDevice(mount);
-        g_entries.erase(itr);
+    if (!(*itr)->ref_count) {
+        itr->reset();
     }
 }
 

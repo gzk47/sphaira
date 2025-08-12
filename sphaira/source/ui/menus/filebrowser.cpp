@@ -2363,7 +2363,8 @@ void MountFsHelper(const std::shared_ptr<fs::Fs>& fs, const fs::FsPath& name) {
         .flags = filebrowser::FsEntryFlag_ReadOnly,
     };
 
-    App::Push<filebrowser::Menu>(fs, fs_entry, fs->Root());
+    const auto options = FsOption_All &~ FsOption_LoadAssoc;
+    App::Push<filebrowser::Menu>(fs, fs_entry, fs->Root(), options);
 }
 
 } // namespace sphaira::ui::menu::filebrowser

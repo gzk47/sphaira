@@ -5,6 +5,9 @@
 
 namespace sphaira::devoptab::common {
 
+// max entries per devoptab, should be enough.
+enum { MAX_ENTRIES = 4 };
+
 // buffers data in 512k chunks to maximise throughput.
 // not suitable if random access >= 512k is common.
 // if that is needed, see the LRU cache varient used for fatfs.

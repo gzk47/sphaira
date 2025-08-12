@@ -8,8 +8,9 @@
 #include "yati/nx/nxdumptool/core/save.h"
 
 #include <cstring>
-#include <cstdio>
 #include <cerrno>
+#include <array>
+#include <memory>
 #include <algorithm>
 #include <sys/iosupport.h>
 
@@ -243,19 +244,21 @@ constexpr devoptab_t DEVOPTAB = {
 };
 
 struct Entry {
-    u64 id;
-    Device device;
-    devoptab_t devoptab;
-    char name[32];
-    s32 ref_count;
+    Device device{};
+    devoptab_t devoptab{};
+    u64 id{};
+    fs::FsPath mount{};
+    char name[32]{};
+    s32 ref_count{};
+
+    ~Entry() {
+        RemoveDevice(mount);
+        save_close_savefile(&device.ctx);
+    }
 };
 
 Mutex g_mutex;
-std::vector<Entry> g_entries;
-
-void MakeMountPath(u64 id, fs::FsPath& out_path) {
-    std::snprintf(out_path, sizeof(out_path), "%016lx:/", id);
-}
+std::array<std::unique_ptr<Entry>, common::MAX_ENTRIES> g_entries;
 
 } // namespace
 
@@ -264,12 +267,18 @@ Result MountFromSavePath(u64 id, fs::FsPath& out_path) {
 
     // check if we already have the save mounted.
     for (auto& e : g_entries) {
-        if (e.id == id) {
-            e.ref_count++;
-            MakeMountPath(id, out_path);
+        if (e && e->id == id) {
+            e->ref_count++;
+            out_path = e->mount;
             R_SUCCEED();
         }
     }
+
+    // otherwise, find next free entry.
+    auto itr = std::ranges::find_if(g_entries, [](auto& e){
+        return !e;
+    });
+    R_UNLESS(itr != g_entries.end(), 0x1);
 
     char path[256];
     std::snprintf(path, sizeof(path), "SYSTEM:/save/%016lx", id);
@@ -281,21 +290,23 @@ Result MountFromSavePath(u64 id, fs::FsPath& out_path) {
 
     log_write("[SAVE] OPEN SUCCESS %s\n", path);
 
-    auto& entry = g_entries.emplace_back();
-    entry.id = id;
-    entry.device.ctx = ctx;
-    entry.device.file_table = &ctx->save_filesystem_core.file_table;
-    entry.devoptab = DEVOPTAB;
-    entry.devoptab.name = entry.name;
-    entry.devoptab.deviceData = &entry.device;
-    std::snprintf(entry.name, sizeof(entry.name), "%016lx", id);
+    auto entry = std::make_unique<Entry>();
+    entry->id = id;
+    entry->device.ctx = ctx;
+    entry->device.file_table = &ctx->save_filesystem_core.file_table;
+    entry->devoptab = DEVOPTAB;
+    entry->devoptab.name = entry->name;
+    entry->devoptab.deviceData = &entry->device;
+    std::snprintf(entry->name, sizeof(entry->name), "%016lx", id);
+    std::snprintf(entry->mount, sizeof(entry->mount), "%016lx:/", id);
 
-    R_UNLESS(AddDevice(&entry.devoptab) >= 0, 0x1);
-    log_write("[SAVE] DEVICE SUCCESS %s %s\n", path, entry.name);
+    R_UNLESS(AddDevice(&entry->devoptab) >= 0, 0x1);
+    log_write("[SAVE] DEVICE SUCCESS %s %s\n", path, entry->name);
 
-    MakeMountPath(id, out_path);
+    out_path = entry->mount;
+    entry->ref_count++;
+    *itr = std::move(entry);
 
-    entry.ref_count++;
     R_SUCCEED();
 }
 
@@ -303,29 +314,19 @@ void UnmountSave(u64 id) {
     SCOPED_MUTEX(&g_mutex);
 
     auto itr = std::ranges::find_if(g_entries, [id](auto& e){
-        return id == e.id;
+        return e && e->id == id;
     });
 
     if (itr == g_entries.end()) {
         return;
     }
 
-    if (itr->ref_count) {
-        itr->ref_count--;
+    if ((*itr)->ref_count) {
+        (*itr)->ref_count--;
     }
 
-    if (!itr->ref_count) {
-        fs::FsPath path;
-        MakeMountPath(id, path);
-
-        // todo: verify this actually works.
-        RemoveDevice(path);
-
-        if (itr->device.ctx) {
-            save_close_savefile(&itr->device.ctx);
-        }
-
-        g_entries.erase(itr);
+    if (!(*itr)->ref_count) {
+        itr->reset();
     }
 }
 
