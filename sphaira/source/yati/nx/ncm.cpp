@@ -216,4 +216,28 @@ Result GetFsPathFromContentId(NcmContentStorage* cs, const NcmContentMetaKey& ke
     return ncmContentStorageGetPath(cs, out_path->s, sizeof(*out_path), &id);
 }
 
+NcmSource::NcmSource(NcmContentStorage* cs, const NcmContentId* id) : m_cs{*cs}, m_id{*id} {
+
+}
+
+Result NcmSource::Read(void* buf, s64 off, s64 size, u64* bytes_read) {
+    s64 max_size;
+    R_TRY(GetSize(&max_size));
+
+    size = std::min<s64>(size, max_size - off);
+    R_TRY(ncmContentStorageReadContentIdFile(&m_cs, buf, size, &m_id, off));
+
+    *bytes_read = size;
+    R_SUCCEED();
+}
+
+Result NcmSource::GetSize(s64* size) {
+    if (!m_size) {
+        R_TRY(ncmContentStorageGetSizeFromContentId(&m_cs, &m_size, &m_id));
+    }
+
+    *size = m_size;
+    R_SUCCEED();
+}
+
 } // namespace sphaira::ncm

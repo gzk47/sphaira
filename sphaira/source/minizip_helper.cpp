@@ -4,6 +4,8 @@
 #include <cstring>
 #include <cstdio>
 
+#include "log.hpp"
+
 namespace sphaira::mz {
 namespace {
 
@@ -193,8 +195,10 @@ voidpf minizip_open_file_func_stdio(voidpf opaque, const void* filename, int mod
     if ((mode & ZLIB_FILEFUNC_MODE_READWRITEFILTER) == ZLIB_FILEFUNC_MODE_READ) {
         mode_fopen = "rb";
     } else if (mode & ZLIB_FILEFUNC_MODE_EXISTING) {
+        log_write("[ZIP] opening r/w\n");
         mode_fopen = "r+b";
     } else if (mode & ZLIB_FILEFUNC_MODE_CREATE) {
+        log_write("[ZIP] opening r/w +\n");
         mode_fopen = "wb";
     } else {
         return NULL;
@@ -219,6 +223,7 @@ long minizip_seek_file_func_stdio(voidpf opaque, voidpf stream, ZPOS64_T offset,
 
 uLong minizip_read_file_func_stdio(voidpf opaque, voidpf stream, void* buf, uLong size) {
     auto file = static_cast<std::FILE*>(stream);
+    log_write("[ZIP] doing read\n");
     return std::fread(buf, 1, size, file);
 }
 

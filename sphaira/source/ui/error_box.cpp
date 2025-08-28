@@ -100,6 +100,7 @@ auto GetCodeMessage(Result rc) -> const char* {
         case Result_ThemezerFailedToDownloadTheme: return "SphairaError_ThemezerFailedToDownloadTheme";
         case Result_MainFailedToDownloadUpdate: return "SphairaError_MainFailedToDownloadUpdate";
         case Result_UsbDsBadDeviceSpeed: return "SphairaError_UsbDsBadDeviceSpeed";
+        case Result_NcaBadMagic: return "SphairaError_NcaBadMagic";
         case Result_NspBadMagic: return "SphairaError_NspBadMagic";
         case Result_XciBadMagic: return "SphairaError_XciBadMagic";
         case Result_XciSecurePartitionNotFound: return "SphairaError_XciSecurePartitionNotFound";
@@ -147,6 +148,16 @@ auto GetCodeMessage(Result rc) -> const char* {
         case Result_YatiCertNotFound: return "SphairaError_YatiCertNotFound";
         case Result_YatiNcmDbCorruptHeader: return "SphairaError_YatiNcmDbCorruptHeader";
         case Result_YatiNcmDbCorruptInfos: return "SphairaError_YatiNcmDbCorruptInfos";
+
+        case Result_NszFailedCreateCctx: return "SphairaError_NszFailedCreateCctx";
+        case Result_NszFailedSetCompressionLevel: return "SphairaError_NszFailedSetCompressionLevel";
+        case Result_NszFailedSetThreadCount: return "SphairaError_NszFailedSetThreadCount";
+        case Result_NszFailedSetLongDistanceMode: return "SphairaError_NszFailedSetLongDistanceMode";
+        case Result_NszFailedResetCctx: return "SphairaError_NszFailedResetCctx";
+        case Result_NszFailedCompress2: return "SphairaError_NszFailedCompress2";
+        case Result_NszFailedCompressStream2: return "SphairaError_NszFailedCompressStream2";
+        case Result_NszTooManyBlocks: return "SphairaError_NszTooManyBlocks";
+        case Result_NszMissingBlocks: return "SphairaError_NszMissingBlocks";
     }
 
     return "";
@@ -166,7 +177,7 @@ ErrorBox::ErrorBox(const std::string& message) : m_message{message} {
         SetPop();
     }});
 
-    App::PlaySoundEffect(SoundEffect::SoundEffect_Error);
+    App::PlaySoundEffect(SoundEffect::Error);
 }
 
 ErrorBox::ErrorBox(Result code, const std::string& message) : ErrorBox{message} {

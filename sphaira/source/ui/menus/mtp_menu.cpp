@@ -1,5 +1,3 @@
-#if ENABLE_NETWORK_INSTALL
-
 #include "ui/menus/mtp_menu.hpp"
 #include "usb/usbds.hpp"
 #include "app.hpp"
@@ -12,10 +10,10 @@
 namespace sphaira::ui::menu::mtp {
 
 Menu::Menu(u32 flags) : stream::Menu{"MTP Install"_i18n, flags} {
-    m_was_mtp_enabled = App::GetMtpEnable();
+    m_was_mtp_enabled = haze::IsInit();
     if (!m_was_mtp_enabled) {
         log_write("[MTP] wasn't enabled, forcefully enabling\n");
-        App::SetMtpEnable(true);
+        haze::Init();
     }
 
     haze::InitInstallMode(
@@ -31,7 +29,7 @@ Menu::~Menu() {
 
     if (!m_was_mtp_enabled) {
         log_write("[MTP] disabling on exit\n");
-        App::SetMtpEnable(false);
+        haze::Exit();
     }
 }
 
@@ -59,5 +57,3 @@ void Menu::OnDisableInstallMode() {
 }
 
 } // namespace sphaira::ui::menu::mtp
-
-#endif

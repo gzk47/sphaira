@@ -106,6 +106,7 @@ struct FileEntry final : FsDirectoryEntry {
     bool checked_extension{}; // did we already search for an ext?
     bool checked_internal_extension{}; // did we already search for an ext?
     bool selected{}; // is this file selected?
+    bool done_stat{}; // have we checked file_size / count.
 
     auto IsFile() const -> bool {
         return type == FsDirEntryType_File;
@@ -305,9 +306,11 @@ struct FsView final : Widget {
     void DisplayOptions();
     void DisplayAdvancedOptions();
 
-    void MountNspFs();
-    void MountXciFs();
-    void MountZipFs();
+    using MountFsFunc = Result(*)(fs::Fs *fs, const fs::FsPath &path, fs::FsPath &out_path);
+    // using MountFsFunc = std::function<Result(fs::Fs *fs, const fs::FsPath &path, fs::FsPath &out_path)>;
+    using UmountFsFunc = std::function<void(const fs::FsPath &mount)>;
+
+    void MountFileFs(const MountFsFunc& mount_func, const UmountFsFunc& umount_func);
 
 // private:
     Base* m_menu{};
@@ -437,6 +440,9 @@ protected:
 
     auto CreateFs(const FsEntry& fs_entry) -> std::shared_ptr<fs::Fs>;
 
+private:
+    void Init(const std::shared_ptr<fs::Fs>& fs, const FsEntry& fs_entry, const fs::FsPath& path, bool is_custom);
+
 protected:
     static constexpr inline const char* INI_SECTION = "filebrowser";
 
@@ -479,7 +485,6 @@ struct Menu final : Base {
 auto IsSamePath(std::string_view a, std::string_view b) -> bool;
 auto IsExtension(std::string_view ext1, std::string_view ext2) -> bool;
 auto IsExtension(std::string_view ext, std::span<const std::string_view> list) -> bool;
-
 
 struct FsStdioWrapper final : fs::FsStdio {
     using OnExit = std::function<void(void)>;

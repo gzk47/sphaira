@@ -33,7 +33,7 @@ void Widget::Update(Controller* controller, TouchInfo* touch) {
     for (const auto& [button, action] : m_actions) {
         if ((action.m_type & ActionType::DOWN) && controller->GotDown(button)) {
             if (static_cast<u64>(button) & static_cast<u64>(Button::ANY_BUTTON)) {
-                App::PlaySoundEffect(SoundEffect_Focus);
+                App::PlaySoundEffect(SoundEffect::Focus);
             }
             action.Invoke(true);
             break;
@@ -83,7 +83,7 @@ void Widget::RemoveAction(Button button) {
 auto Widget::FireAction(Button b, u8 type) -> bool {
     for (const auto& [button, action] : m_actions) {
         if (button == b && (action.m_type & type)) {
-            App::PlaySoundEffect(SoundEffect_Focus);
+            App::PlaySoundEffect(SoundEffect::Focus);
             action.Invoke(true);
             return true;
         }

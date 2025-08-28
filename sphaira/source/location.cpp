@@ -1,6 +1,7 @@
 #include "location.hpp"
 #include "fs.hpp"
 #include "app.hpp"
+#include "usbdvd.hpp"
 
 #include <ff.h>
 #include <cstring>
@@ -76,17 +77,28 @@ auto Load() -> Entries {
 }
 
 auto GetStdio(bool write) -> StdioEntries {
+    StdioEntries out{};
+
+    // try and load usbdvd entry.
+    // todo: check if more than 1 entry is supported.
+    // todo: only call if usbdvd is init.
+    if (!write) {
+        StdioEntry entry;
+        if (usbdvd::GetMountPoint(entry)) {
+            out.emplace_back(entry);
+        }
+    }
+
+    // bail out early if usbhdd is disabled.
     if (!App::GetHddEnable()) {
         log_write("[USBHSFS] not enabled\n");
-        return {};
+        return out;
     }
 
     static UsbHsFsDevice devices[0x20];
     const auto count = usbHsFsListMountedDevices(devices, std::size(devices));
     log_write("[USBHSFS] got connected: %u\n", usbHsFsGetPhysicalDeviceCount());
     log_write("[USBHSFS] got count: %u\n", count);
-
-    StdioEntries out{};
 
     for (s32 i = 0; i < count; i++) {
         const auto& e = devices[i];
@@ -108,9 +120,6 @@ auto GetStdio(bool write) -> StdioEntries {
 
 auto GetFat() -> StdioEntries {
     StdioEntries out{};
-
-    // todo: move this somewhere else.
-    out.emplace_back("Qlaunch_romfs:/", "Qlaunch RomFS (Read Only)", true);
 
     for (auto& e : VolumeStr) {
         char path[64];

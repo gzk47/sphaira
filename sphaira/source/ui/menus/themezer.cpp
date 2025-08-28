@@ -1,3 +1,4 @@
+#if 0
 #include "ui/menus/themezer.hpp"
 #include "ui/menus/ghdl.hpp"
 #include "ui/progress_box.hpp"
@@ -444,7 +445,7 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
         if (touch && m_index == i) {
             FireAction(Button::A);
         } else {
-            App::PlaySoundEffect(SoundEffect_Focus);
+            App::PlaySoundEffect(SoundEffect::Focus);
             SetIndex(i);
         }
     });
@@ -723,3 +724,4 @@ void Menu::DisplayOptions() {
 }
 
 } // namespace sphaira::ui::menu::themezer
+#endif

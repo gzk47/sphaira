@@ -2,6 +2,7 @@
 #include <memory>
 #include "app.hpp"
 #include "log.hpp"
+#include "ui/menus/main_menu.hpp"
 
 int main(int argc, char** argv) {
     if (!argc || !argv) {
@@ -9,6 +10,7 @@ int main(int argc, char** argv) {
     }
 
     auto app = std::make_unique<sphaira::App>(argv[0]);
+    app->Push<sphaira::ui::menu::main::MainMenu>();
     app->Loop();
     return 0;
 }

@@ -7,9 +7,13 @@
 #include "image.hpp"
 #include "swkbd.hpp"
 
+#include "utils/utils.hpp"
+#include "utils/nsz_dumper.hpp"
+
 #include "ui/menus/game_menu.hpp"
 #include "ui/menus/game_meta_menu.hpp"
 #include "ui/menus/save_menu.hpp"
+#include "ui/menus/gc_menu.hpp" // remove when gc event pr is merged.
 #include "ui/sidebar.hpp"
 #include "ui/error_box.hpp"
 #include "ui/option_box.hpp"
@@ -50,6 +54,11 @@ struct NspSource final : dump::BaseSource {
         return rc;
     }
 
+    Result Read(const std::string& path, void* buf, s64 off, s64 size) {
+        u64 bytes_read = 0;
+        return Read(path, buf, off, size, &bytes_read);
+    }
+
     auto GetName(const std::string& path) const -> std::string {
         const auto it = std::ranges::find_if(m_entries, [&path](auto& e){
             return path.find(e.path.s) != path.npos;
@@ -86,10 +95,56 @@ struct NspSource final : dump::BaseSource {
         return App::GetDefaultImage();
     }
 
+    Result GetEntryFromPath(const std::string& path, NspEntry& out) const {
+        const auto it = std::ranges::find_if(m_entries, [&path](auto& e){
+            return path.find(e.path.s) != path.npos;
+        });
+        R_UNLESS(it != m_entries.end(), Result_GameBadReadForDump);
+
+        out = *it;
+        R_SUCCEED();
+    }
+
 private:
     std::vector<NspEntry> m_entries{};
     bool m_is_file_based_emummc{};
 };
+
+Result NszExport(ProgressBox* pbox, const keys::Keys& keys, dump::BaseSource* _source, dump::WriteSource* writer, const fs::FsPath& path) {
+    auto source = (NspSource*)_source;
+
+    NspEntry entry;
+    R_TRY(source->GetEntryFromPath(path, entry));
+
+    const auto nca_creator = [&entry](const nca::Header& header, const keys::KeyEntry& title_key, const utils::nsz::Collection& collection) {
+        const auto content_id = ncm::GetContentIdFromStr(collection.name.c_str());
+        return std::make_unique<nca::NcaReader>(
+            header, &title_key, collection.size,
+            std::make_shared<ncm::NcmSource>(&entry.cs, &content_id)
+        );
+    };
+
+    auto& collections = entry.collections;
+    s64 read_offset = entry.nsp_data.size();
+    s64 write_offset = entry.nsp_data.size();
+
+    R_TRY(utils::nsz::NszExport(pbox, nca_creator, read_offset, write_offset, collections, keys, source, writer, path));
+
+    // zero base the offsets.
+    for (auto& collection : collections) {
+        collection.offset -= entry.nsp_data.size();
+    }
+
+    // build new nsp collection with the updated offsets and sizes.
+    s64 nsp_size = 0;
+    const auto nsp_data = yati::container::Nsp::Build(collections, nsp_size);
+    R_TRY(writer->Write(nsp_data.data(), 0, nsp_data.size()));
+
+    // update with actual size.
+    R_TRY(writer->SetSize(nsp_size));
+
+    R_SUCCEED();
+}
 
 Result Notify(Result rc, const std::string& error_message) {
     if (R_FAILED(rc)) {
@@ -133,18 +188,6 @@ void LoadControlEntry(Entry& e, bool force_image_load = false) {
     if (force_image_load && e.status == title::NacpLoadStatus::Loaded) {
         LoadControlImage(e, title::Get(e.app_id));
     }
-}
-
-struct HashStr {
-    char str[0x21];
-};
-
-HashStr hexIdToStr(auto id) {
-    HashStr str{};
-    const auto id_lower = std::byteswap(*(u64*)id.c);
-    const auto id_upper = std::byteswap(*(u64*)(id.c + 0x8));
-    std::snprintf(str.str, 0x21, "%016lx%016lx", id_lower, id_upper);
-    return str;
 }
 
 void FreeEntry(NVGcontext* vg, Entry& e) {
@@ -324,26 +367,15 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
                     );
                 });
 
-                options->Add<SidebarEntryCallback>("Export NSP"_i18n, [this](){
-                    auto options = std::make_unique<Sidebar>("Select content to export"_i18n, Sidebar::Side::RIGHT);
-                    ON_SCOPE_EXIT(App::Push(std::move(options)));
+                auto export_nsp = options->Add<SidebarEntryCallback>("Export NSP"_i18n, [this](){
+                    ExportOptions(false);
+                });
+                export_nsp->Depends(App::IsApplication, "Not supported in Applet Mode"_i18n);
 
-                    options->Add<SidebarEntryCallback>("Export All"_i18n, [this](){
-                        DumpGames(title::ContentFlag_All);
-                    }, true);
-                    options->Add<SidebarEntryCallback>("Export Application"_i18n, [this](){
-                        DumpGames(title::ContentFlag_Application);
-                    }, true);
-                    options->Add<SidebarEntryCallback>("Export Patch"_i18n, [this](){
-                        DumpGames(title::ContentFlag_Patch);
-                    }, true);
-                    options->Add<SidebarEntryCallback>("Export AddOnContent"_i18n, [this](){
-                        DumpGames(title::ContentFlag_AddOnContent);
-                    }, true);
-                    options->Add<SidebarEntryCallback>("Export DataPatch"_i18n, [this](){
-                        DumpGames(title::ContentFlag_DataPatch);
-                    }, true);
-                }, true);
+                auto export_nsz = options->Add<SidebarEntryCallback>("Export NSZ"_i18n, [this](){
+                    ExportOptions(true);
+                },  "Exports to NSZ (compressed NSP)"_i18n);
+                export_nsz->Depends(App::IsApplication, "Not supported in Applet Mode"_i18n);
 
                 options->Add<SidebarEntryCallback>("Export options"_i18n, [this](){
                     App::DisplayDumpOptions(false);
@@ -418,6 +450,9 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
     ns::Initialize();
     es::Initialize();
     title::Init();
+
+    fsOpenGameCardDetectionEventNotifier(std::addressof(m_gc_event_notifier));
+    fsEventNotifierGetEventHandle(std::addressof(m_gc_event_notifier), std::addressof(m_gc_event), true);
 }
 
 Menu::~Menu() {
@@ -426,9 +461,15 @@ Menu::~Menu() {
     FreeEntries();
     ns::Exit();
     es::Exit();
+
+    eventClose(std::addressof(m_gc_event));
+    fsEventNotifierClose(std::addressof(m_gc_event_notifier));
 }
 
 void Menu::Update(Controller* controller, TouchInfo* touch) {
+    // force update if gamecard state changed.
+    m_dirty |= R_SUCCEEDED(eventWait(&m_gc_event, 0));
+
     if (m_dirty) {
         App::Notify("Updating application record list"_i18n);
         SortAndFindLastFile(true);
@@ -439,7 +480,7 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
         if (touch && m_index == i) {
             FireAction(Button::A);
         } else {
-            App::PlaySoundEffect(SoundEffect_Focus);
+            App::PlaySoundEffect(SoundEffect::Focus);
             SetIndex(i);
         }
     });
@@ -538,7 +579,7 @@ void Menu::ScanHomebrew() {
                 continue;
             }
 
-            m_entries.emplace_back(e.application_id, e.type);
+            m_entries.emplace_back(e.application_id, e.last_event);
         }
 
         offset += record_count;
@@ -640,16 +681,37 @@ void Menu::DeleteGames() {
     });
 }
 
-void Menu::DumpGames(u32 flags) {
+void Menu::ExportOptions(bool to_nsz) {
+    auto options = std::make_unique<Sidebar>("Select content to export"_i18n, Sidebar::Side::RIGHT);
+    ON_SCOPE_EXIT(App::Push(std::move(options)));
+
+    options->Add<SidebarEntryCallback>("Export All"_i18n, [this, to_nsz](){
+        DumpGames(title::ContentFlag_All, to_nsz);
+    }, true);
+    options->Add<SidebarEntryCallback>("Export Application"_i18n, [this, to_nsz](){
+        DumpGames(title::ContentFlag_Application, to_nsz);
+    }, true);
+    options->Add<SidebarEntryCallback>("Export Patch"_i18n, [this, to_nsz](){
+        DumpGames(title::ContentFlag_Patch, to_nsz);
+    }, true);
+    options->Add<SidebarEntryCallback>("Export AddOnContent"_i18n, [this, to_nsz](){
+        DumpGames(title::ContentFlag_AddOnContent, to_nsz);
+    }, true);
+    options->Add<SidebarEntryCallback>("Export DataPatch"_i18n, [this, to_nsz](){
+        DumpGames(title::ContentFlag_DataPatch, to_nsz);
+    }, true);
+}
+
+void Menu::DumpGames(u32 flags, bool to_nsz) {
     auto targets = GetSelectedEntries();
     ClearSelection();
 
     std::vector<NspEntry> nsp_entries;
     for (auto& e : targets) {
-        BuildNspEntries(e, flags, nsp_entries);
+        BuildNspEntries(e, flags, nsp_entries, to_nsz);
     }
 
-    DumpNsp(nsp_entries);
+    DumpNsp(nsp_entries, to_nsz);
 }
 
 void Menu::CreateSaves(AccountUid uid) {
@@ -762,7 +824,7 @@ void DeleteMetaEntries(u64 app_id, int image, const std::string& name, const tit
     });
 }
 
-auto BuildNspPath(const Entry& e, const NsApplicationContentMetaStatus& status) -> fs::FsPath {
+auto BuildNspPath(const Entry& e, const NsApplicationContentMetaStatus& status, bool to_nsz) -> fs::FsPath {
     fs::FsPath name_buf = e.GetName();
     title::utilsReplaceIllegalCharacters(name_buf, true);
 
@@ -778,17 +840,19 @@ auto BuildNspPath(const Entry& e, const NsApplicationContentMetaStatus& status) 
         }
     }
 
+    const auto ext = to_nsz ? "nsz" : "nsp";
+
     fs::FsPath path;
     if (App::GetApp()->m_dump_app_folder.Get()) {
-        std::snprintf(path, sizeof(path), "%s/%s %s[%016lX][v%u][%s].nsp", name_buf.s, name_buf.s, version, status.application_id, status.version, ncm::GetMetaTypeShortStr(status.meta_type));
+        std::snprintf(path, sizeof(path), "%s/%s %s[%016lX][v%u][%s].%s", name_buf.s, name_buf.s, version, status.application_id, status.version, ncm::GetMetaTypeShortStr(status.meta_type), ext);
     } else {
-        std::snprintf(path, sizeof(path), "%s %s[%016lX][v%u][%s].nsp", name_buf.s, version, status.application_id, status.version, ncm::GetMetaTypeShortStr(status.meta_type));
+        std::snprintf(path, sizeof(path), "%s %s[%016lX][v%u][%s].%s", name_buf.s, version, status.application_id, status.version, ncm::GetMetaTypeShortStr(status.meta_type), ext);
     }
 
     return path;
 }
 
-Result BuildContentEntry(const NsApplicationContentMetaStatus& status, ContentInfoEntry& out) {
+Result BuildContentEntry(const NsApplicationContentMetaStatus& status, ContentInfoEntry& out, bool to_nsz) {
     NcmMetaData meta;
     R_TRY(GetNcmMetaFromMetaStatus(status, meta));
 
@@ -824,14 +888,14 @@ Result BuildContentEntry(const NsApplicationContentMetaStatus& status, ContentIn
     R_SUCCEED();
 }
 
-Result BuildNspEntry(const Entry& e, const ContentInfoEntry& info, const keys::Keys& keys, NspEntry& out) {
+Result BuildNspEntry(const Entry& e, const ContentInfoEntry& info, const keys::Keys& keys, NspEntry& out, bool to_nsz) {
     out.application_name = e.GetName();
-    out.path = BuildNspPath(e, info.status);
+    out.path = BuildNspPath(e, info.status, to_nsz);
     s64 offset{};
 
     for (auto& e : info.content_infos) {
         char nca_name[64];
-        std::snprintf(nca_name, sizeof(nca_name), "%s%s", hexIdToStr(e.content_id).str, e.content_type == NcmContentType_Meta ? ".cnmt.nca" : ".nca");
+        std::snprintf(nca_name, sizeof(nca_name), "%s%s", utils::hexIdToStr(e.content_id).str, e.content_type == NcmContentType_Meta ? ".cnmt.nca" : ".nca");
 
         u64 size;
         ncmContentInfoSizeToU64(std::addressof(e), std::addressof(size));
@@ -856,10 +920,10 @@ Result BuildNspEntry(const Entry& e, const ContentInfoEntry& info, const keys::K
         R_TRY(es::PatchTicket(entry.tik_data, entry.cert_data, key_gen, keys, App::GetApp()->m_dump_convert_to_common_ticket.Get()));
 
         char tik_name[64];
-        std::snprintf(tik_name, sizeof(tik_name), "%s%s", hexIdToStr(rights_id).str, ".tik");
+        std::snprintf(tik_name, sizeof(tik_name), "%s%s", utils::hexIdToStr(rights_id).str, ".tik");
 
         char cert_name[64];
-        std::snprintf(cert_name, sizeof(cert_name), "%s%s", hexIdToStr(rights_id).str, ".cert");
+        std::snprintf(cert_name, sizeof(cert_name), "%s%s", utils::hexIdToStr(rights_id).str, ".cert");
 
         out.collections.emplace_back(tik_name, offset, entry.tik_data.size());
         offset += entry.tik_data.size();
@@ -876,7 +940,7 @@ Result BuildNspEntry(const Entry& e, const ContentInfoEntry& info, const keys::K
     R_SUCCEED();
 }
 
-Result BuildNspEntries(Entry& e, const title::MetaEntries& meta_entries, std::vector<NspEntry>& out) {
+Result BuildNspEntries(Entry& e, const title::MetaEntries& meta_entries, std::vector<NspEntry>& out, bool to_nsz) {
     LoadControlEntry(e);
 
     keys::Keys keys;
@@ -887,7 +951,7 @@ Result BuildNspEntries(Entry& e, const title::MetaEntries& meta_entries, std::ve
         R_TRY(BuildContentEntry(status, info));
 
         NspEntry nsp;
-        R_TRY(BuildNspEntry(e, info, keys, nsp));
+        R_TRY(BuildNspEntry(e, info, keys, nsp, to_nsz));
         out.emplace_back(nsp).icon = e.image;
     }
 
@@ -895,21 +959,36 @@ Result BuildNspEntries(Entry& e, const title::MetaEntries& meta_entries, std::ve
     R_SUCCEED();
 }
 
-Result BuildNspEntries(Entry& e, u32 flags, std::vector<NspEntry>& out) {
+Result BuildNspEntries(Entry& e, u32 flags, std::vector<NspEntry>& out, bool to_nsz) {
     title::MetaEntries meta_entries;
     R_TRY(GetMetaEntries(e, meta_entries, flags));
 
-    return BuildNspEntries(e, meta_entries, out);
+    return BuildNspEntries(e, meta_entries, out, to_nsz);
 }
 
-void DumpNsp(const std::vector<NspEntry>& entries) {
+void DumpNsp(const std::vector<NspEntry>& entries, bool to_nsz) {
     std::vector<fs::FsPath> paths;
     for (auto& e : entries) {
-        paths.emplace_back(fs::AppendPath("/dumps/NSP", e.path));
+        if (to_nsz) {
+            paths.emplace_back(fs::AppendPath("/dumps/NSZ", e.path));
+        } else {
+            paths.emplace_back(fs::AppendPath("/dumps/NSP", e.path));
+        }
     }
 
     auto source = std::make_shared<NspSource>(entries);
-    dump::Dump(source, paths);
+
+    if (to_nsz) {
+        // todo: log keys error.
+        keys::Keys keys;
+        keys::parse_keys(keys, true);
+
+        dump::Dump(source, paths, [keys](ProgressBox* pbox, dump::BaseSource* source, dump::WriteSource* writer, const fs::FsPath& path) {
+            return NszExport(pbox, keys, source, writer, path);
+        });
+    } else {
+        dump::Dump(source, paths);
+    }
 }
 
 } // namespace sphaira::ui::menu::game

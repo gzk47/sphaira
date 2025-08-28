@@ -17,8 +17,7 @@ struct ProgressBox final : Widget {
         int image,
         const std::string& action,
         const std::string& title,
-        const ProgressBoxCallback& callback, const ProgressBoxDoneCallback& done = [](Result rc){},
-        int cpuid = 1, int prio = PRIO_PREEMPTIVE, int stack_size = 1024*128
+        const ProgressBoxCallback& callback, const ProgressBoxDoneCallback& done = nullptr
     );
     ~ProgressBox();
 
@@ -28,6 +27,8 @@ struct ProgressBox final : Widget {
     auto SetActionName(const std::string& action) -> ProgressBox&;
     auto SetTitle(const std::string& title) -> ProgressBox&;
     auto NewTransfer(const std::string& transfer) -> ProgressBox&;
+    // zeros the saved offset.
+    auto ResetTranfser() -> ProgressBox&;
     auto UpdateTransfer(s64 offset, s64 size) -> ProgressBox&;
     // not const in order to avoid copy by using std::swap
     auto SetImage(int image) -> ProgressBox&;
@@ -43,10 +44,6 @@ struct ProgressBox final : Widget {
     auto CopyFile(fs::Fs* fs, const fs::FsPath& src, const fs::FsPath& dst, bool single_threaded = false) -> Result;
     auto CopyFile(const fs::FsPath& src, const fs::FsPath& dst, bool single_threaded = false) -> Result;
     void Yield();
-
-    auto GetCpuId() const {
-        return m_cpuid;
-    }
 
     auto OnDownloadProgressCallback() {
         return [this](s64 dltotal, s64 dlnow, s64 ultotal, s64 ulnow){
@@ -103,7 +100,6 @@ private:
     ScrollingText m_scroll_title{};
     ScrollingText m_scroll_transfer{};
 
-    int m_cpuid{};
     int m_image{};
     bool m_own_image{};
 };

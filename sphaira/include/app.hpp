@@ -2,13 +2,13 @@
 
 #include "nanovg.h"
 #include "nanovg/dk_renderer.hpp"
-#include "pulsar.h"
 #include "ui/widget.hpp"
 #include "ui/notification.hpp"
 #include "owo.hpp"
 #include "option.hpp"
 #include "fs.hpp"
 #include "log.hpp"
+#include "utils/audio.hpp"
 
 #ifdef USE_NVJPG
 #include <nvjpg.hpp>
@@ -22,16 +22,7 @@
 
 namespace sphaira {
 
-enum SoundEffect {
-    SoundEffect_Music,
-    SoundEffect_Focus,
-    SoundEffect_Scroll,
-    SoundEffect_Limit,
-    SoundEffect_Startup,
-    SoundEffect_Install,
-    SoundEffect_Error,
-    SoundEffect_MAX,
-};
+using SoundEffect = audio::SoundEffect;
 
 enum class LaunchType {
     Normal,
@@ -108,6 +99,10 @@ public:
     static auto GetLanguage() -> long;
     static auto GetTextScrollSpeed() -> long;
 
+    static auto GetNszCompressLevel() -> u8;
+    static auto GetNszThreadCount() -> u8;
+    static auto GetNszBlockExponent() -> u8;
+
     static void SetMtpEnable(bool enable);
     static void SetFtpEnable(bool enable);
     static void SetNxlinkEnable(bool enable);
@@ -153,8 +148,12 @@ public:
 
     void LoadTheme(const ThemeMeta& meta);
     void CloseTheme();
+    void CloseThemeBackgroundMusic();
     void ScanThemes(const std::string& path);
     void ScanThemeEntries();
+    void LoadAndPlayThemeMusic();
+    static Result SetDefaultBackgroundMusic(fs::Fs* fs, const fs::FsPath& path);
+    static void SetBackgroundMusicPause(bool pause);
 
     // helper that converts 1.2.3 to a u32 used for comparisons.
     static auto GetVersionFromString(const char* str) -> u32;
@@ -294,6 +293,7 @@ public:
 
     option::OptionBool m_log_enabled{INI_SECTION, "log_enabled", false};
     option::OptionBool m_replace_hbmenu{INI_SECTION, "replace_hbmenu", false};
+    option::OptionString m_default_music{INI_SECTION, "default_music", "/config/sphaira/themes/default_music.bfstm"};
     option::OptionString m_theme_path{INI_SECTION, "theme", DEFAULT_THEME_PATH};
     option::OptionBool m_theme_music{INI_SECTION, "theme_music", true};
     option::OptionBool m_12hour_time{INI_SECTION, "12hour_time", false};
@@ -328,13 +328,18 @@ public:
     option::OptionBool m_dump_append_folder_with_xci{"dump", "append_folder_with_xci", true};
     option::OptionBool m_dump_trim_xci{"dump", "trim_xci", false};
     option::OptionBool m_dump_label_trim_xci{"dump", "label_trim_xci", false};
-    option::OptionBool m_dump_usb_transfer_stream{"dump", "usb_transfer_stream", true, false};
     option::OptionBool m_dump_convert_to_common_ticket{"dump", "convert_to_common_ticket", true};
+    option::OptionLong m_nsz_compress_level{"dump", "nsz_compress_level", 3};
+    option::OptionLong m_nsz_compress_threads{"dump", "nsz_compress_threads", 3};
+    option::OptionBool m_nsz_compress_ldm{"dump", "nsz_compress_ldm", true};
+    option::OptionBool m_nsz_compress_block{"dump", "nsz_compress_block", false};
+    option::OptionLong m_nsz_compress_block_exponent{"dump", "nsz_compress_block_exponent", 6};
 
     // todo: move this into it's own menu
     option::OptionLong m_text_scroll_speed{"accessibility", "text_scroll_speed", 1}; // normal
 
-    PLSR_PlayerSoundId m_sound_ids[SoundEffect_MAX]{};
+    std::shared_ptr<fs::FsNativeSd> m_fs{};
+    audio::SongID m_background_music{};
 
 #ifdef USE_NVJPG
     nj::Decoder m_decoder;

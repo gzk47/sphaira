@@ -72,7 +72,7 @@ auto List::ScrollDown(s64& index, s64 step, s64 count) -> bool {
     }
 
     if (index != old_index) {
-        App::PlaySoundEffect(SoundEffect_Scroll);
+        App::PlaySoundEffect(SoundEffect::Scroll);
         s64 delta = index - old_index;
         s64 start = m_yoff / max * m_row;
 
@@ -110,7 +110,7 @@ auto List::ScrollUp(s64& index, s64 step, s64 count) -> bool {
     }
 
     if (index != old_index) {
-        App::PlaySoundEffect(SoundEffect_Scroll);
+        App::PlaySoundEffect(SoundEffect::Scroll);
         s64 start = m_yoff / max * m_row;
 
         while (index < start) {

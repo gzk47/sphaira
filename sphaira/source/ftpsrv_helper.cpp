@@ -3,6 +3,7 @@
 #include "app.hpp"
 #include "fs.hpp"
 #include "log.hpp"
+#include "utils/thread.hpp"
 
 #include <algorithm>
 #include <minIni.h>
@@ -14,7 +15,6 @@
 namespace sphaira::ftpsrv {
 namespace {
 
-#if ENABLE_NETWORK_INSTALL
 struct InstallSharedData {
     Mutex mutex;
     std::deque<std::string> queued_files;
@@ -27,11 +27,8 @@ struct InstallSharedData {
     bool in_progress;
     bool enabled;
 };
-#endif
 
 const char* INI_PATH = "/config/ftpsrv/config.ini";
-constexpr int THREAD_PRIO = PRIO_PREEMPTIVE;
-constexpr int THREAD_CORE = 2;
 FtpSrvConfig g_ftpsrv_config = {0};
 std::atomic_bool g_should_exit = false;
 bool g_is_running{false};
@@ -46,7 +43,6 @@ void ftp_progress_callback(void) {
     sphaira::App::NotifyFlashLed();
 }
 
-#if ENABLE_NETWORK_INSTALL
 InstallSharedData g_shared_data{};
 
 const char* SUPPORTED_EXT[] = {
@@ -277,10 +273,72 @@ FtpVfs g_vfs_install = {
     .rmdir = vfs_install_rmdir,
     .rename = vfs_install_rename,
 };
-#endif
 
 void loop(void* arg) {
     log_write("[FTP] loop entered\n");
+
+    // load config.
+    {
+        SCOPED_MUTEX(&g_mutex);
+
+        g_ftpsrv_config.log_callback = ftp_log_callback;
+        g_ftpsrv_config.progress_callback = ftp_progress_callback;
+        g_ftpsrv_config.anon = ini_getbool("Login", "anon", 0, INI_PATH);
+        int user_len = ini_gets("Login", "user", "", g_ftpsrv_config.user, sizeof(g_ftpsrv_config.user), INI_PATH);
+        int pass_len = ini_gets("Login", "pass", "", g_ftpsrv_config.pass, sizeof(g_ftpsrv_config.pass), INI_PATH);
+        g_ftpsrv_config.port = ini_getl("Network", "port", 5000, INI_PATH); // 5000 to keep compat with older sphaira
+        g_ftpsrv_config.timeout = ini_getl("Network", "timeout", 0, INI_PATH);
+        g_ftpsrv_config.use_localtime = ini_getbool("Misc", "use_localtime", 0, INI_PATH);
+        bool log_enabled = ini_getbool("Log", "log", 0, INI_PATH);
+
+        // get nx config
+        bool mount_devices = ini_getbool("Nx", "mount_devices", 1, INI_PATH);
+        bool mount_bis = ini_getbool("Nx", "mount_bis", 0, INI_PATH);
+        bool save_writable = ini_getbool("Nx", "save_writable", 0, INI_PATH);
+        g_ftpsrv_config.port = ini_getl("Nx", "app_port", g_ftpsrv_config.port, INI_PATH); // compat
+
+        // get Nx-App overrides
+        g_ftpsrv_config.anon = ini_getbool("Nx-App", "anon", g_ftpsrv_config.anon, INI_PATH);
+        user_len = ini_gets("Nx-App", "user", g_ftpsrv_config.user, g_ftpsrv_config.user, sizeof(g_ftpsrv_config.user), INI_PATH);
+        pass_len = ini_gets("Nx-App", "pass", g_ftpsrv_config.pass, g_ftpsrv_config.pass, sizeof(g_ftpsrv_config.pass), INI_PATH);
+        g_ftpsrv_config.port = ini_getl("Nx-App", "port", g_ftpsrv_config.port, INI_PATH);
+        g_ftpsrv_config.timeout = ini_getl("Nx-App", "timeout", g_ftpsrv_config.timeout, INI_PATH);
+        g_ftpsrv_config.use_localtime = ini_getbool("Nx-App", "use_localtime", g_ftpsrv_config.use_localtime, INI_PATH);
+        log_enabled = ini_getbool("Nx-App", "log", log_enabled, INI_PATH);
+        mount_devices = ini_getbool("Nx-App", "mount_devices", mount_devices, INI_PATH);
+        mount_bis = ini_getbool("Nx-App", "mount_bis", mount_bis, INI_PATH);
+        save_writable = ini_getbool("Nx-App", "save_writable", save_writable, INI_PATH);
+
+        g_should_exit = false;
+        mount_devices = true;
+        g_ftpsrv_config.timeout = 0;
+
+        if (!g_ftpsrv_config.port) {
+            g_ftpsrv_config.port = 5000;
+            log_write("[FTP] no port config, defaulting to 5000\n");
+        }
+
+        // keep compat with older sphaira
+        if (!user_len && !pass_len) {
+            g_ftpsrv_config.anon = true;
+            log_write("[FTP] no user pass, defaulting to anon\n");
+        }
+
+        fsdev_wrapMountSdmc();
+
+        const VfsNxCustomPath custom = {
+            .name = "install",
+            .user = NULL,
+            .func = &g_vfs_install,
+        };
+
+        vfs_nx_init(&custom, mount_devices, save_writable, mount_bis, false);
+    }
+
+    ON_SCOPE_EXIT(
+        vfs_nx_exit();
+        fsdev_wrapUnmountAll();
+    );
 
     while (!g_should_exit) {
         ftpsrv_init(&g_ftpsrv_config);
@@ -305,74 +363,17 @@ bool Init() {
         return false;
     }
 
-    if (R_FAILED(fsdev_wrapMountSdmc())) {
-        log_write("[FTP] cannot mount sdmc\n");
-        return false;
-    }
+    // if (R_FAILED(fsdev_wrapMountSdmc())) {
+    //     log_write("[FTP] cannot mount sdmc\n");
+    //     return false;
+    // }
 
-    g_ftpsrv_config.log_callback = ftp_log_callback;
-    g_ftpsrv_config.progress_callback = ftp_progress_callback;
-    g_ftpsrv_config.anon = ini_getbool("Login", "anon", 0, INI_PATH);
-    int user_len = ini_gets("Login", "user", "", g_ftpsrv_config.user, sizeof(g_ftpsrv_config.user), INI_PATH);
-    int pass_len = ini_gets("Login", "pass", "", g_ftpsrv_config.pass, sizeof(g_ftpsrv_config.pass), INI_PATH);
-    g_ftpsrv_config.port = ini_getl("Network", "port", 5000, INI_PATH); // 5000 to keep compat with older sphaira
-    g_ftpsrv_config.timeout = ini_getl("Network", "timeout", 0, INI_PATH);
-    g_ftpsrv_config.use_localtime = ini_getbool("Misc", "use_localtime", 0, INI_PATH);
-    bool log_enabled = ini_getbool("Log", "log", 0, INI_PATH);
-
-    // get nx config
-    bool mount_devices = ini_getbool("Nx", "mount_devices", 1, INI_PATH);
-    bool mount_bis = ini_getbool("Nx", "mount_bis", 0, INI_PATH);
-    bool save_writable = ini_getbool("Nx", "save_writable", 0, INI_PATH);
-    g_ftpsrv_config.port = ini_getl("Nx", "app_port", g_ftpsrv_config.port, INI_PATH); // compat
-
-    // get Nx-App overrides
-    g_ftpsrv_config.anon = ini_getbool("Nx-App", "anon", g_ftpsrv_config.anon, INI_PATH);
-    user_len = ini_gets("Nx-App", "user", g_ftpsrv_config.user, g_ftpsrv_config.user, sizeof(g_ftpsrv_config.user), INI_PATH);
-    pass_len = ini_gets("Nx-App", "pass", g_ftpsrv_config.pass, g_ftpsrv_config.pass, sizeof(g_ftpsrv_config.pass), INI_PATH);
-    g_ftpsrv_config.port = ini_getl("Nx-App", "port", g_ftpsrv_config.port, INI_PATH);
-    g_ftpsrv_config.timeout = ini_getl("Nx-App", "timeout", g_ftpsrv_config.timeout, INI_PATH);
-    g_ftpsrv_config.use_localtime = ini_getbool("Nx-App", "use_localtime", g_ftpsrv_config.use_localtime, INI_PATH);
-    log_enabled = ini_getbool("Nx-App", "log", log_enabled, INI_PATH);
-    mount_devices = ini_getbool("Nx-App", "mount_devices", mount_devices, INI_PATH);
-    mount_bis = ini_getbool("Nx-App", "mount_bis", mount_bis, INI_PATH);
-    save_writable = ini_getbool("Nx-App", "save_writable", save_writable, INI_PATH);
-
-    g_should_exit = false;
-    mount_devices = true;
-    g_ftpsrv_config.timeout = 0;
-
-    if (!g_ftpsrv_config.port) {
-        log_write("[FTP] no port config\n");
-        return false;
-    }
-
-    // keep compat with older sphaira
-    if (!user_len && !pass_len) {
-        log_write("[FTP] no user pass\n");
-        g_ftpsrv_config.anon = true;
-    }
-
-#if ENABLE_NETWORK_INSTALL
-    const VfsNxCustomPath custom = {
-        .name = "install",
-        .user = NULL,
-        .func = &g_vfs_install,
-    };
-
-    vfs_nx_init(&custom, mount_devices, save_writable, mount_bis, false);
-#else
-    vfs_nx_init(NULL, mount_devices, save_writable, mount_bis, false);
-#endif
+    // todo: replace everything with ini_browse for faster loading.
+    // or load everything in the init thread.
 
     Result rc;
-    if (R_FAILED(rc = threadCreate(&g_thread, loop, nullptr, nullptr, 1024*16, THREAD_PRIO, THREAD_CORE))) {
+    if (R_FAILED(rc = utils::CreateThread(&g_thread, loop, nullptr, 1024*16))) {
         log_write("[FTP] failed to create nxlink thread: 0x%X\n", rc);
-        return false;
-    }
-
-    if (R_FAILED(rc = svcSetThreadCoreMask(g_thread.handle, THREAD_CORE, THREAD_AFFINITY_DEFAULT(THREAD_CORE)))) {
-        log_write("[FTP] failed to set core mask: 0x%X\n", rc);
         return false;
     }
 
@@ -398,8 +399,6 @@ void Exit() {
     threadWaitForExit(&g_thread);
     threadClose(&g_thread);
 
-    vfs_nx_exit();
-    fsdev_wrapUnmountAll();
     memset(&g_ftpsrv_config, 0, sizeof(g_ftpsrv_config));
 
     log_write("[FTP] exitied\n");
@@ -410,7 +409,6 @@ void ExitSignal() {
     g_should_exit = true;
 }
 
-#if ENABLE_NETWORK_INSTALL
 void InitInstallMode(const OnInstallStart& on_start, const OnInstallWrite& on_write, const OnInstallClose& on_close) {
     SCOPED_MUTEX(&g_shared_data.mutex);
     g_shared_data.on_start = on_start;
@@ -423,7 +421,6 @@ void DisableInstallMode() {
     SCOPED_MUTEX(&g_shared_data.mutex);
     g_shared_data.enabled = false;
 }
-#endif
 
 unsigned GetPort() {
     SCOPED_MUTEX(&g_mutex);

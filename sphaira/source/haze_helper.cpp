@@ -12,7 +12,6 @@
 namespace sphaira::haze {
 namespace {
 
-#if ENABLE_NETWORK_INSTALL
 struct InstallSharedData {
     Mutex mutex;
     std::string current_file;
@@ -25,7 +24,6 @@ struct InstallSharedData {
     bool in_progress;
     bool enabled;
 };
-#endif
 
 constexpr int THREAD_PRIO = 0x20;
 constexpr int THREAD_CORE = 2;
@@ -33,7 +31,6 @@ std::atomic_bool g_should_exit = false;
 bool g_is_running{false};
 Mutex g_mutex{};
 
-#if ENABLE_NETWORK_INSTALL
 InstallSharedData g_shared_data{};
 
 const char* SUPPORTED_EXT[] = {
@@ -58,7 +55,6 @@ void on_thing() {
         }
     }
 }
-#endif
 
 struct FsProxyBase : ::haze::FileSystemProxyImpl {
     FsProxyBase(const char* name, const char* display_name) : m_name{name}, m_display_name{display_name} {
@@ -411,7 +407,6 @@ struct FsDevNullProxy final : FsProxyVfs {
     }
 };
 
-#if ENABLE_NETWORK_INSTALL
 struct FsInstallProxy final : FsProxyVfs {
     using FsProxyVfs::FsProxyVfs;
 
@@ -537,7 +532,6 @@ struct FsInstallProxy final : FsProxyVfs {
         return false;
     }
 };
-#endif
 
 ::haze::FsEntries g_fs_entries{};
 
@@ -582,9 +576,7 @@ bool Init() {
     g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeImage>(FsImageDirectoryId_Nand), "image_nand", "Image nand"));
     g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeImage>(FsImageDirectoryId_Sd), "image_sd", "Image sd"));
     g_fs_entries.emplace_back(std::make_shared<FsDevNullProxy>("DevNull", "DevNull (Speed Test)"));
-#if ENABLE_NETWORK_INSTALL
     g_fs_entries.emplace_back(std::make_shared<FsInstallProxy>("install", "Install (NSP, XCI, NSZ, XCZ)"));
-#endif
 
     g_should_exit = false;
     if (!::haze::Initialize(haze_callback, THREAD_PRIO, THREAD_CORE, g_fs_entries)) {
@@ -593,6 +585,11 @@ bool Init() {
 
     log_write("[MTP] started\n");
     return g_is_running = true;
+}
+
+bool IsInit() {
+    SCOPED_MUTEX(&g_mutex);
+    return g_is_running;
 }
 
 void Exit() {
@@ -609,7 +606,6 @@ void Exit() {
     log_write("[MTP] exitied\n");
 }
 
-#if ENABLE_NETWORK_INSTALL
 void InitInstallMode(const OnInstallStart& on_start, const OnInstallWrite& on_write, const OnInstallClose& on_close) {
     SCOPED_MUTEX(&g_shared_data.mutex);
     g_shared_data.on_start = on_start;
@@ -622,6 +618,5 @@ void DisableInstallMode() {
     SCOPED_MUTEX(&g_shared_data.mutex);
     g_shared_data.enabled = false;
 }
-#endif
 
 } // namespace sphaira::haze

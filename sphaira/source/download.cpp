@@ -4,6 +4,7 @@
 #include "evman.hpp"
 #include "fs.hpp"
 #include "app.hpp"
+#include "utils/thread.hpp"
 
 #include <switch.h>
 #include <cstring>
@@ -32,8 +33,8 @@ namespace {
 constexpr auto API_AGENT = "TotalJustice";
 constexpr u64 CHUNK_SIZE = 1024*1024;
 constexpr auto MAX_THREADS = 4;
-constexpr int THREAD_PRIO = PRIO_PREEMPTIVE;
-constexpr int THREAD_CORE = 1;
+constexpr int THREAD_PRIO = 0x2F;
+constexpr int THREAD_CORE = 2;
 
 std::atomic_bool g_running{};
 CURLSH* g_curl_share{};
@@ -262,14 +263,17 @@ struct ThreadEntry {
         R_UNLESS(m_curl != nullptr, Result_CurlFailedEasyInit);
 
         ueventCreate(&m_uevent, true);
-        R_TRY(threadCreate(&m_thread, ThreadFunc, this, nullptr, 1024*32, THREAD_PRIO, THREAD_CORE));
-        R_TRY(svcSetThreadCoreMask(m_thread.handle, THREAD_CORE, THREAD_AFFINITY_DEFAULT(THREAD_CORE)));
+        R_TRY(utils::CreateThread(&m_thread, ThreadFunc, this, 1024*32));
         R_TRY(threadStart(&m_thread));
         R_SUCCEED();
     }
 
-    void Close() {
+    void SignalClose() {
         ueventSignal(&m_uevent);
+    }
+
+    void Close() {
+        SignalClose();
         threadWaitForExit(&m_thread);
         threadClose(&m_thread);
         if (m_curl) {
@@ -320,13 +324,17 @@ struct ThreadQueue {
 
     auto Create() -> Result {
         ueventCreate(&m_uevent, true);
-        R_TRY(threadCreate(&m_thread, ThreadFunc, this, nullptr, 1024*32, THREAD_PRIO, THREAD_CORE));
+        R_TRY(utils::CreateThread(&m_thread, ThreadFunc, this, 1024*32));
         R_TRY(threadStart(&m_thread));
         R_SUCCEED();
     }
 
-    void Close() {
+    void SignalClose() {
         ueventSignal(&m_uevent);
+    }
+
+    void Close() {
+        SignalClose();
         threadWaitForExit(&m_thread);
         threadClose(&m_thread);
     }
@@ -1049,6 +1057,12 @@ void ThreadEntry::ThreadFunc(void* p) {
 
 void ThreadQueue::ThreadFunc(void* p) {
     auto data = static_cast<ThreadQueue*>(p);
+
+    if (!g_cache.init()) {
+        log_write("failed to init json cache\n");
+    }
+    ON_SCOPE_EXIT(g_cache.exit());
+
     while (g_running) {
         auto rc = waitSingle(waiterForUEvent(&data->m_uevent), UINT64_MAX);
         log_write("[thread queue] woke up\n");
@@ -1141,15 +1155,21 @@ auto Init() -> bool {
 
     log_write("finished creating threads\n");
 
-    if (!g_cache.init()) {
-        log_write("failed to init json cache\n");
-    }
-
     return true;
 }
 
-void Exit() {
+void ExitSignal() {
     g_running = false;
+
+    g_thread_queue.SignalClose();
+
+    for (auto& entry : g_threads) {
+        entry.SignalClose();
+    }
+}
+
+void Exit() {
+    ExitSignal();
 
     g_thread_queue.Close();
 
@@ -1168,7 +1188,6 @@ void Exit() {
     }
 
     curl_global_cleanup();
-    g_cache.exit();
 }
 
 auto ToMemory(const Api& e) -> ApiResult {

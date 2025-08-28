@@ -197,7 +197,7 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
         if (touch && m_index == i) {
             FireAction(Button::A);
         } else {
-            App::PlaySoundEffect(SoundEffect_Focus);
+            App::PlaySoundEffect(SoundEffect::Focus);
             SetIndex(i);
         }
     });
@@ -354,16 +354,16 @@ void DownloadEntries(const Entry& entry) {
 
         PopupList::Items entry_items;
         for (const auto& e : gh_entries) {
-            std::string str;
+            std::string str = " [" + e.published_at.substr(0, 10) + "]";
+
             if (!e.name.empty()) {
-                str += e.name + "   |  ";
+                str += " " + e.name;
             } else {
-                str += e.tag_name + "   |  ";
+                str += " " + e.tag_name;
             }
             if (e.prerelease) {
                 str += " (Pre-Release)";
             }
-            str += " [" + e.published_at.substr(0, 10) + "]";
 
             entry_items.emplace_back(str);
         }
@@ -396,8 +396,7 @@ void DownloadEntries(const Entry& entry) {
                 }
 
                 if (!using_name || found) {
-                    std::string str = p.name + "   |  ";
-                    str += " [" + p.updated_at.substr(0, 10) + "]";
+                    std::string str = " [" + p.updated_at.substr(0, 10) + "]" + " " + p.name;
 
                     asset_items.emplace_back(str);
                     api_assets.emplace_back(p);

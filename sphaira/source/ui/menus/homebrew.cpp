@@ -1,13 +1,19 @@
 #include "app.hpp"
 #include "log.hpp"
 #include "fs.hpp"
+
 #include "ui/menus/homebrew.hpp"
 #include "ui/menus/filebrowser.hpp"
+
 #include "ui/sidebar.hpp"
 #include "ui/error_box.hpp"
 #include "ui/option_box.hpp"
 #include "ui/progress_box.hpp"
 #include "ui/nvg_util.hpp"
+
+#include "utils/devoptab.hpp"
+#include "utils/profile.hpp"
+
 #include "owo.hpp"
 #include "defines.hpp"
 #include "i18n.hpp"
@@ -84,7 +90,7 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
         if (touch && m_index == i) {
             FireAction(Button::A);
         } else {
-            App::PlaySoundEffect(SoundEffect_Focus);
+            App::PlaySoundEffect(SoundEffect::Focus);
             SetIndex(i);
         }
     });
@@ -192,10 +198,11 @@ void Menu::InstallHomebrew() {
 }
 
 void Menu::ScanHomebrew() {
-    TimeStamp ts;
     FreeEntries();
-    nro_scan("/switch", m_entries);
-    log_write("nros found: %zu time_taken: %.2f\n", m_entries.size(), ts.GetSecondsD());
+    {
+        SCOPED_TIMESTAMP("nro scan");
+        nro_scan("/switch", m_entries);
+    }
 
     struct IniUser {
         std::vector<NroEntry>& entires;
@@ -458,6 +465,13 @@ void Menu::DisplayOptions() {
         }, "Shows all hidden homebrew."_i18n);
     });
 
+    // for testing stuff.
+    #if 0
+    options->Add<SidebarEntrySlider>("Test", 1, 0, 2, 10, [](auto& v_out){
+
+    });
+    #endif
+
     if (!m_entries_current.empty()) {
         #if 0
         options->Add<SidebarEntryCallback>("Info"_i18n, [this](){
@@ -472,14 +486,10 @@ void Menu::DisplayOptions() {
         },  "Hides the selected homebrew.\n\n"
             "To unhide homebrew, enable \"Show hidden\" in the sort options."_i18n);
 
-        auto mount_option = options->Add<SidebarEntryCallback>("Mount RomFS"_i18n, [this](){
-            const auto rc = MountRomfsFs();
-            App::PushErrorBox(rc, "Failed to mount NRO RomFS"_i18n);
-        },  "Mounts the homebrew RomFS"_i18n);
-
-        mount_option->Depends([this](){
-            return GetEntry().romfs_offset && GetEntry().romfs_size;
-        },  "This homebrew does not have a RomFS"_i18n);
+        options->Add<SidebarEntryCallback>("Mount NRO Fs"_i18n, [this](){
+            const auto rc = MountNroFs();
+            App::PushErrorBox(rc, "Failed to mount NRO FileSystem"_i18n);
+        },  "Mounts the NRO FileSystem (icon, nacp and RomFS)."_i18n);
 
         options->Add<SidebarEntryCallback>("Delete"_i18n, [this](){
             const auto buf = "Are you sure you want to delete "_i18n + GetEntry().path.toString() + "?";
@@ -510,41 +520,17 @@ void Menu::DisplayOptions() {
     }
 }
 
-struct NroRomFS final : fs::FsStdio {
-    NroRomFS(const fs::FsPath& name, const fs::FsPath& root) : FsStdio{true, root}, m_name{name} {
-
-    }
-
-    ~NroRomFS() {
-        romfsUnmount(m_name);
-    }
-
-    const fs::FsPath m_name;
-};
-
-Result Menu::MountRomfsFs() {
-    static const char* name = "nro_romfs";
-    static const char* root = "nro_romfs:/";
+Result Menu::MountNroFs() {
     const auto& e = GetEntry();
 
-    // todo: add errors for when nro doesn't have romfs.
-    R_UNLESS(e.romfs_offset, 0x1);
-    R_UNLESS(e.romfs_size, 0x1);
+    fs::FsPath root;
+    R_TRY(devoptab::MountNro(App::GetApp()->m_fs.get(), e.path, root));
 
-    FsFile file;
-    R_TRY(fsFsOpenFile(fsdevGetDeviceFileSystem("sdmc"), e.path, FsOpenMode_Read, &file));
-
-    const auto rc = romfsMountFromFile(file, e.romfs_offset, name);
-    if (R_FAILED(rc)) {
-        fsFileClose(&file);
-        R_THROW(rc);
-    }
-
-    auto fs = std::make_shared<filebrowser::FsStdioWrapper>(root, [](){
-        romfsUnmount(name);
+    auto fs = std::make_shared<filebrowser::FsStdioWrapper>(root, [root](){
+        devoptab::UmountNro(root);
     });
 
-    filebrowser::MountFsHelper(fs, e.GetName());
+    filebrowser::MountFsHelper(fs, root);
     R_SUCCEED();
 }
 

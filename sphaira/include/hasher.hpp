@@ -14,6 +14,9 @@ enum class Type {
     Md5,
     Sha1,
     Sha256,
+    Null,
+    Deflate,
+    Zstd,
 };
 
 struct BaseSource {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fs.hpp"
+#include "yati/source/base.hpp"
 
 #include <switch.h>
 #include <vector>
@@ -81,5 +82,17 @@ static constexpr inline bool HasRequiredSystemVersion(const NcmContentMetaKey *k
 
 // fills program id and out path of the control nca.
 Result GetFsPathFromContentId(NcmContentStorage* cs, const NcmContentMetaKey& key, const NcmContentId& id, u64* out_program_id, fs::FsPath* out_path);
+
+// helper for reading nca from ncm.
+struct NcmSource final : yati::source::Base {
+    NcmSource(NcmContentStorage* cs, const NcmContentId* id);
+    Result Read(void* buf, s64 off, s64 size, u64* bytes_read) override;
+    Result GetSize(s64* size);
+
+private:
+    NcmContentStorage m_cs;
+    NcmContentId m_id;
+    s64 m_size{};
+};
 
 } // namespace sphaira::ncm

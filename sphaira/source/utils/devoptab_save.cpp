@@ -262,7 +262,7 @@ std::array<std::unique_ptr<Entry>, common::MAX_ENTRIES> g_entries;
 
 } // namespace
 
-Result MountFromSavePath(u64 id, fs::FsPath& out_path) {
+Result MountSaveSystem(u64 id, fs::FsPath& out_path) {
     SCOPED_MUTEX(&g_mutex);
 
     // check if we already have the save mounted.

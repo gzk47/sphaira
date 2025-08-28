@@ -3,6 +3,7 @@
 #include "defines.hpp"
 #include "app.hpp"
 #include "minizip_helper.hpp"
+#include "utils/thread.hpp"
 
 #include <vector>
 #include <algorithm>
@@ -72,13 +73,13 @@ public:
 };
 
 struct ThreadData {
-    ThreadData(ui::ProgressBox* _pbox, s64 size, const ReadCallback& _rfunc, const WriteCallback& _wfunc, u64 buffer_size);
+    ThreadData(ui::ProgressBox* _pbox, s64 size, const ReadCallback& _rfunc, const DecompressCallback& _dfunc, const WriteCallback& _wfunc, u64 buffer_size);
 
     auto GetResults() volatile -> Result;
     void WakeAllThreads();
 
     auto IsAnyRunning() volatile const -> bool {
-        return read_running || write_running;
+        return read_running || decompress_running || write_running;
     }
 
     auto GetWriteOffset() volatile const -> s64 {
@@ -100,6 +101,17 @@ struct ThreadData {
     void SetReadResult(Result result) {
         read_result = result;
 
+        // wake up decompress thread as it may be waiting on data that never comes.
+        condvarWakeOne(std::addressof(can_decompress));
+
+        if (R_FAILED(result)) {
+            ueventSignal(GetDoneEvent());
+        }
+    }
+
+    void SetDecompressResult(Result result) {
+        decompress_result = result;
+
         // wake up write thread as it may be waiting on data that never comes.
         condvarWakeOne(std::addressof(can_write));
 
@@ -110,6 +122,10 @@ struct ThreadData {
 
     void SetWriteResult(Result result) {
         write_result = result;
+
+        // wake up decompress thread as it may be waiting on data that never comes.
+        condvarWakeOne(std::addressof(can_decompress_write));
+
         ueventSignal(GetDoneEvent());
     }
 
@@ -122,9 +138,12 @@ struct ThreadData {
 
     Result Pull(void* data, s64 size, u64* bytes_read);
     Result readFuncInternal();
+    Result decompressFuncInternal();
     Result writeFuncInternal();
 
 private:
+    Result SetDecompressBuf(std::vector<u8>& buf, s64 off, s64 size);
+    Result GetDecompressBuf(std::vector<u8>& buf_out, s64& off_out);
     Result SetWriteBuf(std::vector<u8>& buf, s64 size);
     Result GetWriteBuf(std::vector<u8>& buf_out, s64& off_out);
     Result SetPullBuf(std::vector<u8>& buf, s64 size);
@@ -136,21 +155,30 @@ private:
     // these need to be copied
     ui::ProgressBox* const pbox;
     const ReadCallback& rfunc;
+    const DecompressCallback& dfunc;
     const WriteCallback& wfunc;
 
     // these need to be created
-    Mutex mutex{};
+    Mutex read_mutex{};
+    Mutex write_mutex{};
+
     Mutex pull_mutex{};
 
     CondVar can_read{};
     CondVar can_write{};
+    CondVar can_decompress{};
+    CondVar can_decompress_write{};
+
+    // only used when pull is active.
     CondVar can_pull{};
     CondVar can_pull_write{};
 
     UEvent m_uevent_done{};
     UEvent m_uevent_progres{};
 
+    RingBuf<2> read_buffers{};
     RingBuf<2> write_buffers{};
+
     std::vector<u8> pull_buffer{};
     s64 pull_buffer_offset{};
 
@@ -159,27 +187,35 @@ private:
 
     // these are shared between threads
     std::atomic<s64> read_offset{};
+    std::atomic<s64> decompress_offset{};
     std::atomic<s64> write_offset{};
 
     std::atomic<Result> read_result{};
+    std::atomic<Result> decompress_result{};
     std::atomic<Result> write_result{};
     std::atomic<Result> pull_result{};
 
     std::atomic_bool read_running{true};
+    std::atomic_bool decompress_running{true};
     std::atomic_bool write_running{true};
 };
 
-ThreadData::ThreadData(ui::ProgressBox* _pbox, s64 size, const ReadCallback& _rfunc, const WriteCallback& _wfunc, u64 buffer_size)
+ThreadData::ThreadData(ui::ProgressBox* _pbox, s64 size, const ReadCallback& _rfunc, const DecompressCallback& _dfunc, const WriteCallback& _wfunc, u64 buffer_size)
 : pbox{_pbox}
 , rfunc{_rfunc}
+, dfunc{_dfunc}
 , wfunc{_wfunc}
 , read_buffer_size{buffer_size}
 , write_size{size} {
-    mutexInit(std::addressof(mutex));
+    mutexInit(std::addressof(read_mutex));
+    mutexInit(std::addressof(write_mutex));
     mutexInit(std::addressof(pull_mutex));
 
     condvarInit(std::addressof(can_read));
+    condvarInit(std::addressof(can_decompress));
+    condvarInit(std::addressof(can_decompress_write));
     condvarInit(std::addressof(can_write));
+
     condvarInit(std::addressof(can_pull));
     condvarInit(std::addressof(can_pull_write));
 
@@ -190,6 +226,7 @@ ThreadData::ThreadData(ui::ProgressBox* _pbox, s64 size, const ReadCallback& _rf
 auto ThreadData::GetResults() volatile -> Result {
     R_TRY(pbox->ShouldExitResult());
     R_TRY(read_result.load());
+    R_TRY(decompress_result.load());
     R_TRY(write_result.load());
     R_TRY(pull_result.load());
     R_SUCCEED();
@@ -198,44 +235,80 @@ auto ThreadData::GetResults() volatile -> Result {
 void ThreadData::WakeAllThreads() {
     condvarWakeAll(std::addressof(can_read));
     condvarWakeAll(std::addressof(can_write));
+    condvarWakeAll(std::addressof(can_decompress));
+    condvarWakeAll(std::addressof(can_decompress_write));
     condvarWakeAll(std::addressof(can_pull));
     condvarWakeAll(std::addressof(can_pull_write));
 
-    mutexUnlock(std::addressof(mutex));
+    mutexUnlock(std::addressof(read_mutex));
+    mutexUnlock(std::addressof(write_mutex));
     mutexUnlock(std::addressof(pull_mutex));
+}
+
+Result ThreadData::SetDecompressBuf(std::vector<u8>& buf, s64 off, s64 size) {
+    buf.resize(size);
+
+    mutexLock(std::addressof(read_mutex));
+    if (!read_buffers.ringbuf_free()) {
+        if (!write_running) {
+            R_SUCCEED();
+        }
+        R_TRY(condvarWait(std::addressof(can_read), std::addressof(read_mutex)));
+    }
+
+    ON_SCOPE_EXIT(mutexUnlock(std::addressof(read_mutex)));
+    R_TRY(GetResults());
+    read_buffers.ringbuf_push(buf, off);
+    return condvarWakeOne(std::addressof(can_decompress));
+}
+
+Result ThreadData::GetDecompressBuf(std::vector<u8>& buf_out, s64& off_out) {
+    mutexLock(std::addressof(read_mutex));
+    if (!read_buffers.ringbuf_size()) {
+        if (!read_running) {
+            buf_out.resize(0);
+            R_SUCCEED();
+        }
+        R_TRY(condvarWait(std::addressof(can_decompress), std::addressof(read_mutex)));
+    }
+
+    ON_SCOPE_EXIT(mutexUnlock(std::addressof(read_mutex)));
+    R_TRY(GetResults());
+    read_buffers.ringbuf_pop(buf_out, off_out);
+    return condvarWakeOne(std::addressof(can_read));
 }
 
 Result ThreadData::SetWriteBuf(std::vector<u8>& buf, s64 size) {
     buf.resize(size);
 
-    mutexLock(std::addressof(mutex));
+    mutexLock(std::addressof(write_mutex));
     if (!write_buffers.ringbuf_free()) {
-        if (!write_running) {
+        if (!decompress_running) {
             R_SUCCEED();
         }
-        R_TRY(condvarWait(std::addressof(can_read), std::addressof(mutex)));
+        R_TRY(condvarWait(std::addressof(can_decompress_write), std::addressof(write_mutex)));
     }
 
-    ON_SCOPE_EXIT(mutexUnlock(std::addressof(mutex)));
+    ON_SCOPE_EXIT(mutexUnlock(std::addressof(write_mutex)));
     R_TRY(GetResults());
     write_buffers.ringbuf_push(buf, 0);
     return condvarWakeOne(std::addressof(can_write));
 }
 
 Result ThreadData::GetWriteBuf(std::vector<u8>& buf_out, s64& off_out) {
-    mutexLock(std::addressof(mutex));
+    mutexLock(std::addressof(write_mutex));
     if (!write_buffers.ringbuf_size()) {
-        if (!read_running) {
+        if (!decompress_running) {
             buf_out.resize(0);
             R_SUCCEED();
         }
-        R_TRY(condvarWait(std::addressof(can_write), std::addressof(mutex)));
+        R_TRY(condvarWait(std::addressof(can_write), std::addressof(write_mutex)));
     }
 
-    ON_SCOPE_EXIT(mutexUnlock(std::addressof(mutex)));
+    ON_SCOPE_EXIT(mutexUnlock(std::addressof(write_mutex)));
     R_TRY(GetResults());
     write_buffers.ringbuf_pop(buf_out, off_out);
-    return condvarWakeOne(std::addressof(can_read));
+    return condvarWakeOne(std::addressof(can_decompress_write));
 }
 
 Result ThreadData::SetPullBuf(std::vector<u8>& buf, s64 size) {
@@ -296,6 +369,7 @@ Result ThreadData::readFuncInternal() {
 
     while (this->read_offset < this->write_size && R_SUCCEEDED(this->GetResults())) {
         // read more data
+        const auto buffer_offset = this->read_offset.load();
         s64 read_size = this->read_buffer_size;
 
         u64 bytes_read{};
@@ -306,10 +380,79 @@ Result ThreadData::readFuncInternal() {
         }
 
         auto buf_size = bytes_read;
-        R_TRY(this->SetWriteBuf(buf, buf_size));
+        R_TRY(this->SetDecompressBuf(buf, buffer_offset, buf_size));
     }
 
     log_write("finished read thread success!\n");
+    R_SUCCEED();
+}
+
+// read thread reads all data from the source
+Result ThreadData::decompressFuncInternal() {
+    ON_SCOPE_EXIT( decompress_running = false; );
+
+    std::vector<u8> buf{};
+    std::vector<u8> temp_buf{};
+    buf.reserve(this->read_buffer_size);
+    temp_buf.reserve(this->read_buffer_size);
+    const auto temp_buf_flush_max = this->read_buffer_size / 2;
+
+    while (this->decompress_offset < this->write_size && R_SUCCEEDED(this->GetResults())) {
+        s64 decompress_buf_off{};
+        R_TRY(this->GetDecompressBuf(buf, decompress_buf_off));
+        if (buf.empty()) {
+            log_write("exiting decompress func early because no data was received\n");
+            break;
+        }
+
+        if (this->dfunc) {
+            R_TRY(this->dfunc(buf.data(), decompress_buf_off, buf.size(), [&](const void* _data, s64 size) -> Result {
+                auto data = (const u8*)_data;
+
+                while (size) {
+                    const auto block_off = temp_buf.size();
+                    const auto rsize = std::min<s64>(size, temp_buf_flush_max - block_off);
+
+                    temp_buf.resize(block_off + rsize);
+                    std::memcpy(temp_buf.data() + block_off, data, rsize);
+
+                    if (temp_buf.size() == temp_buf_flush_max) {
+                        // log_write("flushing data: %zu %.2f MiB\n", temp_buf.size(), temp_buf.size() / 1024.0 / 1024.0);
+                        R_TRY(this->SetWriteBuf(temp_buf, temp_buf.size()));
+                        temp_buf.resize(0);
+                    }
+
+                    size -= rsize;
+                    this->decompress_offset += rsize;
+                    data += rsize;
+
+                    // const auto buf_off = temp_buf.size();
+                    // temp_buf.resize(buf_off + size);
+                    // std::memcpy(temp_buf.data() + buf_off, data, size);
+                    // this->decompress_offset += size;
+
+                    // if (temp_buf.size() >= temp_buf_flush_max) {
+                    //     // log_write("flushing data: %zu %.2f MiB\n", temp_buf.size(), temp_buf.size() / 1024.0 / 1024.0);
+                    //     R_TRY(this->SetWriteBuf(temp_buf, temp_buf.size()));
+                    //     temp_buf.resize(0);
+                    // }
+                }
+
+                R_SUCCEED();
+            }));
+        } else {
+            this->decompress_offset += buf.size();
+            R_TRY(this->SetWriteBuf(buf, buf.size()));
+        }
+    }
+
+    // flush buffer.
+    if (!temp_buf.empty()) {
+        log_write("flushing data: %zu\n", temp_buf.size());
+        R_TRY(this->SetWriteBuf(temp_buf, temp_buf.size()));
+    }
+
+    log_write("finished decompress thread success!\n");
     R_SUCCEED();
 }
 
@@ -349,17 +492,20 @@ void readFunc(void* d) {
     log_write("read thread returned now\n");
 }
 
+void decompressFunc(void* d) {
+    log_write("hello decomp thread func\n");
+    auto t = static_cast<ThreadData*>(d);
+    t->SetDecompressResult(t->decompressFuncInternal());
+    log_write("decompress thread returned now\n");
+}
+
 void writeFunc(void* d) {
     auto t = static_cast<ThreadData*>(d);
     t->SetWriteResult(t->writeFuncInternal());
     log_write("write thread returned now\n");
 }
 
-auto GetAlternateCore(int id) {
-    return id == 1 ? 2 : 1;
-}
-
-Result TransferInternal(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfunc, const WriteCallback& wfunc, const StartCallback2& sfunc, Mode mode, u64 buffer_size = NORMAL_BUFFER_SIZE) {
+Result TransferInternal(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfunc, const DecompressCallback& dfunc, const WriteCallback& wfunc, const StartCallback2& sfunc, Mode mode, u64 buffer_size = NORMAL_BUFFER_SIZE) {
     const auto is_file_based_emummc = App::IsFileBaseEmummc();
 
     if (is_file_based_emummc) {
@@ -403,27 +549,30 @@ Result TransferInternal(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfu
         R_SUCCEED();
     }
     else {
-        const auto WRITE_THREAD_CORE = sfunc ? pbox->GetCpuId() : GetAlternateCore(pbox->GetCpuId());
-        const auto READ_THREAD_CORE = GetAlternateCore(WRITE_THREAD_CORE);
-
-        ThreadData t_data{pbox, size, rfunc, wfunc, buffer_size};
+        ThreadData t_data{pbox, size, rfunc, dfunc, wfunc, buffer_size};
 
         Thread t_read{};
-        R_TRY(threadCreate(&t_read, readFunc, std::addressof(t_data), nullptr, 1024*256, 0x3B, READ_THREAD_CORE));
+        R_TRY(utils::CreateThread(&t_read, readFunc, std::addressof(t_data)));
         ON_SCOPE_EXIT(threadClose(&t_read));
 
+        Thread t_decompress{};
+        R_TRY(utils::CreateThread(&t_decompress, decompressFunc, std::addressof(t_data)));
+        ON_SCOPE_EXIT(threadClose(&t_decompress));
+
         Thread t_write{};
-        R_TRY(threadCreate(&t_write, writeFunc, std::addressof(t_data), nullptr, 1024*256, 0x3B, WRITE_THREAD_CORE));
+        R_TRY(utils::CreateThread(&t_write, writeFunc, std::addressof(t_data)));
         ON_SCOPE_EXIT(threadClose(&t_write));
 
         const auto start_threads = [&]() -> Result {
             log_write("starting threads\n");
             R_TRY(threadStart(std::addressof(t_read)));
+            R_TRY(threadStart(std::addressof(t_decompress)));
             R_TRY(threadStart(std::addressof(t_write)));
             R_SUCCEED();
         };
 
         ON_SCOPE_EXIT(threadWaitForExit(std::addressof(t_read)));
+        ON_SCOPE_EXIT(threadWaitForExit(std::addressof(t_decompress)));
         ON_SCOPE_EXIT(threadWaitForExit(std::addressof(t_write)));
 
         if (sfunc) {
@@ -463,6 +612,8 @@ Result TransferInternal(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfu
 
             if (R_FAILED(waitSingleHandle(t_read.handle, 1000))) {
                 continue;
+            } else if (R_FAILED(waitSingleHandle(t_decompress.handle, 1000))) {
+                continue;
             } else if (R_FAILED(waitSingleHandle(t_write.handle, 1000))) {
                 continue;
             }
@@ -485,18 +636,22 @@ Result TransferInternal(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfu
 } // namespace
 
 Result Transfer(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfunc, const WriteCallback& wfunc, Mode mode) {
-    return TransferInternal(pbox, size, rfunc, wfunc, nullptr, mode);
+    return TransferInternal(pbox, size, rfunc, nullptr, wfunc, nullptr, mode);
+}
+
+Result Transfer(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfunc, const DecompressCallback& dfunc, const WriteCallback& wfunc, Mode mode) {
+    return TransferInternal(pbox, size, rfunc, dfunc, wfunc, nullptr, mode);
 }
 
 Result TransferPull(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfunc, const StartCallback& sfunc, Mode mode) {
-    return TransferInternal(pbox, size, rfunc, nullptr, [sfunc](StartThreadCallback start, PullCallback pull) -> Result {
+    return TransferInternal(pbox, size, rfunc, nullptr, nullptr, [sfunc](StartThreadCallback start, PullCallback pull) -> Result {
         R_TRY(start());
         return sfunc(pull);
     }, mode);
 }
 
 Result TransferPull(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfunc, const StartCallback2& sfunc, Mode mode) {
-    return TransferInternal(pbox, size, rfunc, nullptr, sfunc, mode);
+    return TransferInternal(pbox, size, rfunc, nullptr, nullptr, sfunc, mode);
 }
 
 Result TransferUnzip(ui::ProgressBox* pbox, void* zfile, fs::Fs* fs, const fs::FsPath& path, s64 size, u32 crc32, Mode mode) {
@@ -537,6 +692,7 @@ Result TransferUnzip(ui::ProgressBox* pbox, void* zfile, fs::Fs* fs, const fs::F
             *bytes_read = result;
             R_SUCCEED();
         },
+        nullptr,
         [&](const void* data, s64 off, s64 size) -> Result {
             return f.Write(off, data, size, FsWriteOption_None);
         },
@@ -568,6 +724,7 @@ Result TransferZip(ui::ProgressBox* pbox, void* zfile, fs::Fs* fs, const fs::FsP
             }
             return rc;
         },
+        nullptr,
         [&](const void* data, s64 off, s64 size) -> Result {
             if (ZIP_OK != zipWriteInFileInZip(zfile, data, size)) {
                 log_write("failed to write zip file: %s\n", path.s);

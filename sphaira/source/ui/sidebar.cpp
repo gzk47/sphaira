@@ -154,6 +154,52 @@ void SidebarEntryBool::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, 
     SidebarEntryBase::DrawEntry(vg, theme, m_title, m_option ? m_true_str : m_false_str, m_option);
 }
 
+SidebarEntrySlider::SidebarEntrySlider(const std::string& title, float value, float min, float max, int steps, const Callback& cb, const std::string& info)
+: SidebarEntryBase{title, info}
+, m_value{value}
+, m_min{min}
+, m_max{max}
+, m_steps{steps}
+, m_callback{cb} {
+    SetAction(Button::LEFT, Action{[this](){
+        if (!IsEnabled()) {
+            DependsClick();
+        } else {
+            m_value = std::clamp(m_value - m_inc, m_min, m_max);
+            // m_callback(m_option);
+        } }
+    });
+    SetAction(Button::RIGHT, Action{[this](){
+        if (!IsEnabled()) {
+            DependsClick();
+        } else {
+            m_value = std::clamp(m_value + m_inc, m_min, m_max);
+            // m_callback(m_option);
+        } }
+    });
+
+    m_duration = m_max - m_min;
+    m_inc = m_duration / (float)(m_steps);
+}
+
+void SidebarEntrySlider::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) {
+    SidebarEntryBase::Draw(vg, theme, root_pos, left);
+
+    const float barh = 7;
+    const Vec4 bar{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f) - barh / 2, m_pos.w - 15.f * 2, barh};
+
+    gfx::drawRect(vg, bar, theme->GetColour(ThemeEntryID_PROGRESSBAR_BACKGROUND), 3);
+    auto inner = bar;
+    inner.w *= m_value / m_duration;
+    gfx::drawRect(vg, inner, theme->GetColour(ThemeEntryID_PROGRESSBAR), 3);
+
+    for (int i = 0; i <= m_steps; i++) {
+        const auto loop = m_inc * (float)i;
+        const auto marker = Vec4{bar.x + (bar.w * loop / m_duration), bar.y - 4.f, 3.f, bar.h + 8.f};
+        gfx::drawRect(vg, marker, theme->GetColour(ThemeEntryID_TEXT_INFO));
+    }
+}
+
 SidebarEntryCallback::SidebarEntryCallback(const std::string& title, const Callback& cb, bool pop_on_click, const std::string& info)
 : SidebarEntryBase{title, info}
 , m_callback{cb}
@@ -422,6 +468,13 @@ void Sidebar::SetupButtons() {
             SetPop();
         }})
     );
+
+    // disable jump page if the item is using left/right buttons.
+    if (HasAction(Button::LEFT) || HasAction(Button::RIGHT)) {
+        m_list->SetPageJump(false);
+    } else {
+        m_list->SetPageJump(true);
+    }
 }
 
 } // namespace sphaira::ui

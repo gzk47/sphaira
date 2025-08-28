@@ -11,6 +11,9 @@
 #include "yati/nx/keys.hpp"
 #include "yati/nx/crypto.hpp"
 
+#include "utils/utils.hpp"
+#include "utils/devoptab.hpp"
+
 #include "title_info.hpp"
 #include "app.hpp"
 #include "dumper.hpp"
@@ -25,18 +28,6 @@
 
 namespace sphaira::ui::menu::game::meta_nca {
 namespace {
-
-struct HashStr {
-    char str[0x21];
-};
-
-HashStr hexIdToStr(auto id) {
-    HashStr str{};
-    const auto id_lower = std::byteswap(*(u64*)id.c);
-    const auto id_upper = std::byteswap(*(u64*)(id.c + 0x8));
-    std::snprintf(str.str, 0x21, "%016lx%016lx", id_lower, id_upper);
-    return str;
-}
 
 struct NcaHashSource final : hash::BaseSource {
     NcaHashSource(NcmContentStorage* cs, const NcaEntry& entry) : m_cs{cs}, m_entry{entry} {
@@ -67,7 +58,7 @@ struct NcaSource final : dump::BaseSource {
 
     Result Read(const std::string& path, void* buf, s64 off, s64 size, u64* bytes_read) override {
         const auto it = std::ranges::find_if(m_entries, [&path](auto& e){
-            return path.find(hexIdToStr(e.content_id).str) != path.npos;
+            return path.find(utils::hexIdToStr(e.content_id).str) != path.npos;
         });
         R_UNLESS(it != m_entries.end(), Result_GameBadReadForDump);
 
@@ -85,11 +76,11 @@ struct NcaSource final : dump::BaseSource {
 
     auto GetName(const std::string& path) const -> std::string {
         const auto it = std::ranges::find_if(m_entries, [&path](auto& e){
-            return path.find(hexIdToStr(e.content_id).str) != path.npos;
+            return path.find(utils::hexIdToStr(e.content_id).str) != path.npos;
         });
 
         if (it != m_entries.end()) {
-            return hexIdToStr(it->content_id).str;
+            return utils::hexIdToStr(it->content_id).str;
         }
 
         return {};
@@ -97,7 +88,7 @@ struct NcaSource final : dump::BaseSource {
 
     auto GetSize(const std::string& path) const -> s64 {
         const auto it = std::ranges::find_if(m_entries, [&path](auto& e){
-            return path.find(hexIdToStr(e.content_id).str) != path.npos;
+            return path.find(utils::hexIdToStr(e.content_id).str) != path.npos;
         });
 
         if (it != m_entries.end()) {
@@ -172,7 +163,8 @@ Menu::Menu(Entry& entry, const meta::MetaEntry& meta_entry)
         std::make_pair(Button::A, Action{"Mount Fs"_i18n, [this](){
             // todo: handle error here.
             if (!m_entries.empty() && !GetEntry().missing) {
-                MountNcaFs();
+                const auto rc = MountNcaFs();
+                App::PushErrorBox(rc, "Failed to mount NCA"_i18n);
             }
         }}),
         std::make_pair(Button::B, Action{"Back"_i18n, [this](){
@@ -187,16 +179,23 @@ Menu::Menu(Entry& entry, const meta::MetaEntry& meta_entry)
                     DumpNcas();
                 });
 
+                // todo:
+                #if 0
+                options->Add<SidebarEntryCallback>("Export NCA decrypted"_i18n, [this](){
+                    DumpNcas();
+                }, "Exports the NCA with all fs sections decrypted (NCA header is still encrypted)."_i18n);
+                #endif
+
                 options->Add<SidebarEntryCallback>("Verify NCA 256 hash"_i18n, [this](){
                     static std::string hash_out;
                     hash_out.clear();
 
-                    App::Push<ProgressBox>(m_entry.image, "Hashing"_i18n, hexIdToStr(GetEntry().content_id).str, [this](auto pbox) -> Result{
+                    App::Push<ProgressBox>(m_entry.image, "Hashing"_i18n, utils::hexIdToStr(GetEntry().content_id).str, [this](auto pbox) -> Result{
                         auto source = std::make_unique<NcaHashSource>(m_meta.cs, GetEntry());
                         return hash::Hash(pbox, hash::Type::Sha256, source.get(), hash_out);
                     }, [this](Result rc){
                         App::PushErrorBox(rc, "Failed to hash file..."_i18n);
-                        const auto str = hexIdToStr(GetEntry().content_id);
+                        const auto str = utils::hexIdToStr(GetEntry().content_id);
 
                         if (R_SUCCEEDED(rc)) {
                             if (std::strncmp(hash_out.c_str(), str.str, std::strlen(str.str))) {
@@ -227,6 +226,7 @@ Menu::Menu(Entry& entry, const meta::MetaEntry& meta_entry)
     parse_keys(keys, false);
 
     if (R_FAILED(GetNcmMetaFromMetaStatus(m_meta_entry.status, m_meta))) {
+        log_write("[NCA-MENU] failed to GetNcmMetaFromMetaStatus()\n");
         SetPop();
         return;
     }
@@ -234,6 +234,7 @@ Menu::Menu(Entry& entry, const meta::MetaEntry& meta_entry)
     // get the content meta header.
     ncm::ContentMeta content_meta;
     if (R_FAILED(ncm::GetContentMeta(m_meta.db, &m_meta.key, content_meta))) {
+        log_write("[NCA-MENU] failed to ncm::GetContentMeta()\n");
         SetPop();
         return;
     }
@@ -241,6 +242,7 @@ Menu::Menu(Entry& entry, const meta::MetaEntry& meta_entry)
     // fetch all the content infos.
     std::vector<NcmContentInfo> infos;
     if (R_FAILED(ncm::GetContentInfos(m_meta.db, &m_meta.key, content_meta.header, infos))) {
+        log_write("[NCA-MENU] failed to ncm::GetContentInfos()\n");
         SetPop();
         return;
     }
@@ -252,12 +254,17 @@ Menu::Menu(Entry& entry, const meta::MetaEntry& meta_entry)
         ncmContentInfoSizeToU64(&info, &entry.size);
 
         bool has = false;
-        ncmContentMetaDatabaseHasContent(m_meta.db, &has, &m_meta.key, &info.content_id);
+        if (R_FAILED(ncmContentMetaDatabaseHasContent(m_meta.db, &has, &m_meta.key, &info.content_id)) || !has) {
+            log_write("[NCA-MENU] does not have nca!\n");
+        }
         entry.missing = !has;
 
+        // decrypt header.
         if (has && R_SUCCEEDED(ncmContentStorageReadContentIdFile(m_meta.cs, &entry.header, sizeof(entry.header), &info.content_id, 0))) {
-            // decrypt header.
+            log_write("[NCA-MENU] reading to decrypt header\n");
             crypto::cryptoAes128Xts(&entry.header, &entry.header, keys.header_key, 0, 0x200, sizeof(entry.header), false);
+        } else {
+            log_write("[NCA-MENU] failed to read nca from ncm\n");
         }
 
         m_entries.emplace_back(entry);
@@ -283,7 +290,7 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
         if (touch && m_index == i) {
             FireAction(Button::A);
         } else {
-            App::PlaySoundEffect(SoundEffect_Focus);
+            App::PlaySoundEffect(SoundEffect::Focus);
             SetIndex(i);
         }
     });
@@ -337,7 +344,7 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
         }
 
         gfx::drawTextArgs(vg, x + text_xoffset, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%s", ncm::GetContentTypeStr(e.content_type));
-        gfx::drawTextArgs(vg, x + text_xoffset + 185, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%s", hexIdToStr(e.content_id).str);
+        gfx::drawTextArgs(vg, x + text_xoffset + 185, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%s", utils::hexIdToStr(e.content_id).str);
 
         if ((double)e.size / 1024.0 / 1024.0 <= 0.009) {
             gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f), 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%.2f KiB", (double)e.size / 1024.0);
@@ -384,7 +391,7 @@ void Menu::DumpNcas() {
     std::vector<fs::FsPath> paths;
     for (auto& e : entries) {
         char nca_name[64];
-        std::snprintf(nca_name, sizeof(nca_name), "%s%s", hexIdToStr(e.content_id).str, e.content_type == NcmContentType_Meta ? ".cnmt.nca" : ".nca");
+        std::snprintf(nca_name, sizeof(nca_name), "%s%s", utils::hexIdToStr(e.content_id).str, e.content_type == NcmContentType_Meta ? ".cnmt.nca" : ".nca");
 
         fs::FsPath path;
         std::snprintf(path, sizeof(path), "/dumps/NCA/%s %s[%016lX][v%u][%s]/%s", name_buf.s, version, m_meta_entry.status.application_id, m_meta_entry.status.version, ncm::GetMetaTypeShortStr(m_meta_entry.status.meta_type), nca_name);
@@ -393,25 +400,36 @@ void Menu::DumpNcas() {
     }
 
     auto source = std::make_shared<NcaSource>(m_meta.cs, m_entry.image, entries);
-    dump::Dump(source, paths, [](Result){}, dump::DumpLocationFlag_All &~ dump::DumpLocationFlag_UsbS2S);
+    dump::Dump(source, paths, nullptr, dump::DumpLocationFlag_All &~ dump::DumpLocationFlag_UsbS2S);
 }
 
 Result Menu::MountNcaFs() {
     const auto& e = GetEntry();
 
+    // mount using devoptab instead if fails.
     FsFileSystemType type;
-    R_TRY(GetFsFileSystemType(e.header.content_type, type));
+    if (R_FAILED(GetFsFileSystemType(e.header.content_type, type))) {
+        fs::FsPath root;
+        R_TRY(devoptab::MountNcaNcm(m_meta.cs, &e.content_id, root));
 
-    // get fs path from ncm.
-    u64 program_id;
-    fs::FsPath path;
-    R_TRY(ncm::GetFsPathFromContentId(m_meta.cs, m_meta.key, e.content_id, &program_id, &path));
+        auto fs = std::make_shared<filebrowser::FsStdioWrapper>(root, [root](){
+            devoptab::UmountNca(root);
+        });
 
-    // ensure that mounting worked.
-    auto fs = std::make_shared<fs::FsNativeId>(program_id, type, path);
-    R_TRY(fs->GetFsOpenResult());
+        filebrowser::MountFsHelper(fs, utils::hexIdToStr(e.content_id).str);
+    } else {
+        // get fs path from ncm.
+        u64 program_id;
+        fs::FsPath path;
+        R_TRY(ncm::GetFsPathFromContentId(m_meta.cs, m_meta.key, e.content_id, &program_id, &path));
 
-    filebrowser::MountFsHelper(fs, hexIdToStr(e.content_id).str);
+        // ensure that mounting worked.
+        auto fs = std::make_shared<fs::FsNativeId>(program_id, type, path);
+        R_TRY(fs->GetFsOpenResult());
+
+        filebrowser::MountFsHelper(fs, utils::hexIdToStr(e.content_id).str);
+    }
+
     R_SUCCEED();
 }
 

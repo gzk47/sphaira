@@ -7,6 +7,8 @@
 #include "yati/nx/nca.hpp"
 #include "yati/nx/ncm.hpp"
 
+#include "utils/thread.hpp"
+
 #include <cstring>
 #include <atomic>
 #include <ranges>
@@ -17,9 +19,6 @@
 
 namespace sphaira::title {
 namespace {
-
-constexpr int THREAD_PRIO = PRIO_PREEMPTIVE;
-constexpr int THREAD_CORE = 1;
 
 struct ThreadData {
     ThreadData(bool title_cache);
@@ -383,8 +382,7 @@ Result Init() {
         }
 
         g_thread_data = std::make_unique<ThreadData>(true);
-        R_TRY(threadCreate(&g_thread, ThreadFunc, g_thread_data.get(), nullptr, 1024*32, THREAD_PRIO, THREAD_CORE));
-        svcSetThreadCoreMask(g_thread.handle, THREAD_CORE, THREAD_AFFINITY_DEFAULT(THREAD_CORE));
+        R_TRY(utils::CreateThread(&g_thread, ThreadFunc, g_thread_data.get(), 1024*32));
         R_TRY(threadStart(&g_thread));
     }
 

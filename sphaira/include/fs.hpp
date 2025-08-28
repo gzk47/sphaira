@@ -322,6 +322,7 @@ struct Fs {
     virtual bool FileExists(const FsPath& path) = 0;
     virtual bool DirExists(const FsPath& path) = 0;
     virtual bool IsNative() const = 0;
+    virtual bool IsSd() const { return false; }
     virtual FsPath Root() const { return "/"; }
 
     Result OpenFile(const fs::FsPath& path, u32 mode, File* f) {
@@ -510,6 +511,8 @@ struct FsNativeSd final : FsNative {
     FsNativeSd(bool ignore_read_only = true) : FsNative{fsdevGetDeviceFileSystem("sdmc:"), false, ignore_read_only} {
         m_open_result = 0;
     }
+
+    bool IsSd() const override { return true; }
 };
 #endif
 

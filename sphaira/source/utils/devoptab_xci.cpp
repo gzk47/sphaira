@@ -18,7 +18,7 @@ namespace sphaira::devoptab {
 namespace {
 
 struct Device {
-    std::unique_ptr<common::BufferedData> source;
+    std::unique_ptr<common::LruBufferedData> source;
     yati::container::Xci::Partitions partitions;
 };
 
@@ -246,11 +246,20 @@ struct Entry {
 Mutex g_mutex;
 std::array<std::unique_ptr<Entry>, common::MAX_ENTRIES> g_entries;
 
-} // namespace
+bool IsAlreadyMounted(const fs::FsPath& path, fs::FsPath& out_path) {
+    // check if we already have the save mounted.
+    for (auto& e : g_entries) {
+        if (e && e->path == path) {
+            e->ref_count++;
+            out_path = e->mount;
+            return true;
+        }
+    }
 
-Result MountXci(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
-    SCOPED_MUTEX(&g_mutex);
+    return false;
+}
 
+Result MountXciInternal(const std::shared_ptr<yati::source::Base>& source, s64 size, const fs::FsPath& path, fs::FsPath& out_path) {
     // check if we already have the save mounted.
     for (auto& e : g_entries) {
         if (e && e->path == path) {
@@ -265,17 +274,13 @@ Result MountXci(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
         return !e;
     });
     R_UNLESS(itr != g_entries.end(), 0x1);
-
     const auto index = std::distance(g_entries.begin(), itr);
-    auto source = std::make_unique<yati::source::File>(fs, path);
 
-    s64 size;
-    R_TRY(source->GetSize(&size));
-    auto buffered = std::make_unique<common::BufferedData>(std::move(source), size);
+    auto buffered = std::make_unique<common::LruBufferedData>(source, size);
 
     yati::container::Xci xci{buffered.get()};
-    yati::container::Xci::Partitions partitions;
-    R_TRY(xci.GetPartitions(partitions));
+    yati::container::Xci::Root root;
+    R_TRY(xci.GetRoot(root));
 
     auto entry = std::make_unique<Entry>();
     entry->path = path;
@@ -283,7 +288,7 @@ Result MountXci(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
     entry->devoptab.name = entry->name;
     entry->devoptab.deviceData = &entry->device;
     entry->device.source = std::move(buffered);
-    entry->device.partitions = partitions;
+    entry->device.partitions = root.partitions;
     std::snprintf(entry->name, sizeof(entry->name), "xci_%zu", index);
     std::snprintf(entry->mount, sizeof(entry->mount), "xci_%zu:/", index);
 
@@ -295,6 +300,32 @@ Result MountXci(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
     *itr = std::move(entry);
 
     R_SUCCEED();
+}
+
+} // namespace
+
+Result MountXci(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
+    SCOPED_MUTEX(&g_mutex);
+
+    if (IsAlreadyMounted(path, out_path)) {
+        R_SUCCEED();
+    }
+
+    s64 size;
+    auto source = std::make_shared<yati::source::File>(fs, path);
+    R_TRY(source->GetSize(&size));
+
+    return MountXciInternal(source, size, path, out_path);
+}
+
+Result MountXciSource(const std::shared_ptr<sphaira::yati::source::Base>& source, s64 size, const fs::FsPath& path, fs::FsPath& out_path) {
+    SCOPED_MUTEX(&g_mutex);
+
+    if (IsAlreadyMounted(path, out_path)) {
+        R_SUCCEED();
+    }
+
+    return MountXciInternal(source, size, path, out_path);
 }
 
 void UmountXci(const fs::FsPath& mount) {

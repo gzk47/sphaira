@@ -86,7 +86,11 @@ Menu::Menu(Entry& entry) : MenuBase{entry.GetName(), MenuFlag_None}, m_entry{ent
 
             if (!m_entries.empty()) {
                 options->Add<SidebarEntryCallback>("Export NSP"_i18n, [this](){
-                    DumpGames();
+                    DumpGames(false);
+                });
+
+                options->Add<SidebarEntryCallback>("Export NSZ"_i18n, [this](){
+                    DumpGames(true);
                 });
 
                 options->Add<SidebarEntryCallback>("Export options"_i18n, [this](){
@@ -153,7 +157,7 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
         if (touch && m_index == i) {
             FireAction(Button::A);
         } else {
-            App::PlaySoundEffect(SoundEffect_Focus);
+            App::PlaySoundEffect(SoundEffect::Focus);
             SetIndex(i);
         }
     });
@@ -345,14 +349,14 @@ Result Menu::GetNcmSizeOfMetaStatus(MetaEntry& entry) const {
     R_SUCCEED();
 }
 
-void Menu::DumpGames() {
+void Menu::DumpGames(bool to_nsz) {
     const auto entries = GetSelectedEntries();
     App::PopToMenu();
 
     std::vector<NspEntry> nsps;
-    BuildNspEntries(m_entry, entries, nsps);
+    BuildNspEntries(m_entry, entries, nsps, to_nsz);
 
-    DumpNsp(nsps);
+    DumpNsp(nsps, to_nsz);
 }
 
 void Menu::DeleteGames() {

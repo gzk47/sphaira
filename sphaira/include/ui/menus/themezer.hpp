@@ -1,3 +1,4 @@
+#if 0
 #pragma once
 
 #include "ui/menus/menu_base.hpp"
@@ -175,3 +176,4 @@ private:
 };
 
 } // namespace sphaira::ui::menu::themezer
+#endif

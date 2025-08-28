@@ -6,7 +6,11 @@
 #include "log.hpp"
 #include "threaded_file_transfer.hpp"
 #include "i18n.hpp"
+
+#include "utils/thread.hpp"
+
 #include <cstring>
+#include <cmath>
 
 namespace sphaira::ui {
 namespace {
@@ -17,13 +21,44 @@ void threadFunc(void* arg) {
     d->pbox->RequestExit();
 }
 
+// https://github.com/memononen/nanovg/blob/f93799c078fa11ed61c078c65a53914c8782c00b/example/demo.c#L500
+void drawSpinner(NVGcontext* vg, Theme* theme, float cx, float cy, float r, float t)
+{
+	float a0 = 0.0f + t*6;
+	float a1 = NVG_PI + t*6;
+	float r0 = r;
+	float r1 = r * 0.75f;
+	float ax,ay, bx,by;
+	NVGpaint paint;
+
+	nvgSave(vg);
+
+    auto colourb = theme->GetColour(ThemeEntryID_PROGRESSBAR);
+    colourb.a = 0.5;
+
+	nvgBeginPath(vg);
+	nvgArc(vg, cx,cy, r0, a0, a1, NVG_CW);
+	nvgArc(vg, cx,cy, r1, a1, a0, NVG_CCW);
+	nvgClosePath(vg);
+	ax = cx + cosf(a0) * (r0+r1)*0.5f;
+	ay = cy + sinf(a0) * (r0+r1)*0.5f;
+	bx = cx + cosf(a1) * (r0+r1)*0.5f;
+	by = cy + sinf(a1) * (r0+r1)*0.5f;
+	paint = nvgLinearGradient(vg, ax,ay, bx,by, nvgRGBA(0,0,0,0), colourb);
+	nvgFillPaint(vg, paint);
+	nvgFill(vg);
+
+	nvgRestore(vg);
+}
+
 } // namespace
 
-ProgressBox::ProgressBox(int image, const std::string& action, const std::string& title, const ProgressBoxCallback& callback, const ProgressBoxDoneCallback& done, int cpuid, int prio, int stack_size)
+ProgressBox::ProgressBox(int image, const std::string& action, const std::string& title, const ProgressBoxCallback& callback, const ProgressBoxDoneCallback& done)
 : m_done{done}
 , m_action{action}
 , m_title{title}
 , m_image{image} {
+    App::SetAutoSleepDisabled(true);
     if (App::GetApp()->m_progress_boost_mode.Get()) {
         App::SetBoostMode(true);
     }
@@ -45,10 +80,9 @@ ProgressBox::ProgressBox(int image, const std::string& action, const std::string
     // create cancel event.
     ueventCreate(&m_uevent, false);
 
-    m_cpuid = cpuid;
     m_thread_data.pbox = this;
     m_thread_data.callback = callback;
-    if (R_FAILED(threadCreate(&m_thread, threadFunc, &m_thread_data, nullptr, stack_size, prio, cpuid))) {
+    if (R_FAILED(utils::CreateThread(&m_thread, threadFunc, &m_thread_data))) {
         log_write("failed to create thead\n");
     }
     if (R_FAILED(threadStart(&m_thread))) {
@@ -68,9 +102,12 @@ ProgressBox::~ProgressBox() {
     }
 
     FreeImage();
-    m_done(m_thread_data.result);
+    if (m_done) {
+        m_done(m_thread_data.result);
+    }
 
     App::SetBoostMode(false);
+    App::SetAutoSleepDisabled(false);
 }
 
 auto ProgressBox::Update(Controller* controller, TouchInfo* touch) -> void {
@@ -122,7 +159,7 @@ auto ProgressBox::Draw(NVGcontext* vg, Theme* theme) -> void {
     const auto center_x = m_pos.x + m_pos.w/2;
     const auto end_y = m_pos.y + m_pos.h;
     const auto progress_bar_w = m_pos.w - 230;
-    const Vec4 prog_bar = { center_x - progress_bar_w / 2, end_y - 100, progress_bar_w, 12 };
+    const Vec4 prog_bar = { center_x - progress_bar_w / 2, end_y - 95, progress_bar_w, 12 };
 
     nvgSave(vg);
     nvgIntersectScissor(vg, GetX(), GetY(), GetW(), GetH());
@@ -140,7 +177,10 @@ auto ProgressBox::Draw(NVGcontext* vg, Theme* theme) -> void {
         gfx::drawRect(vg, prog_bar, theme->GetColour(ThemeEntryID_PROGRESSBAR_BACKGROUND), rounding);
         const u32 percentage = ((double)offset / (double)size) * 100.0;
         gfx::drawRect(vg, prog_bar.x, prog_bar.y, ((float)offset / (float)size) * prog_bar.w, prog_bar.h, theme->GetColour(ThemeEntryID_PROGRESSBAR), rounding);
-        gfx::drawTextArgs(vg, prog_bar.x + prog_bar.w + pad, prog_bar.y, font_size, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "%u%%", percentage);
+        gfx::drawTextArgs(vg, prog_bar.x + prog_bar.w + pad, prog_bar.y + prog_bar.h / 2, font_size, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(ThemeEntryID_TEXT), "%u%%", percentage);
+
+        const auto rad = 15;
+        drawSpinner(vg, theme, prog_bar.x - pad - rad, prog_bar.y + prog_bar.h / 2, rad, armTicksToNs(armGetSystemTick()) / 1e+9);
 
         const double speed_mb = (double)speed / (1024.0 * 1024.0);
         const double speed_kb = (double)speed / (1024.0);
@@ -210,6 +250,17 @@ auto ProgressBox::SetTitle(const std::string& title)  -> ProgressBox& {
 auto ProgressBox::NewTransfer(const std::string& transfer)  -> ProgressBox& {
     mutexLock(&m_mutex);
     m_transfer = transfer;
+    m_size = 0;
+    m_offset = 0;
+    m_last_offset = 0;
+    m_timestamp.Update();
+    mutexUnlock(&m_mutex);
+    Yield();
+    return *this;
+}
+
+auto ProgressBox::ResetTranfser() -> ProgressBox& {
+    mutexLock(&m_mutex);
     m_size = 0;
     m_offset = 0;
     m_last_offset = 0;

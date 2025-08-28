@@ -18,17 +18,6 @@
             "inherits":["core"],
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "MinSizeRel",
-                "ENABLE_NETWORK_INSTALL": false,
-                "LTO": true
-            }
-        },
-        {
-            "name": "ReleaseWithInstall",
-            "displayName": "ReleaseWithInstall",
-            "inherits":["core"],
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "MinSizeRel",
-                "ENABLE_NETWORK_INSTALL": true,
                 "LTO": true
             }
         },
@@ -38,8 +27,8 @@
             "inherits":["core"],
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "MinSizeRel",
-                "ENABLE_NETWORK_INSTALL": true,
-                "LTO": false
+                "LTO": false,
+                "DEV_BUILD": true
             }
         }
     ],
@@ -47,11 +36,6 @@
         {
             "name": "Release",
             "configurePreset": "Release",
-            "jobs": 16
-        },
-        {
-            "name": "ReleaseWithInstall",
-            "configurePreset": "ReleaseWithInstall",
             "jobs": 16
         },
         {

@@ -13,11 +13,6 @@
 namespace sphaira {
 namespace {
 
-struct NroData {
-    NroStart start;
-    NroHeader header;
-};
-
 auto nro_parse_internal(fs::Fs* fs, const fs::FsPath& path, NroEntry& entry) -> Result {
     entry.path = path;
 
@@ -60,7 +55,7 @@ auto nro_parse_internal(fs::Fs* fs, const fs::FsPath& path, NroEntry& entry) -> 
         std::strcpy(nacp.lang.author, "Unknown");
         std::strcpy(nacp.display_version, "Unknown");
 
-        entry.romfs_offset = entry.romfs_size = entry.icon_offset = entry.icon_size = 0;
+        entry.icon_offset = entry.icon_size = 0;
         entry.is_nacp_valid = false;
     } else {
         entry.size += sizeof(asset) + asset.icon.size + asset.nacp.size + asset.romfs.size;
@@ -70,8 +65,6 @@ auto nro_parse_internal(fs::Fs* fs, const fs::FsPath& path, NroEntry& entry) -> 
         // lazy load the icons
         entry.icon_size = asset.icon.size;
         entry.icon_offset = data.header.size + asset.icon.offset;
-        entry.romfs_offset = data.header.size + asset.romfs.offset;
-        entry.romfs_size = asset.romfs.size;
         entry.is_nacp_valid = true;
     }
 

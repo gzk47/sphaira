@@ -8,6 +8,11 @@
 
 #include "yati/yati.hpp"
 #include "yati/nx/nca.hpp"
+#include "yati/container/xci.hpp"
+
+#include "utils/utils.hpp"
+#include "utils/nsz_dumper.hpp"
+#include "utils/devoptab.hpp"
 
 #include "app.hpp"
 #include "defines.hpp"
@@ -17,16 +22,39 @@
 #include "dumper.hpp"
 #include "image.hpp"
 #include "title_info.hpp"
+#include "threaded_file_transfer.hpp"
 
 #include <cstring>
 #include <algorithm>
+
+// from Gamecard-Installer-NX
+extern "C" {
+
+Result fsOpenGameCardStorage(FsStorage* out, const FsGameCardHandle* handle, FsGameCardPartitionRaw partition) {
+    const struct {
+        FsGameCardHandle handle;
+        u32 partition;
+    } in = { *handle, (u32)partition };
+
+    return serviceDispatchIn(fsGetServiceSession(), 30, in, .out_num_objects = 1, .out_objects = &out->s);
+}
+
+Result fsOpenGameCardDetectionEventNotifier(FsEventNotifier* out) {
+    return serviceDispatch(fsGetServiceSession(), 501,
+        .out_num_objects = 1,
+        .out_objects = &out->s
+    );
+}
+
+}
 
 namespace sphaira::ui::menu::gc {
 namespace {
 
 constexpr u32 XCI_MAGIC = std::byteswap(0x48454144);
 constexpr u32 REMOUNT_ATTEMPT_MAX = 8; // same as nxdumptool.
-constexpr const char* DUMP_BASE_PATH = "/dumps/Gamecard";
+constexpr const char* DUMP_GAMECARD_BASE_PATH = "/dumps/Gamecard";
+constexpr const char* DUMP_XCZ_BASE_PATH = "/dumps/XCZ";
 
 enum DumpFileType {
     DumpFileType_XCI,
@@ -35,6 +63,7 @@ enum DumpFileType {
     DumpFileType_UID,
     DumpFileType_Cert,
     DumpFileType_Initial,
+    DumpFileType_XCZ,
 };
 
 enum DumpFileFlag {
@@ -50,9 +79,9 @@ enum DumpFileFlag {
 
 const char *g_option_list[] = {
     "Install",
-    "Export",
-    "Mount",
-    "Exit",
+    "Export XCI (Gamecard)",
+    "Export XCZ (Compressed XCI)",
+    "Mount Fs",
 };
 
 auto GetXciSizeFromRomSize(u8 rom_size) -> s64 {
@@ -90,6 +119,7 @@ auto GetDumpTypeStr(u8 type) -> const char* {
         case DumpFileType_UID: return " (Card UID).bin";
         case DumpFileType_Cert: return " (Certificate).bin";
         case DumpFileType_Initial: return " (Initial Data).bin";
+        case DumpFileType_XCZ: return ".xcz";
     }
 
     return "";
@@ -128,22 +158,27 @@ auto BuildFullDumpPath(DumpFileType type, std::span<const ApplicationEntry> entr
     const auto base_path = BuildXciBasePath(entries);
     fs::FsPath out;
 
-    if (use_folder) {
-        if (App::GetApp()->m_dump_append_folder_with_xci.Get()) {
-            out = base_path + ".xci/" + base_path + GetDumpTypeStr(type);
-        } else {
-            out = base_path + "/" + base_path + GetDumpTypeStr(type);
-        }
-    } else {
+    if (type == DumpFileType_XCZ) {
         out = base_path + GetDumpTypeStr(type);
-    }
+        return fs::AppendPath(DUMP_XCZ_BASE_PATH, out);
+    } else {
+        if (use_folder) {
+            if (App::GetApp()->m_dump_append_folder_with_xci.Get()) {
+                out = base_path + ".xci/" + base_path + GetDumpTypeStr(type);
+            } else {
+                out = base_path + "/" + base_path + GetDumpTypeStr(type);
+            }
+        } else {
+            out = base_path + GetDumpTypeStr(type);
+        }
 
-    return fs::AppendPath(DUMP_BASE_PATH, out);
+        return fs::AppendPath(DUMP_GAMECARD_BASE_PATH, out);
+    }
 }
 
 auto BuildFullDumpPath(DumpFileType type, std::span<const ApplicationEntry> entries) -> fs::FsPath {
     // check if the base path is too long.
-    const auto max_len = fs::FsPathReal::FS_REAL_MAX_LENGTH - std::strlen(DUMP_BASE_PATH) - 30;
+    const auto max_len = fs::FsPathReal::FS_REAL_MAX_LENGTH - std::strlen(DUMP_GAMECARD_BASE_PATH) - 30;
     auto use_folder = App::GetApp()->m_dump_app_folder.Get();
 
     for (;;) {
@@ -174,7 +209,7 @@ auto BuildFullDumpPath(DumpFileType type, std::span<const ApplicationEntry> entr
 // @Gc is the mount point, S is for secure partion, the remaining is the
 // the gamecard handle value in lower-case hex.
 auto BuildGcPath(const char* name, const FsGameCardHandle* handle, FsGameCardPartition partiton = FsGameCardPartition_Secure) -> fs::FsPath {
-    static const char mount_parition[] = {
+    static const char mount_partition[] = {
         [FsGameCardPartition_Update] = 'U',
         [FsGameCardPartition_Normal] = 'N',
         [FsGameCardPartition_Secure] = 'S',
@@ -182,7 +217,7 @@ auto BuildGcPath(const char* name, const FsGameCardHandle* handle, FsGameCardPar
     };
 
     fs::FsPath path;
-    std::snprintf(path, sizeof(path), "@Gc%c%08x://%s", mount_parition[partiton], handle->value, name);
+    std::snprintf(path, sizeof(path), "@Gc%c%08x://%s", mount_partition[partiton], handle->value, name);
     return path;
 }
 
@@ -200,7 +235,7 @@ struct XciSource final : dump::BaseSource {
     int icon{};
 
     Result Read(const std::string& path, void* buf, s64 off, s64 size, u64* bytes_read) override {
-        if (path.ends_with(GetDumpTypeStr(DumpFileType_XCI))) {
+        if (path.ends_with(GetDumpTypeStr(DumpFileType_XCI)) || path.ends_with(GetDumpTypeStr(DumpFileType_XCZ))) {
             size = ClipSize(off, size, xci_size);
             *bytes_read = size;
             return menu->GcStorageRead(buf, off, size);
@@ -231,7 +266,7 @@ struct XciSource final : dump::BaseSource {
     }
 
     auto GetSize(const std::string& path) const -> s64 override {
-        if (path.ends_with(GetDumpTypeStr(DumpFileType_XCI))) {
+        if (path.ends_with(GetDumpTypeStr(DumpFileType_XCI)) || path.ends_with(GetDumpTypeStr(DumpFileType_XCZ))) {
             return xci_size;
         } else if (path.ends_with(GetDumpTypeStr(DumpFileType_Set))) {
             return id_set.size();
@@ -259,33 +294,175 @@ private:
     }
 };
 
-struct HashStr {
-    char str[0x21];
+struct Test final : yati::source::Base {
+    Test(Menu* menu) : m_menu{menu} {
+
+    }
+
+    Result Read(void* buf, s64 off, s64 size, u64* bytes_read) override {
+        R_TRY(m_menu->GcStorageRead(buf, off, size));
+        *bytes_read = size;
+        R_SUCCEED();
+    }
+
+private:
+    Menu* m_menu;
 };
 
-HashStr hexIdToStr(auto id) {
-    HashStr str{};
-    const auto id_lower = std::byteswap(*(u64*)id.c);
-    const auto id_upper = std::byteswap(*(u64*)(id.c + 0x8));
-    std::snprintf(str.str, 0x21, "%016lx%016lx", id_lower, id_upper);
-    return str;
-}
+struct NcaReader final : yati::source::Base {
+    NcaReader(Test* source, s64 offset) : m_source{source}, m_offset{offset} {
 
-// from Gamecard-Installer-NX
-Result fsOpenGameCardStorage(FsStorage* out, const FsGameCardHandle* handle, FsGameCardPartitionRaw partition) {
-    const struct {
-        FsGameCardHandle handle;
-        u32 partition;
-    } in = { *handle, (u32)partition };
+    }
 
-    return serviceDispatchIn(fsGetServiceSession(), 30, in, .out_num_objects = 1, .out_objects = &out->s);
-}
+    Result Read(void* buf, s64 off, s64 size, u64* bytes_read) override {
+        return m_source->Read(buf, m_offset + off, size, bytes_read);
+    }
 
-Result fsOpenGameCardDetectionEventNotifier(FsEventNotifier* out) {
-    return serviceDispatch(fsGetServiceSession(), 501,
-        .out_num_objects = 1,
-        .out_objects = &out->s
-    );
+private:
+    Test* m_source;
+    const s64 m_offset;
+};
+
+Result NszExport(ProgressBox* pbox, const keys::Keys& keys, dump::BaseSource* _source, dump::WriteSource* writer, const fs::FsPath& path) {
+    auto source = (XciSource*)_source;
+
+    const auto threaded_write = [&](const std::string& name, s64& read_offset, s64& write_offset, s64 size) -> Result {
+        if (size > 0) {
+            pbox->NewTransfer(name);
+
+            R_TRY(thread::Transfer(pbox, size,
+                [&](void* data, s64 off, s64 size, u64* bytes_read) -> Result {
+                    return source->Read(path, data, read_offset + off, size, bytes_read);
+                },
+                [&](const void* data, s64 off, s64 size) -> Result {
+                    return writer->Write(data, write_offset + off, size);
+                }
+            ));
+
+            read_offset += size;
+            write_offset += size;
+        }
+
+        R_SUCCEED();
+    };
+
+    // writes padding between partitions and files.
+    const auto write_padding = [&](const std::string& name, s64& read_offset, s64& write_offset, s64 size) -> Result {
+        return threaded_write("Writing padding - " + name, read_offset, write_offset, size);
+    };
+
+    Test yati_source(source->menu);
+    yati::container::Xci xci{&yati_source};
+
+    yati::container::Xci::Root root;
+    R_TRY(xci.GetRoot(root));
+
+    //
+    s64 read_offset = 0;
+    s64 write_offset = 0;
+
+    for (u32 i = 0; i < std::size(root.partitions); i++) {
+        auto& partition = root.partitions[i];
+        auto& hfs0 = partition.hfs0;
+        auto& collections = partition.collections;
+
+        log_write("\tpartition name: %s offset: %zu size: %zu\n", partition.name.c_str(), partition.hfs0_offset, partition.hfs0_size);
+
+        // read pading before hfs0
+        R_TRY(write_padding("hfs0 before", read_offset, write_offset, partition.hfs0_offset - read_offset));
+
+        // offset to the hfs0.
+        const auto hfs0_offset = write_offset;
+        // offset to the data within the hfs0.
+        const auto hfs0_data_offset = hfs0_offset + hfs0.GetHfs0Size();
+        // offset to the hfs0 within the root hfs0.
+        const auto root_hfs0_data_offset = write_offset - root.hfs0.data_offset;
+
+        // calculate the expected size of the partition.
+        s64 expected_hfs0_data_size = 0;
+        for (auto& collection : partition.collections) {
+            expected_hfs0_data_size += collection.size;
+        }
+
+        if (!partition.collections.empty()) {
+            R_TRY(write_padding(partition.name, read_offset, write_offset, partition.collections[0].offset - read_offset));
+        } else {
+            // empty hfs0, write it as is.
+            log_write("empty hfs0 offset: %zu size: %zu get size: %zu\n", hfs0.data_offset, partition.hfs0_size, hfs0.GetHfs0Size());
+            R_UNLESS(partition.hfs0_size == hfs0.GetHfs0Size(), 21);
+            // R_UNLESS(hfs0.data_offset == 0, 14);
+            R_TRY(write_padding(partition.name, read_offset, write_offset, partition.hfs0_size));
+        }
+
+        const auto nca_creator = [&yati_source](const nca::Header& header, const keys::KeyEntry& title_key, const utils::nsz::Collection& collection) {
+            return std::make_unique<nca::NcaReader>(
+                header, &title_key, collection.size,
+                std::make_shared<NcaReader>(&yati_source, collection.offset)
+            );
+        };
+
+        // todo: update write offset.
+        R_TRY(utils::nsz::NszExport(pbox, nca_creator, read_offset, write_offset, collections, keys, source, writer, path));
+
+        // update offset / size in file table and calculate new total data size.
+        s64 new_hfs0_data_size = 0;
+        for (u32 i = 0; i < std::size(collections); i++) {
+            auto& collection = collections[i];
+            auto& file_table = hfs0.file_table[i];
+
+            // const auto offset = collection.offset - hfs0_data_offset;
+            // log_write("offset: %zu\n", offset);
+            // log_write("collection.offset: %zu\n", collection.offset);
+            // log_write("hfs0.data_offset: %zu\n", hfs0.data_offset);
+            // log_write("file_table.data_offset: %zu\n", file_table.data_offset);
+
+            // R_UNLESS(file_table.data_offset == offset, 8);
+            // R_UNLESS(file_table.data_size = collection.size, 9);
+
+            // update file and string table from collection.
+            file_table.data_offset = collection.offset - hfs0_data_offset;
+            file_table.data_size = collection.size;
+            hfs0.string_table[i] = collection.name;
+            new_hfs0_data_size += collection.size;
+        }
+
+        // update offset and size of hfs0 in root file table.
+        auto& root_file_table = root.hfs0.file_table[i];
+        const auto hfs0_data_size = root_file_table.data_size - (expected_hfs0_data_size - new_hfs0_data_size);
+
+        log_write("hfs0.data_offset: %zu\n", hfs0.data_offset);
+        log_write("old data offset: %zu\n", root_file_table.data_offset);
+        log_write("new data offset: %zu\n\n", root_hfs0_data_offset);
+
+        log_write("old data size: %zu\n", root_file_table.data_size);
+        log_write("new data size: %zu\n", hfs0_data_size);
+
+        // R_UNLESS(root_file_table.data_offset == root_hfs0_data_offset, 5);
+        // R_UNLESS(root_file_table.data_size == hfs0_data_size, 6);
+
+        root_file_table.data_offset = root_hfs0_data_offset;
+        root_file_table.data_size = hfs0_data_size;
+
+        // re-write updated hfs0 partition.
+        // R_UNLESS(partition.hfs0_offset == hfs0_offset, 7);
+        const auto hfs0_data = hfs0.GetHfs0Data();
+        R_TRY(writer->Write(hfs0_data.data(), hfs0_offset, hfs0_data.size()));
+    }
+
+    // add remaining padding, if needed.
+    R_TRY(write_padding("hfs0 partition", read_offset, write_offset, read_offset % 512));
+
+    // re-write updated root partition.
+    const auto root_data = root.hfs0.GetHfs0Data();
+    R_TRY(writer->Write(root_data.data(), root.hfs0_offset, root_data.size()));
+
+    log_write("read_offset: %zu\n", read_offset);
+    log_write("write_offset: %zu\n", write_offset);
+
+    // update with actual size.
+    R_TRY(writer->SetSize(write_offset));
+
+    R_SUCCEED();
 }
 
 struct GcSource final : yati::source::Base {
@@ -401,51 +578,49 @@ auto ApplicationEntry::GetSize() const -> s64 {
 Menu::Menu(u32 flags) : MenuBase{"GameCard"_i18n, flags} {
     this->SetActions(
         std::make_pair(Button::A, Action{"OK"_i18n, [this](){
-            if (m_option_index == 3) {
-                SetPop();
-            } else {
-                if (!m_mounted) {
-                    return;
+            if (!m_mounted) {
+                return;
+            }
+
+            if (m_option_index == 0) {
+                if (!App::GetInstallEnable()) {
+                    App::ShowEnableInstallPrompt();
+                } else {
+                    log_write("[GC] doing install A\n");
+                    App::Push<ui::ProgressBox>(m_icon, "Installing "_i18n, m_entries[m_entry_index].lang_entry.name, [this](auto pbox) -> Result {
+                        auto source = std::make_unique<GcSource>(m_entries[m_entry_index], m_fs.get());
+                        return yati::InstallFromCollections(pbox, source.get(), source->m_collections, source->m_config);
+                    }, [this](Result rc){
+                        App::PushErrorBox(rc, "Gc install failed!"_i18n);
+
+                        if (R_SUCCEEDED(rc)) {
+                            App::Notify("Gc install success!"_i18n);
+                        }
+                    });
                 }
+            } else if (m_option_index == 1) {
+                auto options = std::make_unique<Sidebar>("Select content to dump"_i18n, Sidebar::Side::RIGHT);
+                ON_SCOPE_EXIT(App::Push(std::move(options)));
 
-                if (m_option_index == 0) {
-                    if (!App::GetInstallEnable()) {
-                        App::ShowEnableInstallPrompt();
-                    } else {
-                        log_write("[GC] doing install A\n");
-                        App::Push<ui::ProgressBox>(m_icon, "Installing "_i18n, m_entries[m_entry_index].lang_entry.name, [this](auto pbox) -> Result {
-                            auto source = std::make_unique<GcSource>(m_entries[m_entry_index], m_fs.get());
-                            return yati::InstallFromCollections(pbox, source.get(), source->m_collections, source->m_config);
-                        }, [this](Result rc){
-                            App::PushErrorBox(rc, "Gc install failed!"_i18n);
+                const auto add = [&](const std::string& name, u32 flags){
+                    options->Add<SidebarEntryCallback>(name, [this, flags](){
+                        DumpGames(flags);
+                        m_dirty = true;
+                    }, true);
+                };
 
-                            if (R_SUCCEEDED(rc)) {
-                                App::Notify("Gc install success!"_i18n);
-                            }
-                        });
-                    }
-                } else if (m_option_index == 1) {
-                    auto options = std::make_unique<Sidebar>("Select content to dump"_i18n, Sidebar::Side::RIGHT);
-                    ON_SCOPE_EXIT(App::Push(std::move(options)));
-
-                    const auto add = [&](const std::string& name, u32 flags){
-                        options->Add<SidebarEntryCallback>(name, [this, flags](){
-                            DumpGames(flags);
-                            m_dirty = true;
-                        }, true);
-                    };
-
-                    add("Export All"_i18n, DumpFileFlag_All);
-                    add("Export All Bins"_i18n, DumpFileFlag_AllBin);
-                    add("Export XCI"_i18n, DumpFileFlag_XCI);
-                    add("Export Card ID Set"_i18n, DumpFileFlag_Set);
-                    add("Export Card UID"_i18n, DumpFileFlag_UID);
-                    add("Export Certificate"_i18n, DumpFileFlag_Cert);
-                    add("Export Initial Data"_i18n, DumpFileFlag_Initial);
-                } else if (m_option_index == 2) {
-                    const auto rc = MountGcFs();
-                    App::PushErrorBox(rc, "Failed to mount GameCard filesystem"_i18n);
-                }
+                add("Export All"_i18n, DumpFileFlag_All);
+                add("Export All Bins"_i18n, DumpFileFlag_AllBin);
+                add("Export XCI"_i18n, DumpFileFlag_XCI);
+                add("Export Card ID Set"_i18n, DumpFileFlag_Set);
+                add("Export Card UID"_i18n, DumpFileFlag_UID);
+                add("Export Certificate"_i18n, DumpFileFlag_Cert);
+                add("Export Initial Data"_i18n, DumpFileFlag_Initial);
+            } else if (m_option_index == 2) {
+                DumpXcz(0);
+            } else if (m_option_index == 3) {
+                const auto rc = MountGcFs();
+                App::PushErrorBox(rc, "Failed to mount GameCard filesystem"_i18n);
             }
         }}),
         std::make_pair(Button::B, Action{"Back"_i18n, [this](){
@@ -497,7 +672,7 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
         if (touch && m_option_index == i) {
             FireAction(Button::A);
         } else {
-            App::PlaySoundEffect(SoundEffect_Focus);
+            App::PlaySoundEffect(SoundEffect::Focus);
             m_option_index = i;
         }
     });
@@ -551,7 +726,7 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
             gfx::drawRect(vg, 490, text_y - 45.f / 2.f, 2, 45, theme->GetColour(ThemeEntryID_TEXT_SELECTED));
             colour = ThemeEntryID_TEXT_SELECTED;
         }
-        if (i != 3 && !m_mounted) {
+        if (!m_mounted) {
             colour = ThemeEntryID_TEXT_INFO;
         }
 
@@ -632,7 +807,7 @@ Result Menu::GcMount() {
             }
 
             // find the nca file, this will never fail for gamecards, see above comment.
-            const auto str = hexIdToStr(info.content_id);
+            const auto str = utils::hexIdToStr(info.content_id);
             const auto it = std::find_if(buf.cbegin(), buf.cend(), [str](auto& e){
                 return !std::strncmp(str.str, e.name, std::strlen(str.str));
             });
@@ -735,12 +910,12 @@ Result Menu::GcMountStorage() {
     log_write("[GC] m_storage_full_size: %zd rom_size: 0x%X\n", m_storage_full_size, rom_size);
     R_UNLESS(m_storage_full_size > 0, Result_GcBadXciRomSize);
 
-    R_TRY(fsStorageGetSize(&m_storage, &m_parition_normal_size));
+    R_TRY(fsStorageGetSize(&m_storage, &m_partition_normal_size));
     R_TRY(GcMountPartition(FsGameCardPartitionRaw_Secure));
-    R_TRY(fsStorageGetSize(&m_storage, &m_parition_secure_size));
+    R_TRY(fsStorageGetSize(&m_storage, &m_partition_secure_size));
 
     m_storage_trimmed_size = sizeof(header) + trim_size * 512ULL;
-    m_storage_total_size = m_parition_normal_size + m_parition_secure_size;
+    m_storage_total_size = m_partition_normal_size + m_partition_secure_size;
     m_storage_mounted = true;
 
     log_write("[GC] m_storage_trimmed_size: %zd\n", m_storage_trimmed_size);
@@ -786,11 +961,11 @@ void Menu::GcUnmountPartition() {
 }
 
 Result Menu::GcStorageReadInternal(void* buf, s64 off, s64 size, u64* bytes_read) {
-    if (off < m_parition_normal_size) {
-        size = std::min<s64>(size, m_parition_normal_size - off);
+    if (off < m_partition_normal_size) {
+        size = std::min<s64>(size, m_partition_normal_size - off);
         R_TRY(GcMountPartition(FsGameCardPartitionRaw_Normal));
     } else {
-        off = off - m_parition_normal_size;
+        off = off - m_partition_normal_size;
         R_TRY(GcMountPartition(FsGameCardPartitionRaw_Secure));
     }
 
@@ -833,9 +1008,7 @@ Result Menu::GcStorageRead(void* _buf, s64 off, s64 size) {
 
     if (unaligned_size) {
         R_TRY(GcStorageReadInternal(data, off, sizeof(data), &bytes_read));
-
-        const auto csize = std::min<s64>(size, 0x200 - unaligned_size);
-        std::memcpy(buf, data + unaligned_size, csize);
+        std::memcpy(buf, data, unaligned_size);
     }
 
     R_SUCCEED();
@@ -867,7 +1040,7 @@ Result Menu::GcOnEvent(bool force) {
             log_write("trying to mount\n");
             m_mounted = R_SUCCEEDED(GcMount());
             if (m_mounted) {
-                App::PlaySoundEffect(SoundEffect::SoundEffect_Startup);
+                App::PlaySoundEffect(SoundEffect::Startup);
             }
         } else {
             log_write("trying to unmount\n");
@@ -924,6 +1097,30 @@ void Menu::OnChangeIndex(s64 new_index) {
             log_write("\t[image load] time taken: %.2fs %zums\n", ts.GetSecondsD(), ts.GetMs());
         }
     }
+}
+
+Result Menu::DumpXcz(u32 flags) {
+    R_TRY(GcMountStorage());
+
+    auto source = std::make_shared<XciSource>();
+    source->menu = this;
+    source->application_name = m_entries[m_entry_index].lang_entry.name;
+    source->icon = m_icon;
+
+    // todo: support for prepending cert area.
+    std::vector<fs::FsPath> paths;
+    source->xci_size = m_storage_trimmed_size;
+    paths.emplace_back(BuildFullDumpPath(DumpFileType_XCZ, m_entries));
+
+    // todo: log keys error.
+    keys::Keys keys;
+    R_TRY(keys::parse_keys(keys, true));
+
+    dump::Dump(source, paths, [keys](ProgressBox* pbox, dump::BaseSource* source, dump::WriteSource* writer, const fs::FsPath& path) {
+        return NszExport(pbox, keys, source, writer, path);
+    });
+
+    R_SUCCEED();
 }
 
 Result Menu::DumpGames(u32 flags) {
@@ -986,7 +1183,17 @@ Result Menu::DumpGames(u32 flags) {
             paths.emplace_back(BuildFullDumpPath(DumpFileType_Initial, m_entries));
         }
 
-        dump::Dump(source, paths, [](Result){}, location_flags);
+        if (0) {
+            // todo: log keys error.
+            keys::Keys keys;
+            keys::parse_keys(keys, true);
+
+            dump::Dump(source, paths, [keys](ProgressBox* pbox, dump::BaseSource* source, dump::WriteSource* writer, const fs::FsPath& path) {
+                return NszExport(pbox, keys, source, writer, path);
+            });
+        } else {
+            dump::Dump(source, paths, nullptr, location_flags);
+        }
 
         R_SUCCEED();
     };
@@ -1105,6 +1312,23 @@ Result Menu::GcGetSecurityInfo(GameCardSecurityInformation& out) {
 }
 
 Result Menu::MountGcFs() {
+    #if 1
+    R_TRY(GcMountStorage());
+
+    const auto& e = m_entries[m_entry_index];
+    auto source = std::make_shared<Test>(this);
+
+    fs::FsPath root;
+    R_TRY(devoptab::MountXciSource(source, m_storage_trimmed_size, e.lang_entry.name, root));
+
+    auto fs = std::make_shared<filebrowser::FsStdioWrapper>(root, [root](){
+        devoptab::UmountXci(root);
+    });
+
+    filebrowser::MountFsHelper(fs, e.lang_entry.name);
+
+    #else
+    // old code that only mounts secure partition.
     const auto& e = m_entries[m_entry_index];
 
     auto fs = std::make_shared<fs::FsNative>(&m_fs->m_fs, false);
@@ -1118,6 +1342,7 @@ Result Menu::MountGcFs() {
     };
 
     App::Push<filebrowser::Menu>(fs, fs_entry, "/");
+    #endif
     R_SUCCEED();
 }
 

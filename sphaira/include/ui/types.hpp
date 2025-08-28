@@ -1,7 +1,6 @@
 #pragma once
 
 #include "nanovg.h"
-#include "pulsar.h"
 #include "fs.hpp"
 
 #include <switch.h>
@@ -229,6 +228,7 @@ struct ThemeMeta {
 struct Theme {
     ThemeMeta meta;
     ElementEntry elements[ThemeEntryID_MAX];
+    fs::FsPath music_path;
 
     auto GetColour(ThemeEntryID id) const {
         return elements[id].colour;
@@ -291,11 +291,13 @@ enum class Button : u64 {
     LS_RIGHT = static_cast<u64>(HidNpadButton_StickLRight),
     LS_UP = static_cast<u64>(HidNpadButton_StickLUp),
     LS_DOWN = static_cast<u64>(HidNpadButton_StickLDown),
+    LS_ANY = LS_LEFT | LS_RIGHT | LS_UP | LS_DOWN,
 
     RS_LEFT = static_cast<u64>(HidNpadButton_StickRLeft),
     RS_RIGHT = static_cast<u64>(HidNpadButton_StickRRight),
     RS_UP = static_cast<u64>(HidNpadButton_StickRUp),
     RS_DOWN = static_cast<u64>(HidNpadButton_StickRDown),
+    RS_ANY = RS_LEFT | RS_RIGHT | RS_UP | RS_DOWN,
 
     ANY_LEFT = static_cast<u64>(HidNpadButton_AnyLeft),
     ANY_RIGHT = static_cast<u64>(HidNpadButton_AnyRight),

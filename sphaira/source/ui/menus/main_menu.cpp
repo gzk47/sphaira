@@ -67,16 +67,17 @@ const MiscMenuEntry MISC_MENU_ENTRIES[] = {
         "You can backup and restore saves.\n\n"\
         "Experimental support for backing up system saves is possible." },
 
+#if 0
     { .name = "Themezer", .title = "Themezer", .func = MiscMenuFuncGenerator<ui::menu::themezer::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
         "Download themes from themezer.net. "\
         "Themes are downloaded to /themes/sphaira\n"\
         "To install the themes, NXThemesInstaller needs to be installed (can be downloaded via the AppStore)." },
+#endif
 
     { .name = "GitHub", .title = "GitHub", .func = MiscMenuFuncGenerator<ui::menu::gh::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
         "Download releases directly from GitHub. "\
         "Custom entries can be added to /config/sphaira/github" },
 
-#if ENABLE_NETWORK_INSTALL
     { .name = "FTP", .title = "FTP Install", .func = MiscMenuFuncGenerator<ui::menu::ftp::Menu>, .flag = MiscMenuFlag_Install, .info =
         "Install apps via FTP.\n\n"\
         "NOTE: This feature does not always work, use at your own risk. "\
@@ -93,7 +94,6 @@ const MiscMenuEntry MISC_MENU_ENTRIES[] = {
         "NOTE: This feature does not always work, use at your own risk. "\
         "If you encounter an issue, do not open an issue, it will not be fixed." },
 
-#endif
     { .name = "GameCard", .title = "GameCard", .func = MiscMenuFuncGenerator<ui::menu::gc::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
         "View info on the inserted Game Card (GC). "\
         "You can backup and install the inserted GC. "\

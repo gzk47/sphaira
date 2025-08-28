@@ -1,3 +1,5 @@
+#include "utils/devoptab.hpp"
+#include "utils/devoptab_common.hpp"
 #include "fatfs.hpp"
 #include "defines.hpp"
 #include "log.hpp"
@@ -6,6 +8,7 @@
 #include <array>
 #include <algorithm>
 #include <span>
+#include <memory>
 
 #include <cstring>
 #include <cstdio>
@@ -15,98 +18,77 @@
 namespace sphaira::fatfs {
 namespace {
 
+auto is_archive(BYTE attr) -> bool {
+    const auto archive_attr = AM_DIR | AM_ARC;
+    return (attr & archive_attr) == archive_attr;
+}
+
 // todo: replace with off+size and have the data be in another struct
 // in order to be more lcache efficient.
-struct BufferedFileData {
-    u8* data{};
-    u64 off{};
-    u64 size{};
+struct FsStorageSource final : yati::source::Base {
+    FsStorageSource(FsStorage* s) : m_s{*s} {
 
-    ~BufferedFileData() {
-        if (data) {
-            free(data);
-        }
     }
 
-    void Allocate(u64 new_size) {
-        data = (u8*)realloc(data, new_size * sizeof(*data));
-        off = 0;
-        size = 0;
-    }
-};
-
-template<typename T>
-struct LinkedList {
-    T* data;
-    LinkedList* next;
-    LinkedList* prev;
-};
-
-constexpr u64 CACHE_LARGE_ALLOC_SIZE = 1024 * 512;
-constexpr u64 CACHE_LARGE_SIZE = 1024 * 16;
-
-template<typename T>
-struct Lru {
-    using ListEntry = LinkedList<T>;
-
-    // pass span of the data.
-    void Init(std::span<T> data) {
-        list_flat_array.clear();
-        list_flat_array.resize(data.size());
-
-        auto list_entry = list_head = list_flat_array.data();
-
-        for (size_t i = 0; i < data.size(); i++) {
-            list_entry = list_flat_array.data() + i;
-            list_entry->data = data.data() + i;
-
-            if (i + 1 < data.size()) {
-                list_entry->next = &list_flat_array[i + 1];
-            }
-            if (i) {
-                list_entry->prev = &list_flat_array[i - 1];
-            }
-        }
-
-        list_tail = list_entry->prev->next;
+    Result Read(void* buf, s64 off, s64 size, u64* bytes_read) override {
+        R_TRY(fsStorageRead(&m_s, off, buf, size));
+        *bytes_read = size;
+        R_SUCCEED();
     }
 
-    // moves entry to the front of the list.
-    void Update(ListEntry* entry) {
-        // only update position if we are not the head.
-        if (list_head != entry) {
-            entry->prev->next = entry->next;
-            if (entry->next) {
-                entry->next->prev = entry->prev;
-            } else {
-                list_tail = entry->prev;
-            }
-
-            // update head.
-            auto head_temp = list_head;
-            list_head = entry;
-            list_head->prev = nullptr;
-            list_head->next = head_temp;
-            head_temp->prev = list_head;
-        }
+    Result GetSize(s64* size) {
+        return fsStorageGetSize(&m_s, size);
     }
-
-    // moves last entry (tail) to the front of the list.
-    auto GetNextFree() {
-        Update(list_tail);
-        return list_head->data;
-    }
-
-    auto begin() const { return list_head; }
-    auto end() const { return list_tail; }
 
 private:
-    ListEntry* list_head{};
-    ListEntry* list_tail{};
-    std::vector<ListEntry> list_flat_array{};
+    FsStorage m_s;
 };
 
-using LruBufferedData = Lru<BufferedFileData>;
+struct File {
+    FIL* files;
+    u32 file_count;
+    size_t off;
+    char path[256];
+};
+
+struct Dir {
+    FDIR dir;
+    char path[256];
+};
+
+u64 get_size_from_files(const File* file) {
+    u64 size = 0;
+    for (u32 i = 0; i < file->file_count; i++) {
+        size += f_size(&file->files[i]);
+    }
+    return size;
+}
+
+FIL* get_current_file(File* file) {
+    auto off = file->off;
+    for (u32 i = 0; i < file->file_count; i++) {
+        auto fil = &file->files[i];
+        if (off <= f_size(fil)) {
+            return fil;
+        }
+        off -= f_size(fil);
+    }
+    return NULL;
+}
+
+// adjusts current file pos and sets the rest of files to 0.
+void set_current_file_pos(File* file) {
+    s64 off = file->off;
+    for (u32 i = 0; i < file->file_count; i++) {
+        auto fil = &file->files[i];
+        if (off >= 0 && off < f_size(fil)) {
+            f_lseek(fil, off);
+        } else {
+            f_rewind(fil);
+        }
+        off -= f_size(fil);
+    }
+}
 
 enum BisMountType {
     BisMountType_PRODINFOF,
@@ -117,10 +99,7 @@ enum BisMountType {
 
 struct FatStorageEntry {
     FsStorage storage;
-    s64 storage_size;
-    LruBufferedData lru_cache[2];
-    BufferedFileData buffered_small[1024]; // 1MiB (usually).
-    BufferedFileData buffered_large[2];    // 1MiB
+    std::unique_ptr<devoptab::common::LruBufferedData> buffered;
     FATFS fs;
     devoptab_t devoptab;
 };
@@ -141,93 +120,39 @@ static_assert(std::size(BIS_MOUNT_ENTRIES) == FF_VOLUMES);
 
 FatStorageEntry g_fat_storage[FF_VOLUMES];
 
-Result ReadStorage(FsStorage* storage, std::span<LruBufferedData> lru_cache, void *_buffer, u64 file_off, u64 read_size, u64 capacity) {
-    // log_write("[FATFS] read offset: %zu size: %zu\n", file_off, read_size);
-    auto dst = static_cast<u8*>(_buffer);
-    size_t amount = 0;
-
-    R_UNLESS(file_off < capacity, FsError_UnsupportedOperateRangeForFileStorage);
-    read_size = std::min(read_size, capacity - file_off);
-
-    // fatfs reads in max 16k chunks.
-    // knowing this, it's possible to detect large file reads by simply checking if
-    // the read size is 16k (or more, maybe in the furter).
-    // however this would destroy random access performance, such as fetching 512 bytes.
-    // the fix was to have 2 LRU caches, one for large data and the other for small (anything below 16k).
-    // the results in file reads 32MB -> 184MB and directory listing is instant.
-    const auto large_read = read_size >= 1024 * 16;
-    auto& lru = large_read ? lru_cache[1] : lru_cache[0];
-
-    for (auto list = lru.begin(); list; list = list->next) {
-        const auto& m_buffered = list->data;
-        if (m_buffered->size) {
-            // check if we can read this data into the beginning of dst.
-            if (file_off < m_buffered->off + m_buffered->size && file_off >= m_buffered->off) {
-                const auto off = file_off - m_buffered->off;
-                const auto size = std::min<s64>(read_size, m_buffered->size - off);
-                if (size) {
-                    // log_write("[FAT] cache HIT at: %zu\n", file_off);
-                    std::memcpy(dst, m_buffered->data + off, size);
-
-                    read_size -= size;
-                    file_off += size;
-                    amount += size;
-                    dst += size;
-
-                    lru.Update(list);
-                    break;
-                }
-            }
-        }
-    }
-
-    if (read_size) {
-        // log_write("[FAT] cache miss at: %zu %zu\n", file_off, read_size);
-
-        auto alloc_size = large_read ? CACHE_LARGE_ALLOC_SIZE : std::max<u64>(read_size, 512);
-        alloc_size = std::min(alloc_size, capacity - file_off);
-
-        auto m_buffered = lru.GetNextFree();
-        m_buffered->Allocate(alloc_size);
-
-        // if the dst is big enough, read data in place.
-        if (read_size > alloc_size) {
-            R_TRY(fsStorageRead(storage, file_off, dst, read_size));
-            const auto bytes_read = read_size;
-            read_size -= bytes_read;
-            file_off += bytes_read;
-            amount += bytes_read;
-            dst += bytes_read;
-
-            // save the last chunk of data to the m_buffered io.
-            const auto max_advance = std::min<u64>(amount, alloc_size);
-            m_buffered->off = file_off - max_advance;
-            m_buffered->size = max_advance;
-            std::memcpy(m_buffered->data, dst - max_advance, max_advance);
-        } else {
-            R_TRY(fsStorageRead(storage, file_off, m_buffered->data, alloc_size));
-			const auto bytes_read = alloc_size;
-			const auto max_advance = std::min<u64>(read_size, bytes_read);
-            std::memcpy(dst, m_buffered->data, max_advance);
-
-            m_buffered->off = file_off;
-            m_buffered->size = bytes_read;
-
-            read_size -= max_advance;
-            file_off += max_advance;
-            amount += max_advance;
-            dst += max_advance;
-        }
-    }
-
-    R_SUCCEED();
-}
-
-void fill_stat(const FILINFO* fno, struct stat *st) {
+void fill_stat(const char* path, const FILINFO* fno, struct stat *st) {
     memset(st, 0, sizeof(*st));
 
     st->st_nlink = 1;
 
+    struct tm tm{};
+    tm.tm_sec = (fno->ftime & 0x1F) << 1;
+    tm.tm_min = (fno->ftime >> 5) & 0x3F;
+    tm.tm_hour = (fno->ftime >> 11);
+    tm.tm_mday = (fno->fdate & 0x1F);
+    tm.tm_mon = ((fno->fdate >> 5) & 0xF) - 1;
+    tm.tm_year = (fno->fdate >> 9) + 80;
+
+    st->st_atime = mktime(&tm);
+    st->st_mtime = st->st_atime;
+    st->st_ctime = st->st_atime;
+
+    // fake file.
+    if (path && is_archive(fno->fattrib)) {
+        st->st_size = 0;
+        char file_path[256];
+        for (u16 i = 0; i < 256; i++) {
+            std::snprintf(file_path, sizeof(file_path), "%s/%02u", path, i);
+            FILINFO file_info;
+            if (FR_OK != f_stat(file_path, &file_info)) {
+                break;
+            }
+
+            st->st_size += file_info.fsize;
+        }
+
+        st->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
+    } else
     if (fno->fattrib & AM_DIR) {
         st->st_mode = S_IFDIR | S_IRUSR | S_IRGRP | S_IROTH;
     } else {
@@ -242,64 +167,126 @@ static int set_errno(struct _reent *r, int err) {
 }
 
 int fat_open(struct _reent *r, void *fileStruct, const char *path, int flags, int mode) {
-    memset(fileStruct, 0, sizeof(FIL));
+    auto file = static_cast<File*>(fileStruct);
+    std::memset(file, 0, sizeof(*file));
 
-    if (FR_OK != f_open((FIL*)fileStruct, path, FA_READ)) {
+    // todo: init array
+    // todo: handle dir.
+    FIL fil{};
+    if (FR_OK == f_open(&fil, path, FA_READ)) {
+        file->file_count = 1;
+        file->files = (FIL*)std::malloc(sizeof(*file->files));
+        std::memcpy(file->files, &fil, sizeof(*file->files));
+        // todo: check what error code is returned here.
+    } else {
+        FILINFO info{};
+        if (FR_OK != f_stat(path, &info)) {
+            return set_errno(r, ENOENT);
+        }
+
+        if (!(info.fattrib & AM_ARC)) {
+            return set_errno(r, ENOENT);
+        }
+
+        char file_path[256];
+        for (u16 i = 0; i < 256; i++) {
+            std::memset(&fil, 0, sizeof(fil));
+            std::snprintf(file_path, sizeof(file_path), "%s/%02u", path, i);
+
+            if (FR_OK != f_open(&fil, file_path, FA_READ)) {
+                break;
+            }
+
+            file->files = (FIL*)std::realloc(file->files, (i + 1) * sizeof(*file->files));
+            std::memcpy(&file->files[i], &fil, sizeof(fil));
+            file->file_count++;
+        }
+    }
+
+    if (!file->files) {
         return set_errno(r, ENOENT);
     }
+
+    std::snprintf(file->path, sizeof(file->path), "%s", path);
     return r->_errno = 0;
 }
 
 int fat_close(struct _reent *r, void *fd) {
-    if (FR_OK != f_close((FIL*)fd)) {
-        return set_errno(r, ENOENT);
+    auto file = static_cast<File*>(fd);
+
+    if (file->files) {
+        for (u32 i = 0; i < file->file_count; i++) {
+            f_close(&file->files[i]);
+        }
+        free(file->files);
     }
+
     return r->_errno = 0;
 }
 
 ssize_t fat_read(struct _reent *r, void *fd, char *ptr, size_t len) {
-    UINT bytes_read;
-    if (FR_OK != f_read((FIL*)fd, ptr, len, &bytes_read)) {
-        return set_errno(r, ENOENT);
+    auto file = static_cast<File*>(fd);
+    UINT total_bytes_read = 0;
+
+    while (len) {
+        UINT bytes_read;
+        auto fil = get_current_file(file);
+        if (!fil) {
+            log_write("[FATFS] failed to get fil\n");
+            return set_errno(r, ENOENT);
+        }
+
+        if (FR_OK != f_read(fil, ptr, len, &bytes_read)) {
+            return set_errno(r, ENOENT);
+        }
+
+        if (!bytes_read) {
+            break;
+        }
+
+        len -= bytes_read;
+        file->off += bytes_read;
+        total_bytes_read += bytes_read;
     }
 
-    return bytes_read;
+    return total_bytes_read;
 }
 
 off_t fat_seek(struct _reent *r, void *fd, off_t pos, int dir) {
+    auto file = static_cast<File*>(fd);
+    const auto size = get_size_from_files(file);
+
     if (dir == SEEK_CUR) {
-        pos += f_tell((FIL*)fd);
+        pos += file->off;
     } else if (dir == SEEK_END) {
-        pos = f_size((FIL*)fd);
+        pos = size;
     }
 
-    if (FR_OK != f_lseek((FIL*)fd, pos)) {
-        set_errno(r, ENOENT);
-        return 0;
-    }
+    file->off = std::clamp<u64>(pos, 0, size);
+    set_current_file_pos(file);
 
     r->_errno = 0;
-    return f_tell((FIL*)fd);
+    return file->off;
 }
 
 int fat_fstat(struct _reent *r, void *fd, struct stat *st) {
-    const FIL* file = (FIL*)fd;
+    auto file = static_cast<File*>(fd);
 
     /* Only fill the attr and size field, leaving the timestamp blank. */
-    FILINFO info = {0};
-    info.fattrib = file->obj.attr;
-    info.fsize = file->obj.objsize;
+    FILINFO info{};
+    info.fsize = get_size_from_files(file);
 
     /* Fill stat info. */
-    fill_stat(&info, st);
+    fill_stat(nullptr, &info, st);
 
     return r->_errno = 0;
 }
 
 DIR_ITER* fat_diropen(struct _reent *r, DIR_ITER *dirState, const char *path) {
-    memset(dirState->dirStruct, 0, sizeof(FDIR));
+    auto dir = static_cast<Dir*>(dirState->dirStruct);
+    std::memset(dir, 0, sizeof(*dir));
 
-    if (FR_OK != f_opendir((FDIR*)dirState->dirStruct, path)) {
+    if (FR_OK != f_opendir(&dir->dir, path)) {
         set_errno(r, ENOENT);
         return NULL;
     }
@@ -309,15 +296,20 @@ DIR_ITER* fat_diropen(struct _reent *r, DIR_ITER *dirState, const char *path) {
 }
 
 int fat_dirreset(struct _reent *r, DIR_ITER *dirState) {
-    if (FR_OK != f_rewinddir((FDIR*)dirState->dirStruct)) {
+    auto dir = static_cast<Dir*>(dirState->dirStruct);
+
+    if (FR_OK != f_rewinddir(&dir->dir)) {
         return set_errno(r, ENOENT);
     }
+
     return r->_errno = 0;
 }
 
 int fat_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struct stat *filestat) {
+    auto dir = static_cast<Dir*>(dirState->dirStruct);
     FILINFO fno{};
-    if (FR_OK != f_readdir((FDIR*)dirState->dirStruct, &fno)) {
+
+    if (FR_OK != f_readdir(&dir->dir, &fno)) {
         return set_errno(r, ENOENT);
     }
 
@@ -326,15 +318,18 @@ int fat_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struct sta
     }
 
     strcpy(filename, fno.fname);
-    fill_stat(&fno, filestat);
+    fill_stat(dir->path, &fno, filestat);
 
     return r->_errno = 0;
 }
 
 int fat_dirclose(struct _reent *r, DIR_ITER *dirState) {
-    if (FR_OK != f_closedir((FDIR*)dirState->dirStruct)) {
+    auto dir = static_cast<Dir*>(dirState->dirStruct);
+
+    if (FR_OK != f_closedir(&dir->dir)) {
         return set_errno(r, ENOENT);
     }
+
     return r->_errno = 0;
 }
 
@@ -357,19 +352,19 @@ int fat_lstat(struct _reent *r, const char *file, struct stat *st) {
         return set_errno(r, ENOENT);
     }
 
-    fill_stat(&fno, st);
+    fill_stat(file, &fno, st);
     return r->_errno = 0;
 }
 
 constexpr devoptab_t DEVOPTAB = {
-    .structSize   = sizeof(FIL),
+    .structSize   = sizeof(File),
     .open_r       = fat_open,
     .close_r      = fat_close,
     .read_r       = fat_read,
     .seek_r       = fat_seek,
     .fstat_r      = fat_fstat,
     .stat_r       = fat_lstat,
-    .dirStateSize = sizeof(FDIR),
+    .dirStateSize = sizeof(Dir),
     .diropen_r    = fat_diropen,
     .dirreset_r   = fat_dirreset,
     .dirnext_r    = fat_dirnext,
@@ -378,37 +373,55 @@ constexpr devoptab_t DEVOPTAB = {
     .lstat_r      = fat_lstat,
 };
 
+Mutex g_mutex{};
+bool g_is_init{};
+
 } // namespace
 
 Result MountAll() {
+    SCOPED_MUTEX(&g_mutex);
+
+    if (g_is_init) {
+        R_SUCCEED();
+    }
+
     for (u32 i = 0; i < FF_VOLUMES; i++) {
         auto& fat = g_fat_storage[i];
         const auto& bis = BIS_MOUNT_ENTRIES[i];
 
-        log_write("[FAT] %s\n", bis.volume_name);
-
-        fat.lru_cache[0].Init(fat.buffered_small);
-        fat.lru_cache[1].Init(fat.buffered_large);
+        // log_write("[FAT] %s\n", bis.volume_name);
 
         fat.devoptab = DEVOPTAB;
         fat.devoptab.name = bis.volume_name;
         fat.devoptab.deviceData = &fat;
 
         R_TRY(fsOpenBisStorage(&fat.storage, bis.id));
-        R_TRY(fsStorageGetSize(&fat.storage, &fat.storage_size));
-        log_write("[FAT] BIS SUCCESS %s\n", bis.volume_name);
+        auto source = std::make_shared<FsStorageSource>(&fat.storage);
+
+        s64 size;
+        R_TRY(source->GetSize(&size));
+        // log_write("[FAT] BIS SUCCESS %s\n", bis.volume_name);
+
+        fat.buffered = std::make_unique<devoptab::common::LruBufferedData>(source, size);
 
         R_UNLESS(FR_OK == f_mount(&fat.fs, bis.mount_name, 1), 0x1);
-        log_write("[FAT] MOUNT SUCCESS %s\n", bis.volume_name);
+        // log_write("[FAT] MOUNT SUCCESS %s\n", bis.volume_name);
 
         R_UNLESS(AddDevice(&fat.devoptab) >= 0, 0x1);
-        log_write("[FAT] DEVICE SUCCESS %s\n", bis.volume_name);
+        // log_write("[FAT] DEVICE SUCCESS %s\n", bis.volume_name);
     }
 
+    g_is_init = true;
     R_SUCCEED();
 }
 
 void UnmountAll() {
+    SCOPED_MUTEX(&g_mutex);
+
+    if (!g_is_init) {
+        return;
+    }
+
     for (u32 i = 0; i < FF_VOLUMES; i++) {
         auto& fat = g_fat_storage[i];
         const auto& bis = BIS_MOUNT_ENTRIES[i];
@@ -433,7 +446,7 @@ const char* VolumeStr[] {
 Result fatfs_read(u8 num, void* dst, u64 offset, u64 size) {
     // log_write("[FAT] num: %u\n", num);
     auto& fat = sphaira::fatfs::g_fat_storage[num];
-    return sphaira::fatfs::ReadStorage(&fat.storage, fat.lru_cache, dst, offset, size, fat.storage_size);
+    return fat.buffered->Read2(dst, offset, size);
 }
 
 } // extern "C"

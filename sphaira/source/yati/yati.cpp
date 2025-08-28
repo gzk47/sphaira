@@ -12,6 +12,9 @@
 #include "yati/nx/keys.hpp"
 #include "yati/nx/crypto.hpp"
 
+#include "utils/utils.hpp"
+#include "utils/thread.hpp"
+
 #include "ui/progress_box.hpp"
 #include "app.hpp"
 #include "i18n.hpp"
@@ -162,7 +165,7 @@ struct ThreadData {
     void WakeAllThreads();
 
     auto IsAnyRunning() volatile const -> bool {
-        return read_running || decompress_result || write_running;
+        return read_running || decompress_running || write_running;
     }
 
     auto GetWriteOffset() volatile const -> s64 {
@@ -183,6 +186,10 @@ struct ThreadData {
 
     void SetReadResult(Result result) {
         read_result = result;
+
+        // wake up decompress thread as it may be waiting on data that never comes.
+        condvarWakeOne(std::addressof(can_decompress));
+
         if (R_FAILED(result)) {
             ueventSignal(GetDoneEvent());
         }
@@ -190,6 +197,10 @@ struct ThreadData {
 
     void SetDecompressResult(Result result) {
         decompress_result = result;
+
+        // wake up write thread as it may be waiting on data that never comes.
+        condvarWakeOne(std::addressof(can_write));
+
         if (R_FAILED(result)) {
             ueventSignal(GetDoneEvent());
         }
@@ -197,6 +208,10 @@ struct ThreadData {
 
     void SetWriteResult(Result result) {
         write_result = result;
+
+        // wake up decompress thread as it may be waiting on data that never comes.
+        condvarWakeOne(std::addressof(can_decompress_write));
+
         ueventSignal(GetDoneEvent());
     }
 
@@ -381,18 +396,6 @@ Result ThreadData::Read(void* buf, s64 size, u64* bytes_read) {
     return rc;
 }
 
-struct HashStr {
-    char str[0x21];
-};
-
-HashStr hexIdToStr(auto id) {
-    HashStr str{};
-    const auto id_lower = std::byteswap(*(u64*)id.c);
-    const auto id_upper = std::byteswap(*(u64*)(id.c + 0x8));
-    std::snprintf(str.str, 0x21, "%016lx%016lx", id_lower, id_upper);
-    return str;
-}
-
 auto GetTicketCollection(const nca::Header& header, std::span<TikCollection> tik) -> TikCollection* {
     TikCollection* ticket{};
 
@@ -403,7 +406,7 @@ auto GetTicketCollection(const nca::Header& header, std::span<TikCollection> tik
 
         if (it != tik.end()) {
             it->required = true;
-            it->key_gen = header.key_gen;
+            it->key_gen = header.GetKeyGeneration();
             ticket = &(*it);
         }
     }
@@ -413,7 +416,7 @@ auto GetTicketCollection(const nca::Header& header, std::span<TikCollection> tik
 
 Result HasRequiredTicket(const nca::Header& header, TikCollection* ticket) {
     if (es::IsRightsIdValid(header.rights_id)) {
-        log_write("looking for ticket %s\n", hexIdToStr(header.rights_id).str);
+        log_write("looking for ticket %s\n", utils::hexIdToStr(header.rights_id).str);
         R_UNLESS(ticket, Result_YatiTicketNotFound);
         log_write("ticket found\n");
     }
@@ -487,10 +490,7 @@ Result Yati::readFuncInternal(ThreadData* t) {
                     log_write("storing temp data of size: %zu\n", temp_buf.size());
                 } else {
                     // validate block header.
-                    R_UNLESS(t->ncz_block_header.version == 0x2, Result_YatiInvalidNczBlockVersion);
-                    R_UNLESS(t->ncz_block_header.type == 0x1, Result_YatiInvalidNczBlockType);
-                    R_UNLESS(t->ncz_block_header.total_blocks, Result_YatiInvalidNczBlockTotal);
-                    R_UNLESS(t->ncz_block_header.block_size_exponent >= 14 && t->ncz_block_header.block_size_exponent <= 32, Result_YatiInvalidNczBlockSizeExponent);
+                    R_TRY(t->ncz_block_header.IsValid());
 
                     // read blocks (array of block sizes).
                     std::vector<ncz::Block> blocks(t->ncz_block_header.total_blocks);
@@ -554,8 +554,9 @@ Result Yati::decompressFuncInternal(ThreadData* t) {
 
         for (s64 off = 0; off < size;) {
             if (!ncz_section || !ncz_section->InRange(written)) {
-                log_write("[NCZ] looking for new section: %zu\n", written);
+                log_write("[NCZ] looking for new section: %zu off: %zu size: %zu\n", written, off, size);
                 auto it = std::ranges::find_if(t->ncz_sections, [written](auto& e){
+                    log_write("\t[NCZ] checking offset: %zu size: %zu written: %zu\n", e.offset, e.size, written);
                     return e.InRange(written);
                 });
 
@@ -614,10 +615,9 @@ Result Yati::decompressFuncInternal(ThreadData* t) {
             if (!decompress_buf_off) {
                 log_write("reading nca header\n");
 
-                nca::Header header{};
-                crypto::cryptoAes128Xts(buf.data(), std::addressof(header), keys.header_key, 0, 0x200, sizeof(header), false);
                 log_write("verifying nca header magic\n");
-                R_UNLESS(header.magic == 0x3341434E, Result_YatiInvalidNcaMagic);
+                nca::Header header{};
+                R_TRY(nca::DecryptHeader(buf.data(), keys, header));
                 log_write("nca magic is ok! type: %u\n", header.content_type);
 
                 // store the unmodified header.
@@ -649,20 +649,11 @@ Result Yati::decompressFuncInternal(ThreadData* t) {
                     u8 keak_generation = 0;
 
                     if (ticket) {
-                        const auto key_gen = header.key_gen;
-                        log_write("converting to standard crypto: 0x%X 0x%X\n", key_gen, header.key_gen);
+                        const auto key_gen = header.GetKeyGeneration();
+                        log_write("converting to standard crypto: 0x%X 0x%X\n", key_gen, header.GetKeyGeneration());
 
-                        // fetch ticket data block.
-                        es::TicketData ticket_data;
-                        R_TRY(es::GetTicketData(ticket->ticket, std::addressof(ticket_data)));
-
-                        // validate that this indeed the correct ticket.
-                        R_UNLESS(!std::memcmp(std::addressof(header.rights_id), std::addressof(ticket_data.rights_id), sizeof(header.rights_id)), Result_YatiInvalidTicketBadRightsId);
-
-                        // decrypt title key.
                         keys::KeyEntry title_key;
-                        R_TRY(es::GetTitleKey(title_key, ticket_data, keys));
-                        R_TRY(es::DecryptTitleKey(title_key, key_gen, keys));
+                        R_TRY(es::GetTitleKeyDecrypted(ticket->ticket, header.rights_id, key_gen, keys, title_key));
 
                         std::memset(header.key_area, 0, sizeof(header.key_area));
                         std::memcpy(&header.key_area[0x2], &title_key, sizeof(title_key));
@@ -706,11 +697,15 @@ Result Yati::decompressFuncInternal(ThreadData* t) {
                     }
 
                     // https://github.com/nicoboss/nsz/issues/79
-                    auto decompressedBlockSize = 1 << t->ncz_block_header.block_size_exponent;
+                    auto decompressedBlockSize = 1UL << t->ncz_block_header.block_size_exponent;
                     // special handling for the last block to check it's actually compressed
                     if (ncz_block->offset == t->ncz_blocks.back().offset) {
                         log_write("[NCZ] last block special handling\n");
-                        decompressedBlockSize = t->ncz_block_header.decompressed_size % decompressedBlockSize;
+                        // https://github.com/nicoboss/nsz/issues/210
+                        const auto remainder = t->ncz_block_header.decompressed_size % decompressedBlockSize;
+                        if (remainder) {
+                            decompressedBlockSize = remainder;
+                        }
                     }
 
                     // check if this block is compressed.
@@ -946,15 +941,15 @@ Result Yati::InstallNcaInternal(std::span<TikCollection> tickets, NcaCollection&
     // #define WRITE_THREAD_CORE 2
 
     Thread t_read{};
-    R_TRY(threadCreate(&t_read, readFunc, std::addressof(t_data), nullptr, 1024*64, PRIO_PREEMPTIVE, READ_THREAD_CORE));
+    R_TRY(utils::CreateThread(&t_read, readFunc, std::addressof(t_data), 1024*64));
     ON_SCOPE_EXIT(threadClose(&t_read));
 
     Thread t_decompress{};
-    R_TRY(threadCreate(&t_decompress, decompressFunc, std::addressof(t_data), nullptr, 1024*64, PRIO_PREEMPTIVE, DECOMPRESS_THREAD_CORE));
+    R_TRY(utils::CreateThread(&t_decompress, decompressFunc, std::addressof(t_data), 1024*64));
     ON_SCOPE_EXIT(threadClose(&t_decompress));
 
     Thread t_write{};
-    R_TRY(threadCreate(&t_write, writeFunc, std::addressof(t_data), nullptr, 1024*64, PRIO_PREEMPTIVE, WRITE_THREAD_CORE));
+    R_TRY(utils::CreateThread(&t_write, writeFunc, std::addressof(t_data), 1024*64));
     ON_SCOPE_EXIT(threadClose(&t_write));
 
     log_write("starting threads\n");
@@ -1012,7 +1007,7 @@ Result Yati::InstallNcaInternal(std::span<TikCollection> tickets, NcaCollection&
     NcmContentId content_id{};
     std::memcpy(std::addressof(content_id), nca.hash, sizeof(content_id));
 
-    log_write("old id: %s new id: %s\n", hexIdToStr(nca.content_id).str, hexIdToStr(content_id).str);
+    log_write("old id: %s new id: %s\n", utils::hexIdToStr(nca.content_id).str, utils::hexIdToStr(content_id).str);
     if (!config.skip_nca_hash_verify && !nca.modified) {
         if (std::memcmp(&nca.content_id, nca.hash, sizeof(nca.content_id))) {
             log_write("nca hash is invalid!!!!\n");
@@ -1077,7 +1072,7 @@ Result Yati::InstallCnmtNca(std::span<TikCollection> tickets, CnmtCollection& cn
             continue;
         }
 
-        const auto str = hexIdToStr(info.content_id);
+        const auto str = utils::hexIdToStr(info.content_id);
         const auto it = std::ranges::find_if(collections, [&str](auto& e){
             return e.name.find(str.str) != e.name.npos;
         });

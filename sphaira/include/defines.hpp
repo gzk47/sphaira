@@ -577,6 +577,7 @@ enum class SphairaResult : Result {
 
     UsbDsBadDeviceSpeed,
 
+    NcaBadMagic,
     NspBadMagic,
     XciBadMagic,
     XciSecurePartitionNotFound,
@@ -648,6 +649,17 @@ enum class SphairaResult : Result {
     YatiNcmDbCorruptHeader,
     // unable to total infos from ncm database.
     YatiNcmDbCorruptInfos,
+
+    NszFailedCreateCctx,
+    NszFailedSetCompressionLevel,
+    NszFailedSetThreadCount,
+    NszFailedSetLongDistanceMode,
+    NszFailedResetCctx,
+    NszFailedCompress2,
+    NszFailedCompressStream2,
+    NszTooManyBlocks,
+    // set when nca finished but not all blocks were handled.
+    NszMissingBlocks,
 };
 
 #define MAKE_SPHAIRA_RESULT_ENUM(x) Result_##x =  MAKERESULT(Module_Sphaira, (Result)SphairaResult::x)
@@ -717,8 +729,11 @@ enum : Result {
     MAKE_SPHAIRA_RESULT_ENUM(ThemezerFailedToDownloadTheme),
     MAKE_SPHAIRA_RESULT_ENUM(MainFailedToDownloadUpdate),
     MAKE_SPHAIRA_RESULT_ENUM(UsbDsBadDeviceSpeed),
+
     MAKE_SPHAIRA_RESULT_ENUM(NspBadMagic),
     MAKE_SPHAIRA_RESULT_ENUM(XciBadMagic),
+    MAKE_SPHAIRA_RESULT_ENUM(NcaBadMagic),
+
     MAKE_SPHAIRA_RESULT_ENUM(XciSecurePartitionNotFound),
     MAKE_SPHAIRA_RESULT_ENUM(EsBadTitleKeyType),
     MAKE_SPHAIRA_RESULT_ENUM(EsPersonalisedTicketDeviceIdMissmatch),
@@ -729,7 +744,9 @@ enum : Result {
     MAKE_SPHAIRA_RESULT_ENUM(EsInvalidTicketFromatVersion),
     MAKE_SPHAIRA_RESULT_ENUM(EsInvalidTicketKeyType),
     MAKE_SPHAIRA_RESULT_ENUM(EsInvalidTicketKeyRevision),
+
     MAKE_SPHAIRA_RESULT_ENUM(OwoBadArgs),
+
     MAKE_SPHAIRA_RESULT_ENUM(UsbCancelled),
     MAKE_SPHAIRA_RESULT_ENUM(UsbBadMagic),
     MAKE_SPHAIRA_RESULT_ENUM(UsbBadVersion),
@@ -744,6 +761,7 @@ enum : Result {
     MAKE_SPHAIRA_RESULT_ENUM(UsbUploadBadTransferSize),
     MAKE_SPHAIRA_RESULT_ENUM(UsbUploadBadTotalSize),
     MAKE_SPHAIRA_RESULT_ENUM(UsbUploadBadCommand),
+
     MAKE_SPHAIRA_RESULT_ENUM(YatiContainerNotFound),
     MAKE_SPHAIRA_RESULT_ENUM(YatiNcaNotFound),
     MAKE_SPHAIRA_RESULT_ENUM(YatiInvalidNcaReadSize),
@@ -765,6 +783,16 @@ enum : Result {
     MAKE_SPHAIRA_RESULT_ENUM(YatiCertNotFound),
     MAKE_SPHAIRA_RESULT_ENUM(YatiNcmDbCorruptHeader),
     MAKE_SPHAIRA_RESULT_ENUM(YatiNcmDbCorruptInfos),
+
+    MAKE_SPHAIRA_RESULT_ENUM(NszFailedCreateCctx),
+    MAKE_SPHAIRA_RESULT_ENUM(NszFailedSetCompressionLevel),
+    MAKE_SPHAIRA_RESULT_ENUM(NszFailedSetThreadCount),
+    MAKE_SPHAIRA_RESULT_ENUM(NszFailedSetLongDistanceMode),
+    MAKE_SPHAIRA_RESULT_ENUM(NszFailedResetCctx),
+    MAKE_SPHAIRA_RESULT_ENUM(NszFailedCompress2),
+    MAKE_SPHAIRA_RESULT_ENUM(NszFailedCompressStream2),
+    MAKE_SPHAIRA_RESULT_ENUM(NszTooManyBlocks),
+    MAKE_SPHAIRA_RESULT_ENUM(NszMissingBlocks),
 };
 
 #undef MAKE_SPHAIRA_RESULT_ENUM
@@ -798,16 +826,6 @@ enum : Result {
 #define ON_SCOPE_EXIT(_f) std::experimental::scope_exit ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){[&] { _f; }};
 // #define ON_SCOPE_FAIL(_f) std::experimental::scope_exit ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){[&] { if (R_FAILED(rc)) { _f; } }};
 // #define ON_SCOPE_SUCCESS(_f) std::experimental::scope_exit ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){[&] { if (R_SUCCEEDED(rc)) { _f; } }};
-
-// threading helpers.
-#define PRIO_PREEMPTIVE 0x3B
-
-// threading affinity, use with svcSetThreadCoreMask().
-#define THREAD_AFFINITY_CORE0 BIT(0)
-#define THREAD_AFFINITY_CORE1 BIT(1)
-#define THREAD_AFFINITY_CORE2 BIT(2)
-#define THREAD_AFFINITY_DEFAULT(core) (BIT(core)|THREAD_AFFINITY_CORE1|THREAD_AFFINITY_CORE2)
-#define THREAD_AFFINITY_ALL (THREAD_AFFINITY_CORE0|THREAD_AFFINITY_CORE1|THREAD_AFFINITY_CORE2)
 
 // mutex helpers.
 #define SCOPED_MUTEX(mutex) \

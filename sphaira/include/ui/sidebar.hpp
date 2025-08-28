@@ -91,6 +91,25 @@ private:
     std::string m_false_str;
 };
 
+class SidebarEntrySlider final : public SidebarEntryBase {
+public:
+    using Callback = std::function<void(float&)>;
+
+public:
+    explicit SidebarEntrySlider(const std::string& title, float value, float min, float max, int steps, const Callback& cb, const std::string& info = "");
+    void Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) override;
+
+private:
+    float m_value;
+    float m_min;
+    float m_max;
+    int m_steps;
+    Callback m_callback;
+
+    float m_duration;
+    float m_inc;
+};
+
 class SidebarEntryCallback final : public SidebarEntryBase {
 public:
     using Callback = std::function<void()>;

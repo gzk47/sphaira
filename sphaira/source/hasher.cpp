@@ -4,6 +4,9 @@
 #include <mbedtls/md5.h>
 #include <utility>
 
+#include <zlib.h>
+#include <zstd.h>
+
 namespace sphaira::hash {
 namespace {
 
@@ -59,12 +62,152 @@ private:
 
 struct HashSource {
     virtual ~HashSource() = default;
-    virtual void Update(const void* buf, s64 size) = 0;
+    virtual void Update(const void* buf, s64 size, s64 file_size) = 0;
     virtual void Get(std::string& out) = 0;
 };
 
+struct HashNull final : HashSource {
+    void Update(const void* buf, s64 size, s64 file_size) override {
+        m_in_size += size;
+    }
+
+    void Get(std::string& out) override {
+        char str[64];
+        std::snprintf(str, sizeof(str), "%zu bytes", m_in_size);
+        out = str;
+    }
+
+private:
+    size_t m_in_size{};
+};
+
+// this currently crashes when freeing the pool :/
+#define USE_THREAD_POOL 0
+struct HashZstd final : HashSource {
+    HashZstd() {
+        const auto num_threads = 3;
+        const auto level = ZSTD_CLEVEL_DEFAULT;
+
+        m_ctx = ZSTD_createCCtx();
+        if (!m_ctx) {
+            log_write("[ZSTD] failed to create ctx\n");
+        }
+
+
+        #if USE_THREAD_POOL
+        m_pool = ZSTD_createThreadPool(num_threads);
+        if (!m_pool) {
+            log_write("[ZSTD] failed to create pool\n");
+        }
+
+        if (ZSTD_isError(ZSTD_CCtx_refThreadPool(m_ctx, m_pool))) {
+            log_write("[ZSTD] failed ZSTD_CCtx_refThreadPool(m_pool)\n");
+        }
+        #endif
+        if (ZSTD_isError(ZSTD_CCtx_setParameter(m_ctx, ZSTD_c_compressionLevel, level))) {
+            log_write("[ZSTD] failed ZSTD_CCtx_setParameter(ZSTD_c_compressionLevel)\n");
+        }
+        if (ZSTD_isError(ZSTD_CCtx_setParameter(m_ctx, ZSTD_c_nbWorkers, num_threads))) {
+            log_write("[ZSTD] failed ZSTD_CCtx_setParameter(ZSTD_c_nbWorkers)\n");
+        }
+
+        m_out_buf.resize(ZSTD_CStreamOutSize());
+    }
+
+    ~HashZstd() {
+        ZSTD_freeCCtx(m_ctx);
+        #if USE_THREAD_POOL
+        // crashes here during ZSTD_pthread_join()
+        // ZSTD_freeThreadPool(m_pool);
+        #endif
+    }
+
+    void Update(const void* buf, s64 size, s64 file_size) override {
+        ZSTD_inBuffer input = { buf, (u64)size, 0 };
+
+        const auto last_chunk = m_in_size + size >= file_size;
+        const auto mode = last_chunk ? ZSTD_e_end : ZSTD_e_continue;
+
+        while (input.pos < input.size) {
+            ZSTD_outBuffer output = { m_out_buf.data(), m_out_buf.size(), 0 };
+            const size_t remaining = ZSTD_compressStream2(m_ctx, &output , &input, mode);
+
+            if (ZSTD_isError(remaining)) {
+                log_write("[ZSTD] error: %zu\n", remaining);
+                break;
+            }
+
+            m_out_size += output.pos;
+        };
+
+        m_in_size += size;
+    }
+
+    void Get(std::string& out) override {
+        log_write("getting size: %zu vs %zu\n", m_out_size, m_in_size);
+        char str[64];
+        const u32 percentage = ((double)m_out_size / (double)m_in_size) * 100.0;
+        std::snprintf(str, sizeof(str), "%u%%", percentage);
+        out = str;
+        log_write("got size: %zu vs %zu\n", m_out_size, m_in_size);
+    }
+
+private:
+    ZSTD_CCtx* m_ctx{};
+    ZSTD_threadPool* m_pool{};
+    std::vector<u8> m_out_buf{};
+    size_t m_in_size{};
+    size_t m_out_size{};
+};
+
+struct HashDeflate final : HashSource {
+    HashDeflate() {
+        deflateInit(&m_ctx, Z_DEFAULT_COMPRESSION);
+        m_out_buf.resize(deflateBound(&m_ctx, 1024*1024*16)); // max chunk size.
+    }
+
+    ~HashDeflate() {
+        deflateEnd(&m_ctx);
+    }
+
+    void Update(const void* buf, s64 size, s64 file_size) override {
+        m_ctx.avail_in = size;
+        m_ctx.next_in = const_cast<Bytef*>((const Bytef*)buf);
+
+        const auto last_chunk = m_in_size + size >= file_size;
+        const auto mode = last_chunk ? Z_FINISH : Z_NO_FLUSH;
+
+        while (m_ctx.avail_in != 0) {
+            m_ctx.next_out = m_out_buf.data();
+            m_ctx.avail_out = m_out_buf.size();
+
+            const auto rc = deflate(&m_ctx, mode);
+            if (Z_OK != rc) {
+                if (Z_STREAM_END != rc) {
+                    log_write("[ZLIB] deflate error: %d\n", rc);
+                }
+                break;
+            }
+        }
+
+        m_in_size += size;
+    }
+
+    void Get(std::string& out) override {
+        char str[64];
+        const u32 percentage = ((double)m_ctx.total_out / (double)m_in_size) * 100.0;
+        std::snprintf(str, sizeof(str), "%u%%", percentage);
+        out = str;
+    }
+
+private:
+    z_stream m_ctx{};
+    std::vector<u8> m_out_buf{};
+    size_t m_in_size{};
+};
+
 struct HashCrc32 final : HashSource {
-    void Update(const void* buf, s64 size) override {
+    void Update(const void* buf, s64 size, s64 file_size) override {
         m_seed = crc32CalculateWithSeed(m_seed, buf, size);
     }
 
@@ -88,7 +231,7 @@ struct HashMd5 final : HashSource {
         mbedtls_md5_free(&m_ctx);
     }
 
-    void Update(const void* buf, s64 size) override {
+    void Update(const void* buf, s64 size, s64 file_size) override {
         mbedtls_md5_update_ret(&m_ctx, (const u8*)buf, size);
     }
 
@@ -113,7 +256,7 @@ struct HashSha1 final : HashSource {
         sha1ContextCreate(&m_ctx);
     }
 
-    void Update(const void* buf, s64 size) override {
+    void Update(const void* buf, s64 size, s64 file_size) override {
         sha1ContextUpdate(&m_ctx, buf, size);
     }
 
@@ -138,7 +281,7 @@ struct HashSha256 final : HashSource {
         sha256ContextCreate(&m_ctx);
     }
 
-    void Update(const void* buf, s64 size) override {
+    void Update(const void* buf, s64 size, s64 file_size) override {
         sha256ContextUpdate(&m_ctx, buf, size);
     }
 
@@ -167,7 +310,7 @@ Result Hash(ui::ProgressBox* pbox, std::unique_ptr<HashSource> hash, BaseSource*
             return source->Read(data, off, size, bytes_read);
         },
         [&](const void* data, s64 off, s64 size) -> Result {
-            hash->Update(data, size);
+            hash->Update(data, size, file_size);
             R_SUCCEED();
         }
     ));
@@ -184,6 +327,9 @@ auto GetTypeStr(Type type) -> const char* {
         case Type::Md5: return "MD5";
         case Type::Sha1: return "SHA1";
         case Type::Sha256: return "SHA256";
+        case Type::Null: return "/dev/null (Speed Test)";
+        case Type::Deflate: return "Deflate (Speed Test)";
+        case Type::Zstd: return "ZSTD (Speed Test)";
     }
     return "";
 }
@@ -194,6 +340,9 @@ Result Hash(ui::ProgressBox* pbox, Type type, BaseSource* source, std::string& o
         case Type::Md5: return Hash(pbox, std::make_unique<HashMd5>(), source, out);
         case Type::Sha1: return Hash(pbox, std::make_unique<HashSha1>(), source, out);
         case Type::Sha256: return Hash(pbox, std::make_unique<HashSha256>(), source, out);
+        case Type::Null: return Hash(pbox, std::make_unique<HashNull>(), source, out);
+        case Type::Deflate: return Hash(pbox, std::make_unique<HashDeflate>(), source, out);
+        case Type::Zstd: return Hash(pbox, std::make_unique<HashZstd>(), source, out);
     }
     std::unreachable();
 }

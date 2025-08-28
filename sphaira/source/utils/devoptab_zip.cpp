@@ -114,7 +114,7 @@ struct DirectoryEntry {
 using FileTableEntries = std::vector<FileEntry>;
 
 struct Device {
-    std::unique_ptr<common::BufferedData> source;
+    std::unique_ptr<common::LruBufferedData> source;
     DirectoryEntry root;
 };
 
@@ -226,7 +226,7 @@ int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int fla
 
     mmz_LocalHeader local_hdr{};
     auto offset = entry->local_file_header_off;
-    if (R_FAILED(device->source->Read(&local_hdr, offset, sizeof(local_hdr)))) {
+    if (R_FAILED(device->source->Read2(&local_hdr, offset, sizeof(local_hdr)))) {
         return set_errno(r, ENOENT);
     }
 
@@ -239,7 +239,7 @@ int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int fla
     // todo: does a decs take prio over file header?
     if (local_hdr.flags & mmz_Flag_DataDescriptor) {
         mmz_DataDescriptor data_desc{};
-        if (R_FAILED(device->source->Read(&data_desc, offset, sizeof(data_desc)))) {
+        if (R_FAILED(device->source->Read2(&data_desc, offset, sizeof(data_desc)))) {
             return set_errno(r, ENOENT);
         }
 
@@ -296,7 +296,7 @@ ssize_t devoptab_read(struct _reent *r, void *fd, char *ptr, size_t len) {
     }
 
     if (file->entry->compression_type == mmz_Compression_None) {
-        if (R_FAILED(file->device->source->Read(ptr, file->data_off + file->off, len))) {
+        if (R_FAILED(file->device->source->Read2(ptr, file->data_off + file->off, len))) {
             return set_errno(r, ENOENT);
         }
     } else if (file->entry->compression_type == mmz_Compression_Deflate) {
@@ -309,7 +309,7 @@ ssize_t devoptab_read(struct _reent *r, void *fd, char *ptr, size_t len) {
             // check if we need to fetch more data.
             if (!zfile.z.next_in || !zfile.z.avail_in) {
                 const auto clen = std::min(zfile.buffer_size, file->entry->compressed_size - zfile.compressed_off);
-                if (R_FAILED(file->device->source->Read(zfile.buffer, file->data_off + zfile.compressed_off, clen))) {
+                if (R_FAILED(file->device->source->Read2(zfile.buffer, file->data_off + zfile.compressed_off, clen))) {
                     return set_errno(r, ENOENT);
                 }
 
@@ -533,10 +533,10 @@ void Parse(const FileTableEntries& entries, DirectoryEntry& out) {
     Parse(entries, index, out);
 }
 
-Result find_central_dir_offset(common::BufferedData* source, s64 size, mmz_EndRecord* record) {
+Result find_central_dir_offset(common::LruBufferedData* source, s64 size, mmz_EndRecord* record) {
     // check if the record is at the end (no extra header).
     auto offset = size - sizeof(*record);
-    R_TRY(source->Read(record, offset, sizeof(*record)));
+    R_TRY(source->Read2(record, offset, sizeof(*record)));
 
     if (record->sig == END_RECORD_SIG) {
         R_SUCCEED();
@@ -546,7 +546,7 @@ Result find_central_dir_offset(common::BufferedData* source, s64 size, mmz_EndRe
     const auto rsize = std::min<u64>(UINT16_MAX, size);
     offset = size - rsize;
     std::vector<u8> data(rsize);
-    R_TRY(source->Read(data.data(), offset, data.size()));
+    R_TRY(source->Read2(data.data(), offset, data.size()));
 
     // check in reverse order as it's more likely at the end.
     for (s64 i = data.size() - sizeof(*record); i >= 0; i--) {
@@ -561,7 +561,7 @@ Result find_central_dir_offset(common::BufferedData* source, s64 size, mmz_EndRe
     R_THROW(0x1);
 }
 
-Result ParseZip(common::BufferedData* source, s64 size, FileTableEntries& out) {
+Result ParseZip(common::LruBufferedData* source, s64 size, FileTableEntries& out) {
     mmz_EndRecord end_rec;
     R_TRY(find_central_dir_offset(source, size, &end_rec));
 
@@ -571,7 +571,7 @@ Result ParseZip(common::BufferedData* source, s64 size, FileTableEntries& out) {
     for (u16 i = 0; i < end_rec.total_entries; i++) {
         // read the file header.
         mmz_FileHeader file_hdr{};
-        R_TRY(source->Read(&file_hdr, file_header_off, sizeof(file_hdr)));
+        R_TRY(source->Read2(&file_hdr, file_header_off, sizeof(file_hdr)));
 
         if (file_hdr.sig != FILE_HEADER_SIG) {
             log_write("[ZIP] invalid file record\n");
@@ -591,7 +591,7 @@ Result ParseZip(common::BufferedData* source, s64 size, FileTableEntries& out) {
         // read the file name.
         const auto filename_off = file_header_off + sizeof(file_hdr);
         new_entry.path.resize(file_hdr.filename_len);
-        R_TRY(source->Read(new_entry.path.data(), filename_off, new_entry.path.size()));
+        R_TRY(source->Read2(new_entry.path.data(), filename_off, new_entry.path.size()));
 
         // advance the offset.
         file_header_off += sizeof(file_hdr) + file_hdr.filename_len + file_hdr.extrafield_len + file_hdr.filecomment_len;
@@ -637,12 +637,12 @@ Result MountZip(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
     R_UNLESS(itr != g_entries.end(), 0x1);
 
     const auto index = std::distance(g_entries.begin(), itr);
-    auto source = std::make_unique<yati::source::File>(fs, path);
+    auto source = std::make_shared<yati::source::File>(fs, path);
 
     s64 size;
     R_TRY(source->GetSize(&size));
 
-    auto buffered = std::make_unique<common::BufferedData>(std::move(source), size);
+    auto buffered = std::make_unique<common::LruBufferedData>(source, size);
 
     FileTableEntries table_entries;
     R_TRY(ParseZip(buffered.get(), size, table_entries));

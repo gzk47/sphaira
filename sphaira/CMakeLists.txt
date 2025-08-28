@@ -35,6 +35,7 @@ set(sphaira_VERSION_HASH "${sphaira_VERSION} [${GIT_COMMIT}]")
 add_executable(sphaira
     source/ui/menus/appstore.cpp
     source/ui/menus/file_viewer.cpp
+    source/ui/menus/image_viewer.cpp
     source/ui/menus/filebrowser.cpp
     source/ui/menus/file_picker.cpp
     source/ui/menus/homebrew.cpp
@@ -65,6 +66,7 @@ add_executable(sphaira
     source/ui/widget.cpp
     source/ui/list.cpp
     source/ui/scrolling_text.cpp
+    source/ui/music_player.cpp
 
     source/app.cpp
     source/download.cpp
@@ -89,29 +91,39 @@ add_executable(sphaira
     source/title_info.cpp
     source/minizip_helper.cpp
     source/fatfs.cpp
+    source/usbdvd.cpp
 
+    source/utils/utils.cpp
+    source/utils/audio.cpp
+    source/utils/nsz_dumper.cpp
     source/utils/devoptab_common.cpp
+    source/utils/devoptab_romfs.cpp
     source/utils/devoptab_save.cpp
+    source/utils/devoptab_nro.cpp
+    source/utils/devoptab_nca.cpp
     source/utils/devoptab_nsp.cpp
     source/utils/devoptab_xci.cpp
     source/utils/devoptab_zip.cpp
+    source/utils/devoptab_bfsar.cpp
 
     source/usb/base.cpp
     source/usb/usbds.cpp
     source/usb/usbhs.cpp
     source/usb/usb_uploader.cpp
+    source/usb/usb_installer.cpp
+    source/usb/usb_dumper.cpp
 
     source/yati/yati.cpp
     source/yati/container/nsp.cpp
     source/yati/container/xci.cpp
     source/yati/source/file.cpp
-    source/yati/source/usb.cpp
     source/yati/source/stream.cpp
     source/yati/source/stream_file.cpp
 
     source/yati/nx/es.cpp
     source/yati/nx/keys.cpp
     source/yati/nx/nca.cpp
+    source/yati/nx/ncz.cpp
     source/yati/nx/ncm.cpp
     source/yati/nx/ns.cpp
 
@@ -123,7 +135,8 @@ target_compile_definitions(sphaira PRIVATE
     -DAPP_VERSION="${sphaira_VERSION}"
     -DAPP_VERSION_HASH="${sphaira_VERSION_HASH}"
     -DCURL_NO_OLDIES=1
-    -DENABLE_NETWORK_INSTALL=$<BOOL:${ENABLE_NETWORK_INSTALL}>
+    -DDEV_BUILD=$<BOOL:${DEV_BUILD}>
+    -DZSTD_STATIC_LINKING_ONLY=1
 )
 
 target_compile_options(sphaira PRIVATE
@@ -177,12 +190,12 @@ FetchContent_Declare(ftpsrv
 
 FetchContent_Declare(libhaze
     GIT_REPOSITORY https://github.com/ITotalJustice/libhaze.git
-    GIT_TAG 0be1523
+    GIT_TAG f0b2a14
 )
 
 FetchContent_Declare(libpulsar
     GIT_REPOSITORY https://github.com/ITotalJustice/switch-libpulsar.git
-    GIT_TAG de656e4
+    GIT_TAG ac7bc97
 )
 
 FetchContent_Declare(nanovg
@@ -197,7 +210,7 @@ FetchContent_Declare(stb
 
 FetchContent_Declare(yyjson
     GIT_REPOSITORY https://github.com/ibireme/yyjson.git
-    GIT_TAG 0.11.1
+    GIT_TAG 0.12.0
 )
 
 FetchContent_Declare(minIni
@@ -213,7 +226,7 @@ FetchContent_Declare(zstd
 
 FetchContent_Declare(libusbhsfs
     GIT_REPOSITORY https://github.com/ITotalJustice/libusbhsfs.git
-    GIT_TAG d0a973e
+    GIT_TAG 625269b
 )
 
 FetchContent_Declare(libnxtc
@@ -226,31 +239,47 @@ FetchContent_Declare(nvjpg
     GIT_TAG 45680e7
 )
 
+FetchContent_Declare(dr_libs
+    GIT_REPOSITORY https://github.com/mackron/dr_libs.git
+    GIT_TAG b962384
+    SOURCE_SUBDIR NONE
+)
+
+FetchContent_Declare(id3v2lib
+    GIT_REPOSITORY https://github.com/larsbs/id3v2lib.git
+    GIT_TAG 141ffb8
+)
+
+FetchContent_Declare(libusbdvd
+    GIT_REPOSITORY https://github.com/proconsule/libusbdvd.git
+    GIT_TAG 3cb0613
+)
+
 set(USE_NEW_ZSTD ON)
 # has issues with some homebrew and game icons (oxenfree, overwatch2).
-set(USE_NVJPG ON)
+set(USE_NVJPG OFF)
 
 set(ZSTD_BUILD_STATIC ON)
 set(ZSTD_BUILD_SHARED OFF)
-set(ZSTD_BUILD_COMPRESSION OFF)
+set(ZSTD_BUILD_COMPRESSION ON)
+set(ZSTD_MULTITHREAD_SUPPORT ON)
 set(ZSTD_BUILD_DECOMPRESSION ON)
 set(ZSTD_BUILD_DICTBUILDER OFF)
 set(ZSTD_LEGACY_SUPPORT OFF)
-set(ZSTD_MULTITHREAD_SUPPORT OFF)
 set(ZSTD_BUILD_PROGRAMS OFF)
 set(ZSTD_BUILD_TESTS OFF)
 
 set(MININI_LIB_NAME minIni)
 set(MININI_USE_STDIO ON)
 set(MININI_USE_NX OFF)
-set(MININI_USE_FLOAT OFF)
+set(MININI_USE_FLOAT ON)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     set(NANOVG_DEBUG ON)
 endif()
 set(NANOVG_NO_JPEG OFF)
 set(NANOVG_NO_PNG OFF)
-set(NANOVG_NO_BMP ON)
+set(NANOVG_NO_BMP OFF)
 set(NANOVG_NO_PSD ON)
 set(NANOVG_NO_TGA ON)
 set(NANOVG_NO_GIF ON)
@@ -283,6 +312,9 @@ FetchContent_MakeAvailable(
     libusbhsfs
     libnxtc
     nvjpg
+    dr_libs
+    id3v2lib
+    libusbdvd
 )
 
 set(FTPSRV_LIB_BUILD TRUE)
@@ -324,12 +356,37 @@ target_include_directories(ftpsrv_helper PUBLIC ${ftpsrv_SOURCE_DIR}/src/platfor
 add_library(stb INTERFACE)
 target_include_directories(stb INTERFACE ${stb_SOURCE_DIR})
 
+add_library(dr_libs INTERFACE)
+target_include_directories(dr_libs INTERFACE ${dr_libs_SOURCE_DIR})
+
 add_library(libnxtc
     ${libnxtc_SOURCE_DIR}/source/nxtc.c
     ${libnxtc_SOURCE_DIR}/source/nxtc_log.c
     ${libnxtc_SOURCE_DIR}/source/nxtc_utils.c
 )
 target_include_directories(libnxtc PUBLIC ${libnxtc_SOURCE_DIR}/include)
+
+add_library(libusbdvd
+    ${libusbdvd_SOURCE_DIR}/source/usbdvd.cpp
+    ${libusbdvd_SOURCE_DIR}/source/usbdvd_scsi.cpp
+    ${libusbdvd_SOURCE_DIR}/source/usbdvd_utils.cpp
+    ${libusbdvd_SOURCE_DIR}/source/fs/usbdvd_datadisc.cpp
+    ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs/audiocdfs.cpp
+    ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs/cdaudio_devoptab.cpp
+    ${libusbdvd_SOURCE_DIR}/source/fs/iso9660/usbdvd_iso9660.cpp
+    ${libusbdvd_SOURCE_DIR}/source/fs/iso9660/iso9660_devoptab.cpp
+    ${libusbdvd_SOURCE_DIR}/source/fs/udf/usbdvd_udf.cpp
+    ${libusbdvd_SOURCE_DIR}/source/fs/udf/udf_devoptab.cpp
+    ${libusbdvd_SOURCE_DIR}/source/os/switch/switch_usb.cpp
+
+)
+target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/)
+target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/os/switch)
+target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs)
+target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs)
+target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/iso9660)
+target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/udf)
+target_include_directories(libusbdvd PUBLIC ${libusbdvd_SOURCE_DIR}/include)
 
 if (USE_NVJPG)
     add_library(nvjpg
@@ -357,7 +414,6 @@ endif()
 add_library(fatfs
     source/ff16/diskio.c
     source/ff16/ff.c
-    source/ff16/ffunicode.c
 )
 
 target_include_directories(fatfs PUBLIC source/ff16)
@@ -380,6 +436,9 @@ target_link_libraries(sphaira PRIVATE
     # libusbhsfs
     libnxtc
     fatfs
+    dr_libs
+    id3v2lib
+    libusbdvd
 
     ${minizip_lib}
     ZLIB::ZLIB

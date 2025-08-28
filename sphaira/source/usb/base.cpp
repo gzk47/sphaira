@@ -16,8 +16,6 @@
 
 // The USB transfer code was taken from Haze (part of Atmosphere).
 
-#if ENABLE_NETWORK_INSTALL
-
 #include "usb/base.hpp"
 #include "log.hpp"
 #include "defines.hpp"
@@ -100,5 +98,3 @@ Result Base::TransferAll(bool read, void *data, u32 size, u64 timeout) {
 }
 
 } // namespace sphaira::usb
-
-#endif

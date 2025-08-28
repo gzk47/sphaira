@@ -9,6 +9,11 @@
 
 namespace sphaira {
 
+struct NroData {
+    NroStart start;
+    NroHeader header;
+};
+
 struct Hbini {
     u64 timestamp{}; // timestamp of last launch
     bool hidden{};
@@ -26,9 +31,6 @@ struct NroEntry {
 
     u64 icon_size{};
     u64 icon_offset{};
-
-    u64 romfs_size{};
-    u64 romfs_offset{};
 
     FsTimeStampRaw timestamp{};
     Hbini hbini{};

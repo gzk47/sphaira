@@ -17,7 +17,7 @@ namespace sphaira::ui::menu::game {
 
 struct Entry {
     u64 app_id{};
-    u8 type{};
+    u8 last_event{};
     NacpLanguageEntry lang{};
     int image{};
     bool selected{};
@@ -84,7 +84,8 @@ private:
     }
 
     void DeleteGames();
-    void DumpGames(u32 flags);
+    void ExportOptions(bool to_nsz);
+    void DumpGames(u32 flags, bool to_nsz);
     void CreateSaves(AccountUid uid);
 
 private:
@@ -97,6 +98,10 @@ private:
     std::unique_ptr<List> m_list{};
     bool m_is_reversed{};
     bool m_dirty{};
+
+    // use for detection game card removal to force a refresh.
+    Event m_gc_event{};
+    FsEventNotifier m_gc_event_notifier{};
 
     option::OptionLong m_sort{INI_SECTION, "sort", SortType::SortType_Updated};
     option::OptionLong m_order{INI_SECTION, "order", OrderType::OrderType_Descending};
@@ -160,13 +165,13 @@ struct ContentInfoEntry {
     std::vector<NcmRightsId> ncm_rights_id{};
 };
 
-auto BuildNspPath(const Entry& e, const NsApplicationContentMetaStatus& status) -> fs::FsPath;
-Result BuildContentEntry(const NsApplicationContentMetaStatus& status, ContentInfoEntry& out);
-Result BuildNspEntry(const Entry& e, const ContentInfoEntry& info, const keys::Keys& keys, NspEntry& out);
-Result BuildNspEntries(Entry& e, const title::MetaEntries& meta_entries, std::vector<NspEntry>& out);
-Result BuildNspEntries(Entry& e, u32 flags, std::vector<NspEntry>& out);
+auto BuildNspPath(const Entry& e, const NsApplicationContentMetaStatus& status, bool to_nsz = false) -> fs::FsPath;
+Result BuildContentEntry(const NsApplicationContentMetaStatus& status, ContentInfoEntry& out, bool to_nsz = false);
+Result BuildNspEntry(const Entry& e, const ContentInfoEntry& info, const keys::Keys& keys, NspEntry& out, bool to_nsz = false);
+Result BuildNspEntries(Entry& e, const title::MetaEntries& meta_entries, std::vector<NspEntry>& out, bool to_nsz = false);
+Result BuildNspEntries(Entry& e, u32 flags, std::vector<NspEntry>& out, bool to_nsz = false);
 
 // dumps the array of nsp entries.
-void DumpNsp(const std::vector<NspEntry>& entries);
+void DumpNsp(const std::vector<NspEntry>& entries, bool to_nsz);
 
 } // namespace sphaira::ui::menu::game

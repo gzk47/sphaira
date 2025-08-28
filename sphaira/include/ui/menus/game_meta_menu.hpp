@@ -91,7 +91,7 @@ private:
         return GetEntry(m_index);
     }
 
-    void DumpGames();
+    void DumpGames(bool to_nsz);
     void DeleteGames();
     Result ResetRequiredSystemVersion(MetaEntry& entry) const;
     Result GetNcmSizeOfMetaStatus(MetaEntry& entry) const;

@@ -5,6 +5,7 @@
 namespace sphaira::haze {
 
 bool Init();
+bool IsInit();
 void Exit();
 
 using OnInstallStart = std::function<bool(const char* path)>;

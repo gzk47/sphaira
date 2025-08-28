@@ -142,6 +142,7 @@ struct DownloadEventData {
 
 auto Init() -> bool;
 void Exit();
+void ExitSignal();
 
 // sync functions
 auto ToMemory(const Api& e) -> ApiResult;

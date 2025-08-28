@@ -15,7 +15,10 @@ enum class Mode {
     SingleThreadedIfSmaller,
 };
 
+using DecompressWriteCallback = std::function<Result(const void* data, s64 size)>;
+
 using ReadCallback = std::function<Result(void* data, s64 off, s64 size, u64* bytes_read)>;
+using DecompressCallback = std::function<Result(void* data, s64 off, s64 size, const DecompressWriteCallback& callback)>;
 using WriteCallback = std::function<Result(const void* data, s64 off, s64 size)>;
 
 // used for pull api
@@ -33,6 +36,7 @@ using StartCallback2 = std::function<Result(StartThreadCallback start, PullCallb
 
 // reads data from rfunc into wfunc.
 Result Transfer(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfunc, const WriteCallback& wfunc, Mode mode = Mode::MultiThreaded);
+Result Transfer(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfunc, const DecompressCallback& dfunc, const WriteCallback& wfunc, Mode mode = Mode::MultiThreaded);
 
 // reads data from rfunc, pull data from provided pull() callback.
 Result TransferPull(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfunc, const StartCallback& sfunc, Mode mode = Mode::MultiThreaded);

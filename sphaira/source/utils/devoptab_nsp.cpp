@@ -19,7 +19,7 @@ namespace sphaira::devoptab {
 namespace {
 
 struct Device {
-    std::unique_ptr<common::BufferedData> source;
+    std::unique_ptr<common::LruBufferedData> source;
     yati::container::Collections collections;
 };
 
@@ -245,11 +245,11 @@ Result MountNsp(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
     R_UNLESS(itr != g_entries.end(), 0x1);
 
     const auto index = std::distance(g_entries.begin(), itr);
-    auto source = std::make_unique<yati::source::File>(fs, path);
+    auto source = std::make_shared<yati::source::File>(fs, path);
 
     s64 size;
     R_TRY(source->GetSize(&size));
-    auto buffered = std::make_unique<common::BufferedData>(std::move(source), size);
+    auto buffered = std::make_unique<common::LruBufferedData>(source, size);
 
     yati::container::Nsp nsp{buffered.get()};
     yati::container::Collections collections;

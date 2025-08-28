@@ -87,7 +87,8 @@ private:
 
     auto BuildSavePath(const Entry& e, bool is_auto) const -> fs::FsPath;
     Result RestoreSaveInternal(ProgressBox* pbox, const Entry& e, const fs::FsPath& path) const;
-    Result BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& location, const Entry& e, bool compressed, bool is_auto = false) const;
+    Result BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& location, Entry& e, bool compressed, bool is_auto = false) const;
+    Result BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& location, std::span<const std::reference_wrapper<Entry>> entries, bool compressed, bool is_auto = false) const;
 
     Result MountSaveFs();
 

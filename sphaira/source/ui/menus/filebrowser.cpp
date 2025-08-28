@@ -1,11 +1,14 @@
 #include "ui/menus/filebrowser.hpp"
 #include "ui/menus/homebrew.hpp"
+#include "ui/menus/file_viewer.hpp"
+#include "ui/menus/image_viewer.hpp"
+
 #include "ui/sidebar.hpp"
 #include "ui/option_box.hpp"
 #include "ui/popup_list.hpp"
 #include "ui/progress_box.hpp"
 #include "ui/error_box.hpp"
-#include "ui/menus/file_viewer.hpp"
+#include "ui/music_player.hpp"
 
 #include "utils/devoptab.hpp"
 
@@ -28,6 +31,7 @@
 #include "yati/yati.hpp"
 #include "yati/source/file.hpp"
 
+#include <usbdvd.h>
 #include <minIni.h>
 #include <minizip/zip.h>
 #include <minizip/unzip.h>
@@ -80,10 +84,10 @@ constexpr FsEntry FS_ENTRIES[]{
 
 constexpr std::string_view AUDIO_EXTENSIONS[] = {
     "mp3", "ogg", "flac", "wav", "aac" "ac3", "aif", "asf", "bfwav",
-    "bfsar", "bfstm",
+    "bfsar", "bfstm", "bwav",
 };
 constexpr std::string_view VIDEO_EXTENSIONS[] = {
-    "mp4", "mkv", "m3u", "m3u8", "hls", "vob", "avi", "dv", "flv", "m2ts",
+    "mp4", "mkv", "m3u", "m3u8", "hls", "vob", "avi", "dv", "flv", "m2ts", "webm",
     "m2v", "m4a", "mov", "mpeg", "mpg", "mts", "swf", "ts", "vob", "wma", "wmv",
 };
 constexpr std::string_view IMAGE_EXTENSIONS[] = {
@@ -98,6 +102,9 @@ constexpr std::string_view NSP_EXTENSIONS[] = {
 constexpr std::string_view XCI_EXTENSIONS[] = {
     "xci", "xcz",
 };
+constexpr std::string_view NCA_EXTENSIONS[] = {
+    "nca", "ncz",
+};
 // these are files that are already compressed or encrypted and should
 // be stored raw in a zip file.
 constexpr std::string_view COMPRESSED_EXTENSIONS[] = {
@@ -105,6 +112,16 @@ constexpr std::string_view COMPRESSED_EXTENSIONS[] = {
 };
 constexpr std::string_view ZIP_EXTENSIONS[] = {
     "zip",
+};
+// supported music playback extensions.
+constexpr std::string_view MUSIC_EXTENSIONS[] = {
+    "bfstm", "bfwav", "wav", "mp3", "ogg", "adf",
+};
+// supported theme music playback extensions.
+constexpr std::span THEME_MUSIC_EXTENSIONS = MUSIC_EXTENSIONS;
+
+constexpr std::string_view CDDVD_EXTENSIONS[] = {
+    "iso", "cue",
 };
 
 struct RomDatabaseEntry {
@@ -473,8 +490,10 @@ FsView::FsView(Base* menu, const std::shared_ptr<fs::Fs>& fs, const fs::FsPath& 
         }})
     );
 
+    log_write("setting side\n");
     SetSide(m_side);
 
+    log_write("getting path\n");
     auto buf = path;
     if (path.empty() && entry.IsSd()) {
         ini_gets("paths", "last_path", entry.root, buf, sizeof(buf), App::CONFIG_PATH);
@@ -485,7 +504,9 @@ FsView::FsView(Base* menu, const std::shared_ptr<fs::Fs>& fs, const fs::FsPath& 
         buf = entry.root;
     }
 
+    log_write("setting fs\n");
     SetFs(fs, buf, entry);
+    log_write("set fs\n");
 }
 
 FsView::FsView(FsView* view, ViewSide side) : FsView{view->m_menu, view->m_fs, view->m_path, view->m_fs_entry, side} {
@@ -509,7 +530,7 @@ void FsView::Update(Controller* controller, TouchInfo* touch) {
         if (touch && m_index == i) {
             FireAction(Button::A);
         } else {
-            App::PlaySoundEffect(SoundEffect_Focus);
+            App::PlaySoundEffect(SoundEffect::Focus);
             SetIndex(i);
         }
     });
@@ -574,8 +595,9 @@ void FsView::Draw(NVGcontext* vg, Theme* theme) {
         if (e.IsDir()) {
             // NOTE: this takes longer than 16ms when opening a new folder due to it
             // checking all 9 folders at once.
-            if (!got_dir_count && e.file_count == -1 && e.dir_count == -1) {
+            if (!got_dir_count && !e.done_stat && e.file_count == -1 && e.dir_count == -1) {
                 got_dir_count = true;
+                e.done_stat = true;
                 m_fs->DirGetEntryCount(GetNewPath(e), &e.file_count, &e.dir_count);
             }
 
@@ -586,7 +608,8 @@ void FsView::Draw(NVGcontext* vg, Theme* theme) {
                 gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) + 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP, theme->GetColour(text_id), "%zd dirs"_i18n.c_str(), e.dir_count);
             }
         } else if (e.IsFile()) {
-            if (!e.time_stamp.is_valid) {
+            if (!e.time_stamp.is_valid && !e.done_stat) {
+                e.done_stat = true;
                 const auto path = GetNewPath(e);
                 if (m_fs->IsNative()) {
                     m_fs->GetFileTimeStampRaw(path, &e.time_stamp);
@@ -686,12 +709,44 @@ void FsView::OnClick() {
                         nro_launch(GetNewPathCurrent());
                     }
                 });
+        } else if (IsExtension(entry.GetExtension(), NCA_EXTENSIONS)) {
+            MountFileFs(devoptab::MountNca, devoptab::UmountNca);
         } else if (IsExtension(entry.GetExtension(), NSP_EXTENSIONS)) {
-            MountNspFs();
+            MountFileFs(devoptab::MountNsp, devoptab::UmountNsp);
         } else if (IsExtension(entry.GetExtension(), XCI_EXTENSIONS)) {
-            MountXciFs();
+            MountFileFs(devoptab::MountXci, devoptab::UmountXci);
         } else if (IsExtension(entry.GetExtension(), "zip")) {
-            MountZipFs();
+            MountFileFs(devoptab::MountZip, devoptab::UmountZip);
+        } else if (IsExtension(entry.GetExtension(), "bfsar")) {
+            MountFileFs(devoptab::MountBfsar, devoptab::UmountBfsar);
+        } else if (IsExtension(entry.GetExtension(), MUSIC_EXTENSIONS)) {
+            App::Push<music::Menu>(GetFs(), GetNewPathCurrent());
+        } else if (IsExtension(entry.GetExtension(), IMAGE_EXTENSIONS)) {
+            App::Push<imageview::Menu>(GetFs(), GetNewPathCurrent());
+        } else if (IsExtension(entry.GetExtension(), CDDVD_EXTENSIONS)) {
+            std::shared_ptr<CUSBDVD> usbdvd;
+
+            if (entry.GetExtension() == "cue") {
+                const auto cue_path = GetNewPathCurrent();
+                fs::FsPath bin_path = cue_path;
+                std::strcpy(std::strstr(bin_path, ".cue"), ".bin");
+                if (m_fs->FileExists(bin_path)) {
+                    usbdvd = std::make_shared<CUSBDVD>(cue_path, bin_path);
+                }
+            } else {
+                usbdvd = std::make_shared<CUSBDVD>(GetNewPathCurrent());
+            }
+
+            if (usbdvd && usbdvd->usbdvd_drive_ctx.fs.mounted) {
+                auto fs = std::make_shared<FsStdioWrapper>(usbdvd->usbdvd_drive_ctx.fs.mountpoint, [usbdvd](){
+                    // dummy func to keep shared_ptr alive until fs is closed.
+                });
+
+                MountFsHelper(fs, usbdvd->usbdvd_drive_ctx.fs.disc_fstype);
+                log_write("[USBDVD] mounted\n");
+            } else {
+                log_write("[USBDVD] failed to mount\n");
+            }
         } else if (IsExtension(entry.GetExtension(), INSTALL_EXTENSIONS)) {
             InstallFiles();
         } else if (IsSd()) {
@@ -1926,15 +1981,22 @@ void FsView::DisplayAdvancedOptions() {
         });
     }
 
-    if (IsSd() && m_entries_current.size() && !m_selected_count && GetEntry().IsFile() && GetEntry().file_size < 1024*64) {
+    if (m_entries_current.size() && !m_selected_count && GetEntry().IsFile() && GetEntry().file_size < 1024*64) {
         options->Add<SidebarEntryCallback>("View as text (unfinished)"_i18n, [this](){
-            App::Push<fileview::Menu>(GetNewPathCurrent());
+            App::Push<fileview::Menu>(GetFs(), GetNewPathCurrent());
         });
     }
 
     if (m_entries_current.size() && (m_menu->m_options & FsOption_CanUpload)) {
         options->Add<SidebarEntryCallback>("Upload"_i18n, [this](){
             UploadFiles();
+        });
+    }
+
+    if (m_entries_current.size() && !m_selected_count && IsExtension(GetEntry().GetExtension(), THEME_MUSIC_EXTENSIONS)) {
+        options->Add<SidebarEntryCallback>("Set as background music"_i18n, [this](){
+            const auto rc = App::SetDefaultBackgroundMusic(GetFs(), GetNewPathCurrent());
+            App::PushErrorBox(rc, "Failed to set default music path"_i18n);
         });
     }
 
@@ -1955,6 +2017,15 @@ void FsView::DisplayAdvancedOptions() {
             options->Add<SidebarEntryCallback>("SHA256"_i18n, [this](){
                 DisplayHash(hash::Type::Sha256);
             });
+            options->Add<SidebarEntryCallback>("/dev/null (Speed Test)"_i18n, [this](){
+                DisplayHash(hash::Type::Null);
+            });
+            options->Add<SidebarEntryCallback>("Deflate (Speed Test)"_i18n, [this](){
+                DisplayHash(hash::Type::Deflate);
+            });
+            options->Add<SidebarEntryCallback>("ZSTD (Speed Test)"_i18n, [this](){
+                DisplayHash(hash::Type::Zstd);
+            });
         });
     }
 
@@ -1964,42 +2035,14 @@ void FsView::DisplayAdvancedOptions() {
     });
 }
 
-void FsView::MountNspFs() {
+void FsView::MountFileFs(const MountFsFunc& mount_func, const UmountFsFunc& umount_func) {
     fs::FsPath mount;
-    const auto rc = devoptab::MountNsp(GetFs(), GetNewPathCurrent(), mount);
-    App::PushErrorBox(rc, "Failed to mount NSP."_i18n);
+    const auto rc = mount_func(GetFs(), GetNewPathCurrent(), mount);
+    App::PushErrorBox(rc, "Failed to mount FS."_i18n);
 
     if (R_SUCCEEDED(rc)) {
-        auto fs = std::make_shared<FsStdioWrapper>(mount, [mount](){
-            devoptab::UmountNsp(mount);
-        });
-
-        MountFsHelper(fs, GetEntry().GetName());
-    }
-}
-
-void FsView::MountXciFs() {
-    fs::FsPath mount;
-    const auto rc = devoptab::MountXci(GetFs(), GetNewPathCurrent(), mount);
-    App::PushErrorBox(rc, "Failed to mount XCI."_i18n);
-
-    if (R_SUCCEEDED(rc)) {
-        auto fs = std::make_shared<FsStdioWrapper>(mount, [mount](){
-            devoptab::UmountXci(mount);
-        });
-
-        MountFsHelper(fs, GetEntry().GetName());
-    }
-}
-
-void FsView::MountZipFs() {
-    fs::FsPath mount;
-    const auto rc = devoptab::MountZip(GetFs(), GetNewPathCurrent(), mount);
-    App::PushErrorBox(rc, "Failed to mount zip."_i18n);
-
-    if (R_SUCCEEDED(rc)) {
-        auto fs = std::make_shared<FsStdioWrapper>(mount, [mount](){
-            devoptab::UmountZip(mount);
+        auto fs = std::make_shared<FsStdioWrapper>(mount, [mount, umount_func](){
+            umount_func(mount);
         });
 
         MountFsHelper(fs, GetEntry().GetName());
@@ -2007,32 +2050,15 @@ void FsView::MountZipFs() {
 }
 
 Base::Base(u32 flags, u32 options)
-: Base{CreateFs(FS_ENTRY_DEFAULT), FS_ENTRY_DEFAULT, {}, false, flags, options} {
+: MenuBase{"FileBrowser"_i18n, flags}
+, m_options{options} {
+    Init(CreateFs(FS_ENTRY_DEFAULT), FS_ENTRY_DEFAULT, {}, false);
 }
 
 Base::Base(const std::shared_ptr<fs::Fs>& fs, const FsEntry& fs_entry, const fs::FsPath& path, bool is_custom, u32 flags, u32 options)
 : MenuBase{"FileBrowser"_i18n, flags}
 , m_options{options} {
-    if (m_options & FsOption_CanSplit) {
-        SetAction(Button::L3, Action{"Split"_i18n, [this](){
-            SetSplitScreen(IsSplitScreen() ^ 1);
-        }});
-    }
-
-    if (!IsTab()) {
-        SetAction(Button::SELECT, Action{"Close"_i18n, [this](){
-            PromptIfShouldExit();
-        }});
-    }
-
-    if (is_custom) {
-        m_custom_fs = fs;
-        m_custom_fs_entry = fs_entry;
-    }
-
-    view_left = std::make_unique<FsView>(this, fs, path, fs_entry, ViewSide::Left);
-    view = view_left.get();
-    ueventCreate(&g_change_uevent, true);
+    Init(fs, fs_entry, path, is_custom);
 }
 
 void Base::Update(Controller* controller, TouchInfo* touch) {
@@ -2353,6 +2379,31 @@ auto Base::CreateFs(const FsEntry& fs_entry) -> std::shared_ptr<fs::Fs> {
     }
 
     std::unreachable();
+}
+
+void Base::Init(const std::shared_ptr<fs::Fs>& fs, const FsEntry& fs_entry, const fs::FsPath& path, bool is_custom) {
+    if (m_options & FsOption_CanSplit) {
+        SetAction(Button::L3, Action{"Split"_i18n, [this](){
+            SetSplitScreen(IsSplitScreen() ^ 1);
+        }});
+    }
+
+    if (!IsTab()) {
+        SetAction(Button::SELECT, Action{"Close"_i18n, [this](){
+            PromptIfShouldExit();
+        }});
+    }
+
+    if (is_custom) {
+        m_custom_fs = fs;
+        m_custom_fs_entry = fs_entry;
+    }
+
+    log_write("creating view\n");
+
+    view_left = std::make_unique<FsView>(this, fs, path, fs_entry, ViewSide::Left);
+    view = view_left.get();
+    ueventCreate(&g_change_uevent, true);
 }
 
 void MountFsHelper(const std::shared_ptr<fs::Fs>& fs, const fs::FsPath& name) {
