@@ -1404,15 +1404,8 @@ App::App(const char* argv0) {
         __nx_applet_exit_mode = 1;
     }
 
-    {
-        SCOPED_TIMESTAMP("config directory init");
-        m_fs = std::make_shared<fs::FsNativeSd>(true);
-        m_fs->CreateDirectoryRecursively("/config/sphaira");
-        m_fs->CreateDirectory("/config/sphaira/assoc");
-        m_fs->CreateDirectory("/config/sphaira/themes");
-        m_fs->CreateDirectory("/config/sphaira/github");
-        m_fs->CreateDirectory("/config/sphaira/i18n");
-    }
+    // init fs for app use.
+    m_fs = std::make_shared<fs::FsNativeSd>(true);
 
     auto cb = [](const mTCHAR *Section, const mTCHAR *Key, const mTCHAR *Value, void *UserData) -> int {
         auto app = static_cast<App*>(UserData);
@@ -1491,6 +1484,15 @@ App::App(const char* argv0) {
     // currrent load time is 60ms without logs, 90 with (down from 230ms).
     utils::Async async_init([this](){
         SCOPED_TIMESTAMP("App async load");
+
+        {
+            SCOPED_TIMESTAMP("config directory init");
+            m_fs->CreateDirectoryRecursively("/config/sphaira");
+            m_fs->CreateDirectory("/config/sphaira/assoc");
+            m_fs->CreateDirectory("/config/sphaira/themes");
+            m_fs->CreateDirectory("/config/sphaira/github");
+            m_fs->CreateDirectory("/config/sphaira/i18n");
+        }
 
         if (log_is_init()) {
             SCOPED_TIMESTAMP("fw log init");
