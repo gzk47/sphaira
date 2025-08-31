@@ -1494,6 +1494,12 @@ App::App(const char* argv0) {
             m_fs->CreateDirectory("/config/sphaira/i18n");
         }
 
+        {
+            // delete old themezer cache as themezer does not exit anymore.
+            SCOPED_TIMESTAMP("themezer cache delete");
+            m_fs->DeleteDirectoryRecursively("/switch/sphaira/cache/themezer");
+        }
+
         if (log_is_init()) {
             SCOPED_TIMESTAMP("fw log init");
             SetSysFirmwareVersion fw_version{};
