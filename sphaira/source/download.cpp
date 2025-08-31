@@ -247,7 +247,7 @@ private:
         }
     }
 
-    static constexpr inline fs::FsPath JSON_PATH{"/switch/sphaira/cache/cache.json"};
+    static constexpr inline fs::FsPath JSON_PATH{"/switch/sphaira/cache/etag_v2.json"};
     static constexpr inline const char* ETAG_STR{"etag"};
     static constexpr inline const char* LAST_MODIFIED_STR{"last-modified"};
 

@@ -1495,9 +1495,10 @@ App::App(const char* argv0) {
         }
 
         {
-            // delete old themezer cache as themezer does not exit anymore.
-            SCOPED_TIMESTAMP("themezer cache delete");
-            m_fs->DeleteDirectoryRecursively("/switch/sphaira/cache/themezer");
+            // delete old cached folders/files on startup.
+            SCOPED_TIMESTAMP("old cache delete");
+            m_fs->DeleteDirectoryRecursively("/switch/sphaira/cache/themezer"); // themezer icon/json cache.
+            m_fs->DeleteFile("/switch/sphaira/cache/cache.json"); // old etag cache.
         }
 
         if (log_is_init()) {
