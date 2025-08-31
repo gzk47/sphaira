@@ -3,7 +3,7 @@ name: USB Install Python Tests
 on:
   push:
     paths: &python_usb_install_paths
-      - 'tools/test_usb_install.py'
+      - 'tools/tests/test_usb_install.py'
       - 'tools/usb_install.py'
       - 'tools/usb_common.py'
       - 'tools/requirements.txt'
@@ -30,4 +30,4 @@ jobs:
 
       - name: Run tests
         run: |
-          python3 tools/test_usb_install.py
+          python3 tools/tests/test_usb_install.py

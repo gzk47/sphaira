@@ -3,7 +3,7 @@ name: USB Export Python Tests
 on:
   push:
     paths: &python_usb_export_paths
-      - 'tools/test_usb_export.py'
+      - 'tools/tests/test_usb_export.py'
       - 'tools/usb_export.py'
       - 'tools/usb_common.py'
       - 'tools/requirements.txt'
@@ -30,4 +30,4 @@ jobs:
 
       - name: Run tests
         run: |
-          python3 tools/test_usb_export.py
+          python3 tools/tests/test_usb_export.py
