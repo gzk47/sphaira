@@ -19,7 +19,7 @@ Usb::Usb(u64 transfer_timeout) {
 
 Usb::~Usb() {
     if (m_was_connected && R_SUCCEEDED(m_usb->IsUsbConnected(0))) {
-        SendHeader send_header{MAGIC, CMD_QUIT};
+        const auto send_header = SendPacket::Build(CMD_QUIT);
         SendAndVerify(&send_header, sizeof(send_header));
     }
 }
@@ -35,8 +35,8 @@ Result Usb::WaitForConnection(u64 timeout, std::vector<std::string>& out_names) 
     R_TRY(m_open_result);
     R_TRY(m_usb->IsUsbConnected(timeout));
 
-    SendHeader send_header{MAGIC, RESULT_OK};
-    ResultHeader recv_header;
+    const auto send_header = SendPacket::Build(RESULT_OK);
+    ResultPacket recv_header;
     R_TRY(SendAndVerify(&send_header, sizeof(send_header), timeout, &recv_header))
 
     std::vector<char> names(recv_header.arg3);
@@ -50,15 +50,14 @@ Result Usb::WaitForConnection(u64 timeout, std::vector<std::string>& out_names) 
         }
     }
 
-    m_flags = recv_header.arg4;
     m_was_connected = true;
     R_SUCCEED();
 }
 
 Result Usb::OpenFile(u32 index, s64& file_size) {
     log_write("doing open file\n");
-    SendHeader send_header{MAGIC, CMD_OPEN, index};
-    ResultHeader recv_header;
+    const auto send_header = SendPacket::Build(CMD_OPEN, index);
+    ResultPacket recv_header;
     R_TRY(SendAndVerify(&send_header, sizeof(send_header), &recv_header))
     log_write("did open file\n");
 
@@ -72,7 +71,7 @@ Result Usb::OpenFile(u32 index, s64& file_size) {
 }
 
 Result Usb::CloseFile() {
-    SendDataHeader send_header{0, 0};
+    const auto send_header = SendDataPacket::Build(0, 0, 0);
 
     return SendAndVerify(&send_header, sizeof(send_header));
 }
@@ -86,8 +85,8 @@ u32 Usb::GetFlags() const {
 }
 
 Result Usb::Read(void* buf, u64 off, u32 size, u64* bytes_read) {
-    SendDataHeader send_header{off, size};
-    ResultHeader recv_header;
+    const auto send_header = SendDataPacket::Build(off, size, 0);
+    ResultPacket recv_header;
     R_TRY(SendAndVerify(&send_header, sizeof(send_header), &recv_header))
 
     // adjust the size and read the data.
@@ -102,10 +101,10 @@ Result Usb::Read(void* buf, u64 off, u32 size, u64* bytes_read) {
 }
 
 // casts away const, but it does not modify the buffer!
-Result Usb::SendAndVerify(const void* data, u32 size, u64 timeout, ResultHeader* out) {
+Result Usb::SendAndVerify(const void* data, u32 size, u64 timeout, ResultPacket* out) {
     R_TRY(m_usb->TransferAll(false, const_cast<void*>(data), size, timeout));
 
-    ResultHeader recv_header;
+    ResultPacket recv_header;
     R_TRY(m_usb->TransferAll(true, &recv_header, sizeof(recv_header), timeout));
     R_TRY(recv_header.Verify());
 
@@ -113,7 +112,7 @@ Result Usb::SendAndVerify(const void* data, u32 size, u64 timeout, ResultHeader*
     R_SUCCEED();
 }
 
-Result Usb::SendAndVerify(const void* data, u32 size, ResultHeader* out) {
+Result Usb::SendAndVerify(const void* data, u32 size, ResultPacket* out) {
     return SendAndVerify(data, size, m_usb->GetTransferTimeout(), out);
 }
 

@@ -62,7 +62,7 @@ if __name__ == '__main__':
     if (not os.path.isdir(root_path)):
         raise ValueError('must be a dir!')
 
-    usb: Usb = Usb()
+    usb = Usb()
 
     try:
         # get usb endpoints.

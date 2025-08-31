@@ -25,8 +25,8 @@ struct Usb {
     Result CloseFile();
 
 private:
-    Result SendAndVerify(const void* data, u32 size, u64 timeout, api::ResultHeader* out = nullptr);
-    Result SendAndVerify(const void* data, u32 size, api::ResultHeader* out = nullptr);
+    Result SendAndVerify(const void* data, u32 size, u64 timeout, api::ResultPacket* out = nullptr);
+    Result SendAndVerify(const void* data, u32 size, api::ResultPacket* out = nullptr);
 
 private:
     std::unique_ptr<usb::UsbDs> m_usb{};

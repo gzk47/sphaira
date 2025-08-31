@@ -53,7 +53,7 @@ Result Usb::WaitForConnection(u64 timeout, std::span<const std::string> names) {
     }
 
     // send.
-    SendHeader send_header;
+    SendPacket send_header;
     R_TRY(m_usb->TransferAll(true, &send_header, sizeof(send_header), timeout));
     R_TRY(send_header.Verify());
 
@@ -67,14 +67,14 @@ Result Usb::WaitForConnection(u64 timeout, std::span<const std::string> names) {
 }
 
 Result Usb::PollCommands() {
-    SendHeader send_header;
+    SendPacket send_header;
     R_TRY(m_usb->TransferAll(true, &send_header, sizeof(send_header)));
     R_TRY(send_header.Verify());
 
-    if (send_header.cmd == CMD_QUIT) {
+    if (send_header.GetCmd() == CMD_QUIT) {
         R_TRY(SendResult(RESULT_OK));
         R_THROW(Result_UsbUploadExit);
-    } else if (send_header.cmd == CMD_OPEN) {
+    } else if (send_header.GetCmd() == CMD_OPEN) {
         s64 file_size;
         u16 flags;
         R_TRY(Open(send_header.arg3, file_size, flags));
@@ -92,11 +92,11 @@ Result Usb::file_transfer_loop() {
     log_write("doing file transfer\n");
 
     // get offset + size.
-    SendDataHeader send_header;
+    SendDataPacket send_header;
     R_TRY(m_usb->TransferAll(true, &send_header, sizeof(send_header)));
 
     // check if we should finish now.
-    if (send_header.offset == 0 && send_header.size == 0) {
+    if (send_header.GetOffset() == 0 && send_header.GetSize() == 0) {
         log_write("finished\n");
         R_TRY(SendResult(RESULT_OK));
         return Result_UsbUploadExit;
@@ -104,10 +104,10 @@ Result Usb::file_transfer_loop() {
 
     // read file and calculate the hash.
     u64 bytes_read;
-    m_buf.resize(send_header.size);
+    m_buf.resize(send_header.GetSize());
     log_write("reading buffer: %zu\n", m_buf.size());
 
-    R_TRY(Read(m_buf.data(), send_header.offset, m_buf.size(), &bytes_read));
+    R_TRY(Read(m_buf.data(), send_header.GetOffset(), m_buf.size(), &bytes_read));
     const auto crc32 = crc32Calculate(m_buf.data(), m_buf.size());
 
     log_write("read the buffer: %zu\n", bytes_read);
@@ -125,7 +125,7 @@ Result Usb::file_transfer_loop() {
 }
 
 Result Usb::SendResult(u32 result, u32 arg3, u32 arg4) {
-    ResultHeader recv_header{MAGIC, result, arg3, arg4};
+    auto recv_header = api::ResultPacket::Build(result, arg3, arg4);
     return m_usb->TransferAll(false, &recv_header, sizeof(recv_header));
 }
 

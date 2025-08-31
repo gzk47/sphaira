@@ -127,14 +127,14 @@ if __name__ == '__main__':
     else:
         raise ValueError('must be a file!')
 
-    usb: Usb = Usb()
+    usb = Usb()
 
     try:
         # get usb endpoints.
         usb.wait_for_connect()
 
         # build string table.
-        string_table: bytes
+        string_table = bytes()
         for [_, path] in paths:
             string_table += bytes(Path(path).name.__str__(), 'utf8') + b'\n'
 

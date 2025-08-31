@@ -19,7 +19,7 @@ Usb::Usb(u64 transfer_timeout) {
 
 Usb::~Usb() {
     if (m_was_connected && R_SUCCEEDED(m_usb->IsUsbConnected(0))) {
-        SendHeader send_header{MAGIC, CMD_QUIT};
+        const auto send_header = SendPacket::Build(CMD_QUIT);
         SendAndVerify(&send_header, sizeof(send_header));
     }
 }
@@ -35,7 +35,7 @@ Result Usb::WaitForConnection(std::string_view path, u64 timeout) {
     R_TRY(m_open_result);
     R_TRY(m_usb->IsUsbConnected(timeout));
 
-    SendHeader send_header{MAGIC, CMD_EXPORT, (u32)path.length()};
+    const auto send_header = SendPacket::Build(CMD_EXPORT, path.length());
     R_TRY(SendAndVerify(&send_header, sizeof(send_header), timeout));
     R_TRY(SendAndVerify(path.data(), path.length(), timeout));
 
@@ -44,7 +44,7 @@ Result Usb::WaitForConnection(std::string_view path, u64 timeout) {
 }
 
 Result Usb::CloseFile() {
-    SendDataHeader send_header{0, 0};
+    const auto send_header = SendDataPacket::Build(0, 0, 0);
 
     return SendAndVerify(&send_header, sizeof(send_header));
 }
@@ -54,17 +54,18 @@ void Usb::SignalCancel() {
 }
 
 Result Usb::Write(const void* buf, u64 off, u32 size) {
-    SendDataHeader send_header{off, size, crc32cCalculate(buf, size)};
+    const auto send_header = SendDataPacket::Build(off, size, crc32cCalculate(buf, size));
 
     R_TRY(SendAndVerify(&send_header, sizeof(send_header)));
     return SendAndVerify(buf, size);
 }
 
 // casts away const, but it does not modify the buffer!
-Result Usb::SendAndVerify(const void* data, u32 size, u64 timeout, ResultHeader* out) {
+Result Usb::SendAndVerify(const void* data, u32 size, u64 timeout, ResultPacket* out) {
     R_TRY(m_usb->TransferAll(false, const_cast<void*>(data), size, timeout));
 
-    ResultHeader recv_header;
+
+    ResultPacket recv_header;
     R_TRY(m_usb->TransferAll(true, &recv_header, sizeof(recv_header), timeout));
     R_TRY(recv_header.Verify());
 
@@ -72,7 +73,7 @@ Result Usb::SendAndVerify(const void* data, u32 size, u64 timeout, ResultHeader*
     R_SUCCEED();
 }
 
-Result Usb::SendAndVerify(const void* data, u32 size, ResultHeader* out) {
+Result Usb::SendAndVerify(const void* data, u32 size, ResultPacket* out) {
     return SendAndVerify(data, size, m_usb->GetTransferTimeout(), out);
 }
 
