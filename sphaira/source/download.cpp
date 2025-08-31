@@ -82,24 +82,28 @@ struct Cache {
     bool init() {
         SCOPED_MUTEX(&m_mutex);
 
-        if (m_json) {
-            return true;
+        if (!m_json) {
+            auto json_in = yyjson_read_file(JSON_PATH, YYJSON_READ_NOFLAG, nullptr, nullptr);
+            if (json_in) {
+                log_write("loading old json doc\n");
+                m_json = yyjson_doc_mut_copy(json_in, nullptr);
+                yyjson_doc_free(json_in);
+                m_root = yyjson_mut_doc_get_root(m_json);
+            } else {
+                log_write("creating new json doc\n");
+                m_json = yyjson_mut_doc_new(nullptr);
+                m_root = yyjson_mut_obj(m_json);
+                yyjson_mut_doc_set_root(m_json, m_root);
+            }
         }
 
-        auto json_in = yyjson_read_file(JSON_PATH, YYJSON_READ_NOFLAG, nullptr, nullptr);
-        if (json_in) {
-            log_write("loading old json doc\n");
-            m_json = yyjson_doc_mut_copy(json_in, nullptr);
-            yyjson_doc_free(json_in);
-            m_root = yyjson_mut_doc_get_root(m_json);
-        } else {
-            log_write("creating new json doc\n");
-            m_json = yyjson_mut_doc_new(nullptr);
-            m_root = yyjson_mut_obj(m_json);
-            yyjson_mut_doc_set_root(m_json, m_root);
+        if (!m_json) {
+            return false;
         }
 
-        return m_json && m_root;
+        m_init_ref_count++;
+        log_write("[ETAG] init: %u\n", m_init_ref_count);
+        return true;
     }
 
     void exit() {
@@ -109,14 +113,20 @@ struct Cache {
             return;
         }
 
+        m_init_ref_count--;
+        if (m_init_ref_count) {
+            return;
+        }
+
         // note: this takes 20ms
         if (!yyjson_mut_write_file(JSON_PATH, m_json, YYJSON_WRITE_NOFLAG, nullptr, nullptr)) {
-            log_write("failed to write etag json: %s\n", JSON_PATH.s);
+            log_write("[ETAG] failed to write etag json: %s\n", JSON_PATH.s);
         }
 
         yyjson_mut_doc_free(m_json);
         m_json = nullptr;
         m_root = nullptr;
+        log_write("[ETAG] exit\n");
     }
 
     void get(const fs::FsPath& path, curl::Header& header) {
@@ -255,6 +265,7 @@ private:
     yyjson_mut_doc* m_json{};
     yyjson_mut_val* m_root{};
     std::unordered_map<std::string, Value> m_cache{};
+    u32 m_init_ref_count{};
 };
 
 struct ThreadEntry {
@@ -1029,6 +1040,12 @@ void my_unlock(CURL *handle, curl_lock_data data, void *useptr) {
 
 void ThreadEntry::ThreadFunc(void* p) {
     auto data = static_cast<ThreadEntry*>(p);
+
+    if (!g_cache.init()) {
+        log_write("failed to init json cache\n");
+    }
+    ON_SCOPE_EXIT(g_cache.exit());
+
     while (g_running) {
         auto rc = waitSingle(waiterForUEvent(&data->m_uevent), UINT64_MAX);
         // log_write("woke up\n");
@@ -1057,11 +1074,6 @@ void ThreadEntry::ThreadFunc(void* p) {
 
 void ThreadQueue::ThreadFunc(void* p) {
     auto data = static_cast<ThreadQueue*>(p);
-
-    if (!g_cache.init()) {
-        log_write("failed to init json cache\n");
-    }
-    ON_SCOPE_EXIT(g_cache.exit());
 
     while (g_running) {
         auto rc = waitSingle(waiterForUEvent(&data->m_uevent), UINT64_MAX);
