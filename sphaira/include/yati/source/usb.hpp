@@ -43,6 +43,14 @@ struct Usb final : Base {
         return m_usb->CloseFile();
     }
 
+    auto GetOpenResult() const {
+        return m_usb->GetOpenResult();
+    }
+
+    auto GetCancelEvent() {
+        return m_usb->GetCancelEvent();
+    }
+
 private:
     std::unique_ptr<usb::install::Usb> m_usb{};
 };

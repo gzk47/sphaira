@@ -1,3 +1,74 @@
+.download-spinner-text-wrap {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+}
+
+#downloadSpinnerText {
+    overflow-x: auto;
+    white-space: nowrap;
+    display: block;
+    min-width: 0;
+    flex: 1;
+    scrollbar-width: none; /* Firefox */
+}
+#downloadSpinnerText::-webkit-scrollbar {
+    display: none; /* Chrome, Safari */
+}
+
+#downloadSpinnerSpeed {
+    flex-shrink: 0;
+    margin-left: 12px;
+    color: #32ffcf;
+}
+/* Spinner styles */
+.spinner {
+    width: 32px;
+    height: 32px;
+    border: 4px solid #163951;
+    border-top: 4px solid #32ffcf;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 15px;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+/* Custom styled select to match button look */
+.custom-select {
+    background: linear-gradient(45deg, #32ffcf, #5cbeff);
+    color: #111f28;
+    border: none;
+    padding: 14px 26px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    transition: transform 0.2s, box-shadow 0.2s;
+    margin: 5px;
+    min-height: 48px;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    box-shadow: 0 5px 15px rgba(50, 255, 207, 0.08);
+}
+
+.custom-select:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px #32ffcf;
+}
+
+.custom-select option {
+    background: #143144;
+    color: #32ffcf;
+    font-weight: 600;
+    font-size: 16px;
+}
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     max-width: 800px;

@@ -36,7 +36,7 @@ Base::Base(u64 transfer_timeout) {
     App::SetAutoSleepDisabled(true);
 
     m_transfer_timeout = transfer_timeout;
-    ueventCreate(GetCancelEvent(), true);
+    ueventCreate(GetCancelEvent(), false);
     m_aligned = std::make_unique<u8*>(new(std::align_val_t{TRANSFER_ALIGN}) u8[TRANSFER_MAX]);
 }
 

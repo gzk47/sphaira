@@ -29,6 +29,14 @@ struct Usb {
 
     Result file_transfer_loop();
 
+    auto GetOpenResult() const {
+        return m_open_result;
+    }
+
+    auto GetCancelEvent() {
+        return m_usb->GetCancelEvent();
+    }
+
 private:
     Result SendResult(u32 result, u32 arg3 = 0, u32 arg4 = 0);
 

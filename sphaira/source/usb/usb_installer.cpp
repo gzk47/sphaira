@@ -20,7 +20,7 @@ Usb::Usb(u64 transfer_timeout) {
 Usb::~Usb() {
     if (m_was_connected && R_SUCCEEDED(m_usb->IsUsbConnected(0))) {
         const auto send_header = SendPacket::Build(CMD_QUIT);
-        SendAndVerify(&send_header, sizeof(send_header));
+        SendAndVerify(&send_header, sizeof(send_header), 1e+9);
     }
 }
 

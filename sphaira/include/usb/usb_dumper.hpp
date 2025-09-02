@@ -24,6 +24,14 @@ struct Usb {
     // Result OpenFile(u32 index, s64& file_size);
     Result CloseFile();
 
+    auto GetOpenResult() const {
+        return m_open_result;
+    }
+
+    auto GetCancelEvent() {
+        return m_usb->GetCancelEvent();
+    }
+
 private:
     Result SendAndVerify(const void* data, u32 size, u64 timeout, api::ResultPacket* out = nullptr);
     Result SendAndVerify(const void* data, u32 size, api::ResultPacket* out = nullptr);

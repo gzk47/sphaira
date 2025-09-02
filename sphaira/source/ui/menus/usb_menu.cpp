@@ -97,6 +97,9 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
         m_state = State::Progress;
         log_write("got connection\n");
         App::Push<ui::ProgressBox>(0, "Installing "_i18n, "", [this](auto pbox) -> Result {
+            pbox->AddCancelEvent(m_usb_source->GetCancelEvent());
+            ON_SCOPE_EXIT(pbox->RemoveCancelEvent(m_usb_source->GetCancelEvent()));
+
             log_write("inside progress box\n");
             for (u32 i = 0; i < std::size(m_names); i++) {
                 const auto& file_name = m_names[i];

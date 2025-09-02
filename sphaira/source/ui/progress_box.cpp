@@ -232,79 +232,72 @@ auto ProgressBox::Draw(NVGcontext* vg, Theme* theme) -> void {
 }
 
 auto ProgressBox::SetActionName(const std::string& action)  -> ProgressBox& {
-    mutexLock(&m_mutex);
+    SCOPED_MUTEX(&m_mutex);
     m_action = action;
-    mutexUnlock(&m_mutex);
-    Yield();
     return *this;
 }
 
 auto ProgressBox::SetTitle(const std::string& title)  -> ProgressBox& {
-    mutexLock(&m_mutex);
+    SCOPED_MUTEX(&m_mutex);
     m_title = title;
-    mutexUnlock(&m_mutex);
-    Yield();
     return *this;
 }
 
 auto ProgressBox::NewTransfer(const std::string& transfer)  -> ProgressBox& {
-    mutexLock(&m_mutex);
+    SCOPED_MUTEX(&m_mutex);
     m_transfer = transfer;
     m_size = 0;
     m_offset = 0;
     m_last_offset = 0;
     m_timestamp.Update();
-    mutexUnlock(&m_mutex);
-    Yield();
     return *this;
 }
 
 auto ProgressBox::ResetTranfser() -> ProgressBox& {
-    mutexLock(&m_mutex);
+    SCOPED_MUTEX(&m_mutex);
     m_size = 0;
     m_offset = 0;
     m_last_offset = 0;
     m_timestamp.Update();
-    mutexUnlock(&m_mutex);
-    Yield();
     return *this;
 }
 
 auto ProgressBox::UpdateTransfer(s64 offset, s64 size)  -> ProgressBox& {
-    mutexLock(&m_mutex);
+    SCOPED_MUTEX(&m_mutex);
     m_size = size;
     m_offset = offset;
-    mutexUnlock(&m_mutex);
-    Yield();
     return *this;
 }
 
 auto ProgressBox::SetImage(int image) -> ProgressBox& {
-    mutexLock(&m_mutex);
+    SCOPED_MUTEX(&m_mutex);
     m_image_pending = image;
     m_is_image_pending = true;
-    mutexUnlock(&m_mutex);
     return *this;
 }
 
 auto ProgressBox::SetImageData(std::vector<u8>& data) -> ProgressBox& {
-    mutexLock(&m_mutex);
+    SCOPED_MUTEX(&m_mutex);
     std::swap(m_image_data, data);
-    mutexUnlock(&m_mutex);
     return *this;
 }
 
 auto ProgressBox::SetImageDataConst(std::span<const u8> data) -> ProgressBox& {
-    mutexLock(&m_mutex);
+    SCOPED_MUTEX(&m_mutex);
     m_image_data.resize(data.size());
     std::memcpy(m_image_data.data(), data.data(), m_image_data.size());
-    mutexUnlock(&m_mutex);
     return *this;
 }
 
 void ProgressBox::RequestExit() {
+    SCOPED_MUTEX(&m_mutex);
     m_stop_source.request_stop();
     ueventSignal(GetCancelEvent());
+
+    // cancel any registered events.
+    for (auto& e : m_cancel_events) {
+        ueventSignal(e);
+    }
 }
 
 auto ProgressBox::ShouldExit() -> bool {
@@ -316,6 +309,26 @@ auto ProgressBox::ShouldExitResult() -> Result {
         R_THROW(Result_TransferCancelled);
     }
     R_SUCCEED();
+}
+
+void ProgressBox::AddCancelEvent(UEvent* event) {
+    if (!event) {
+        return;
+    }
+
+    SCOPED_MUTEX(&m_mutex);
+    if (std::ranges::find(m_cancel_events, event) == m_cancel_events.end()) {
+        m_cancel_events.emplace_back(event);
+    }
+}
+
+void ProgressBox::RemoveCancelEvent(const UEvent* event) {
+    if (!event) {
+        return;
+    }
+
+    SCOPED_MUTEX(&m_mutex);
+    m_cancel_events.erase(std::remove(m_cancel_events.begin(), m_cancel_events.end(), event), m_cancel_events.end());
 }
 
 auto ProgressBox::CopyFile(fs::Fs* fs_src, fs::Fs* fs_dst, const fs::FsPath& src_path, const fs::FsPath& dst_path, bool single_threaded) -> Result {

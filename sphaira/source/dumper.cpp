@@ -165,6 +165,14 @@ struct WriteUsbSource final : WriteSource {
         R_SUCCEED();
     }
 
+    auto GetOpenResult() const {
+        return m_usb->GetOpenResult();
+    }
+
+    auto GetCancelEvent() {
+        return m_usb->GetCancelEvent();
+    }
+
 private:
     std::unique_ptr<usb::dump::Usb> m_usb{};
     bool m_was_mtp_enabled{};
@@ -178,8 +186,8 @@ constexpr DumpLocationEntry DUMP_LOCATIONS[]{
 };
 
 struct UsbTest final : usb::upload::Usb, yati::source::Stream {
-    UsbTest(ui::ProgressBox* pbox, BaseSource* source, std::span<const fs::FsPath> paths)
-    : Usb{UINT64_MAX}
+    UsbTest(ui::ProgressBox* pbox, BaseSource* source, std::span<const fs::FsPath> paths, u64 timeout)
+    : Usb{timeout}
     , m_pbox{pbox}
     , m_source{source}
     , m_paths{paths} {
@@ -248,6 +256,10 @@ struct UsbTest final : usb::upload::Usb, yati::source::Stream {
         return m_pull_offset;
     }
 
+    auto GetOpenResult() const {
+        return Usb::GetOpenResult();
+    }
+
 private:
     ui::ProgressBox* m_pbox{};
     BaseSource* m_source{};
@@ -261,7 +273,14 @@ private:
 };
 
 Result DumpToUsb(ui::ProgressBox* pbox, BaseSource* source, std::span<const fs::FsPath> paths, const CustomTransfer& custom_transfer) {
-    auto write_source = std::make_unique<WriteUsbSource>(3e+9);
+    // create write source and verify that it opened.
+    constexpr u64 timeout = UINT64_MAX;
+    auto write_source = std::make_unique<WriteUsbSource>(timeout);
+    R_TRY(write_source->GetOpenResult());
+
+    // add cancel event.
+    pbox->AddCancelEvent(write_source->GetCancelEvent());
+    ON_SCOPE_EXIT(pbox->RemoveCancelEvent(write_source->GetCancelEvent()));
 
     for (const auto& path : paths) {
         const auto file_size = source->GetSize(path);
@@ -273,7 +292,7 @@ Result DumpToUsb(ui::ProgressBox* pbox, BaseSource* source, std::span<const fs::
         while (true) {
             R_TRY(pbox->ShouldExitResult());
 
-            const auto rc = write_source->WaitForConnection(path, 3e+9);
+            const auto rc = write_source->WaitForConnection(path, timeout);
             if (R_SUCCEEDED(rc)) {
                 break;
             }
@@ -398,8 +417,14 @@ Result DumpToUsbS2S(ui::ProgressBox* pbox, BaseSource* source, std::span<const f
         file_list.emplace_back(path);
     }
 
-    auto usb = std::make_unique<UsbTest>(pbox, source, paths);
-    constexpr u64 timeout = 3e+9;
+    // create usb test instance and verify that it opened.
+    constexpr u64 timeout = UINT64_MAX;
+    auto usb = std::make_unique<UsbTest>(pbox, source, paths, timeout);
+    R_TRY(usb->GetOpenResult());
+
+    // add cancel event.
+    pbox->AddCancelEvent(usb->GetCancelEvent());
+    ON_SCOPE_EXIT(pbox->RemoveCancelEvent(usb->GetCancelEvent()));
 
     while (!pbox->ShouldExit()) {
         if (R_SUCCEEDED(usb->IsUsbConnected(timeout))) {
