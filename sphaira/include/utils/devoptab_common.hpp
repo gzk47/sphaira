@@ -81,6 +81,8 @@ private:
     std::vector<BufferedFileData> buffered_large{}; // 1MiB
 };
 
-bool fix_path(const char* str, char* out);
+bool fix_path(const char* str, char* out, bool strip_leading_slash = false);
+
+void update_devoptab_for_read_only(devoptab_t* devoptab, bool read_only);
 
 } // namespace sphaira::devoptab::common

@@ -823,11 +823,40 @@ enum : Result {
 #define CONCATENATE(s1, s2) CONCATENATE_IMPL(s1, s2)
 #define ANONYMOUS_VARIABLE(pref) CONCATENATE(pref, __COUNTER__)
 
-#define ON_SCOPE_EXIT(_f) std::experimental::scope_exit ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){[&] { _f; }};
+template<typename Function>
+struct ScopeGuard {
+    ScopeGuard(Function&& function) : m_function(std::forward<Function>(function)) {
+
+    }
+    ~ScopeGuard() {
+        m_function();
+    }
+
+    ScopeGuard(const ScopeGuard&) = delete;
+    void operator=(const ScopeGuard&) = delete;
+
+private:
+    const Function m_function;
+};
+
+struct ScopedMutex {
+    ScopedMutex(Mutex* mutex) : m_mutex{mutex} {
+        mutexLock(m_mutex);
+    }
+    ~ScopedMutex() {
+        mutexUnlock(m_mutex);
+    }
+
+    ScopedMutex(const ScopedMutex&) = delete;
+    void operator=(const ScopedMutex&) = delete;
+
+private:
+    Mutex* const m_mutex;
+};
+
+// #define ON_SCOPE_EXIT(_f) std::experimental::scope_exit ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){[&] { _f; }};
+#define ON_SCOPE_EXIT(_f) ScopeGuard ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){[&] { _f; }};
+#define SCOPED_MUTEX(_m) ScopedMutex ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){_m}
+
 // #define ON_SCOPE_FAIL(_f) std::experimental::scope_exit ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){[&] { if (R_FAILED(rc)) { _f; } }};
 // #define ON_SCOPE_SUCCESS(_f) std::experimental::scope_exit ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){[&] { if (R_SUCCEEDED(rc)) { _f; } }};
-
-// mutex helpers.
-#define SCOPED_MUTEX(mutex) \
-    mutexLock(mutex); \
-    ON_SCOPE_EXIT(mutexUnlock(mutex))

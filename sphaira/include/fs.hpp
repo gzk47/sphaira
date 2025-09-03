@@ -138,20 +138,24 @@ struct FsPath {
         return *this;
     }
 
+    static constexpr bool path_equal(std::string_view a, std::string_view b) {
+        return a.length() == b.length() && !strncasecmp(a.data(), b.data(), a.length());
+    }
+
     constexpr bool operator==(const FsPath& v) const noexcept {
-        return !strcasecmp(*this, v);
+        return path_equal(*this, v);
     }
 
     constexpr bool operator==(const char* v) const noexcept {
-        return !strcasecmp(*this, v);
+        return path_equal(*this, v);
     }
 
     constexpr bool operator==(const std::string& v) const noexcept {
-        return !strncasecmp(*this, v.data(), v.length());
+        return path_equal(*this, v);
     }
 
     constexpr bool operator==(const std::string_view v) const noexcept {
-        return !strncasecmp(*this, v.data(), v.length());
+        return path_equal(*this, v);
     }
 
     static consteval bool Test(const auto& str) {
@@ -229,7 +233,6 @@ struct File {
     fs::Fs* m_fs{};
     FsFile m_native{};
     std::FILE* m_stdio{};
-    s64 m_stdio_off{};
     u32 m_mode{};
 };
 

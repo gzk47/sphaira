@@ -2,6 +2,7 @@
 #include "fs.hpp"
 #include "app.hpp"
 #include "usbdvd.hpp"
+#include "utils/devoptab.hpp"
 
 #include <ff.h>
 #include <cstring>
@@ -78,6 +79,30 @@ auto Load() -> Entries {
 
 auto GetStdio(bool write) -> StdioEntries {
     StdioEntries out{};
+
+    {
+        StdioEntries entries;
+        if (R_SUCCEEDED(devoptab::GetNfsMounts(entries))) {
+            log_write("[NFS] got nfs mounts: %zu\n", entries.size());
+            out.insert(out.end(), entries.begin(), entries.end());
+        }
+    }
+
+    {
+        StdioEntries entries;
+        if (R_SUCCEEDED(devoptab::GetSmb2Mounts(entries))) {
+            log_write("[SMB2] got smb2 mounts: %zu\n", entries.size());
+            out.insert(out.end(), entries.begin(), entries.end());
+        }
+    }
+
+    {
+        StdioEntries entries;
+        if (R_SUCCEEDED(devoptab::GetHttpMounts(entries))) {
+            log_write("[HTTP] got http mounts: %zu\n", entries.size());
+            out.insert(out.end(), entries.begin(), entries.end());
+        }
+    }
 
     // try and load usbdvd entry.
     // todo: check if more than 1 entry is supported.

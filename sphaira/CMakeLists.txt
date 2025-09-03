@@ -105,6 +105,9 @@ add_executable(sphaira
     source/utils/devoptab_xci.cpp
     source/utils/devoptab_zip.cpp
     source/utils/devoptab_bfsar.cpp
+    source/utils/devoptab_http.cpp
+    source/utils/devoptab_nfs.cpp
+    source/utils/devoptab_smb2.cpp
 
     source/usb/base.cpp
     source/usb/usbds.cpp
@@ -255,6 +258,16 @@ FetchContent_Declare(libusbdvd
     GIT_TAG 3cb0613
 )
 
+FetchContent_Declare(libnfs
+    GIT_REPOSITORY https://github.com/ITotalJustice/libnfs.git
+    GIT_TAG 65f3e11
+)
+
+FetchContent_Declare(libsmb2
+    GIT_REPOSITORY https://github.com/ITotalJustice/libsmb2.git
+    GIT_TAG 867beea
+)
+
 set(USE_NEW_ZSTD ON)
 # has issues with some homebrew and game icons (oxenfree, overwatch2).
 set(USE_NVJPG OFF)
@@ -315,6 +328,8 @@ FetchContent_MakeAvailable(
     dr_libs
     id3v2lib
     libusbdvd
+    libnfs
+    libsmb2
 )
 
 set(FTPSRV_LIB_BUILD TRUE)
@@ -425,6 +440,13 @@ set_target_properties(sphaira PROPERTIES
     CXX_EXTENSIONS ON
 )
 
+# todo: fix this upstream as nfs should export these folders.
+target_include_directories(sphaira PRIVATE
+    ${libnfs_SOURCE_DIR}/include
+    ${libnfs_SOURCE_DIR}/include/nfsc
+    ${libnfs_SOURCE_DIR}/nfs
+)
+
 target_link_libraries(sphaira PRIVATE
     ftpsrv_helper
     libhaze
@@ -439,6 +461,8 @@ target_link_libraries(sphaira PRIVATE
     dr_libs
     id3v2lib
     libusbdvd
+    nfs
+    smb2
 
     ${minizip_lib}
     ZLIB::ZLIB

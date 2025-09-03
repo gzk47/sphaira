@@ -413,7 +413,7 @@ Result MountNcaInternal(fs::Fs* fs, const std::shared_ptr<yati::source::Base>& s
     log_write("[NCA] got header, type: %s\n", nca::GetContentTypeStr(header.content_type));
 
     // check if this is a ncz.
-    ncz::Header ncz_header;
+    ncz::Header ncz_header{};
     R_TRY(source->Read2(&ncz_header, NCZ_NORMAL_SIZE, sizeof(ncz_header)));
 
     if (ncz_header.magic == NCZ_SECTION_MAGIC) {
@@ -423,7 +423,7 @@ Result MountNcaInternal(fs::Fs* fs, const std::shared_ptr<yati::source::Base>& s
         R_TRY(source->Read2(ncz_sections.data(), ncz_offset, ncz_sections.size() * sizeof(ncz::Section)));
 
         ncz_offset += ncz_sections.size() * sizeof(ncz::Section);
-        ncz::BlockHeader ncz_block_header;
+        ncz::BlockHeader ncz_block_header{};
         R_TRY(source->Read2(&ncz_block_header, ncz_offset, sizeof(ncz_block_header)));
 
         // ensure this is a block compressed nsz, otherwise bail out

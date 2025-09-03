@@ -27,6 +27,7 @@
 
 #include "utils/profile.hpp"
 #include "utils/thread.hpp"
+#include "utils/devoptab.hpp"
 
 #include <nanovg_dk.h>
 #include <minIni.h>
@@ -1590,6 +1591,22 @@ App::App(const char* argv0) {
             curl::Init();
         }
 
+        // this has to come after curl init as it inits curl global.
+        {
+            SCOPED_TIMESTAMP("http init");
+            devoptab::MountHttpAll();
+        }
+
+        {
+            SCOPED_TIMESTAMP("nfs init");
+            devoptab::MountNfsAll();
+        }
+
+        {
+            SCOPED_TIMESTAMP("smb init");
+            devoptab::MountSmb2All();
+        }
+
         {
             SCOPED_TIMESTAMP("timestamp init");
             // ini_putl(GetExePath(), "timestamp", m_start_timestamp, App::PLAYLOG_PATH);
@@ -2198,6 +2215,22 @@ App::~App() {
             {
                 SCOPED_TIMESTAMP("fatfs exit");
                 fatfs::UnmountAll();
+            }
+
+            // this has to come before curl exit as it uses curl global.
+            {
+                SCOPED_TIMESTAMP("http exit");
+                devoptab::UnmountHttpAll();
+            }
+
+            {
+                SCOPED_TIMESTAMP("nfs exit");
+                devoptab::UnmountNfsAll();
+            }
+
+            {
+                SCOPED_TIMESTAMP("smb exit");
+                devoptab::UnmountSmb2All();
             }
 
             // do these last as they were signalled to exit.

@@ -500,9 +500,9 @@ Result File::Read( s64 off, void* buf, u64 read_size, u32 option, u64* bytes_rea
     } else {
         R_UNLESS(m_stdio, Result_FsUnknownStdioError);
 
-        if (m_stdio_off != off) {
-            m_stdio_off = off;
-            std::fseek(m_stdio, off, SEEK_SET);
+        if (std::ftell(m_stdio) != off) {
+            const auto ret = std::fseek(m_stdio, off, SEEK_SET);
+            R_UNLESS(ret == 0, Result_FsUnknownStdioError);
         }
 
         *bytes_read = std::fread(buf, 1, read_size, m_stdio);
@@ -510,11 +510,10 @@ Result File::Read( s64 off, void* buf, u64 read_size, u32 option, u64* bytes_rea
         // if we read less bytes than expected, check if there was an error (ignoring eof).
         if (*bytes_read < read_size) {
             if (!std::feof(m_stdio) && std::ferror(m_stdio)) {
+                log_write("[FS] fread error: %d\n", std::ferror(m_stdio));
                 R_THROW(Result_FsUnknownStdioError);
             }
         }
-
-        m_stdio_off += *bytes_read;
     }
 
     R_SUCCEED();
@@ -528,17 +527,14 @@ Result File::Write(s64 off, const void* buf, u64 write_size, u32 option) {
     } else {
         R_UNLESS(m_stdio, Result_FsUnknownStdioError);
 
-        if (m_stdio_off != off) {
-            log_write("[FS] diff seek\n");
-            m_stdio_off = off;
-            std::fseek(m_stdio, off, SEEK_SET);
+        if (std::ftell(m_stdio) != off) {
+            const auto ret = std::fseek(m_stdio, off, SEEK_SET);
+            R_UNLESS(ret == 0, Result_FsUnknownStdioError);
         }
 
         const auto result = std::fwrite(buf, 1, write_size, m_stdio);
         // log_write("[FS] fwrite res: %zu vs %zu\n", result, write_size);
         R_UNLESS(result == write_size, Result_FsUnknownStdioError);
-
-        m_stdio_off += write_size;
     }
 
     R_SUCCEED();

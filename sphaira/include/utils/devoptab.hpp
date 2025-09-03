@@ -2,6 +2,7 @@
 
 #include "fs.hpp"
 #include "yati/source/base.hpp"
+#include "location.hpp"
 
 #include <switch.h>
 #include <memory>
@@ -31,5 +32,17 @@ void UmountBfsar(const fs::FsPath& mount);
 
 Result MountNro(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path);
 void UmountNro(const fs::FsPath& mount);
+
+Result MountHttpAll();
+Result GetHttpMounts(location::StdioEntries& out);
+void UnmountHttpAll();
+
+Result MountNfsAll();
+Result GetNfsMounts(location::StdioEntries& out);
+void UnmountNfsAll();
+
+Result MountSmb2All();
+Result GetSmb2Mounts(location::StdioEntries& out);
+void UnmountSmb2All();
 
 } // namespace sphaira::devoptab

@@ -156,7 +156,7 @@ Result LruBufferedData::Read(void *_buffer, s64 file_off, s64 read_size, u64* by
     R_SUCCEED();
 }
 
-bool fix_path(const char* str, char* out) {
+bool fix_path(const char* str, char* out, bool strip_leading_slash) {
     // log_write("[SAVE] got path: %s\n", str);
 
     str = std::strrchr(str, ':');
@@ -175,9 +175,16 @@ bool fix_path(const char* str, char* out) {
             continue;
         }
 
-        // add leading slash.
-        if (!i && str[i] != '/') {
-            out[len++] = '/';
+        if (!i) {
+            // skip leading slash.
+            if (strip_leading_slash && str[i] == '/') {
+                continue;
+            }
+
+            // add leading slash.
+            if (!strip_leading_slash && str[i] != '/') {
+                out[len++] = '/';
+            }
         }
 
         // save single char.
@@ -195,6 +202,22 @@ bool fix_path(const char* str, char* out) {
     // log_write("[SAVE] end path: %s\n", out);
 
     return true;
+}
+
+void update_devoptab_for_read_only(devoptab_t* devoptab, bool read_only) {
+    // remove write functions if read_only is set.
+    if (read_only) {
+        devoptab->write_r     = nullptr;
+        devoptab->link_r      = nullptr;
+        devoptab->unlink_r    = nullptr;
+        devoptab->rename_r    = nullptr;
+        devoptab->mkdir_r     = nullptr;
+        devoptab->ftruncate_r = nullptr;
+        devoptab->fsync_r     = nullptr;
+        devoptab->rmdir_r     = nullptr;
+        devoptab->utimes_r    = nullptr;
+        devoptab->symlink_r   = nullptr;
+    }
 }
 
 } // sphaira::devoptab::common
