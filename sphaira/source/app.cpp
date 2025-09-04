@@ -1944,24 +1944,6 @@ void App::DisplayAdvancedOptions(bool left_side) {
     options->Add<ui::SidebarEntryCallback>("Export options"_i18n, [left_side](){
         App::DisplayDumpOptions(left_side);
     },  "Change the export options."_i18n);
-
-    static const char* erpt_path = "/atmosphere/erpt_reports";
-    options->Add<ui::SidebarEntryBool>("Disable erpt_reports"_i18n, g_app->m_fs->FileExists(erpt_path), [](bool& enable){
-        if (enable) {
-            Result rc;
-            // it's possible for erpt to generate a report in between deleting the folder and creating the file.
-            for (int i = 0; i < 10; i++) {
-                g_app->m_fs->DeleteDirectoryRecursively(erpt_path);
-                if (R_SUCCEEDED(rc = g_app->m_fs->CreateFile(erpt_path))) {
-                    break;
-                }
-            }
-            enable = R_SUCCEEDED(rc);
-        } else {
-            g_app->m_fs->DeleteFile(erpt_path);
-            g_app->m_fs->CreateDirectory(erpt_path);
-        }
-    }, "Disables error reports generated in /atmosphere/erpt_reports."_i18n);
 }
 
 void App::DisplayInstallOptions(bool left_side) {
