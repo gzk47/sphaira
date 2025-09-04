@@ -44,7 +44,7 @@ int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int fla
     auto file = static_cast<File*>(fileStruct);
     std::memset(file, 0, sizeof(*file));
 
-    char path[FS_MAX_PATH];
+    char path[PATH_MAX];
     if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -112,7 +112,7 @@ DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_pa
     auto dir = static_cast<Dir*>(dirState->dirStruct);
     std::memset(dir, 0, sizeof(*dir));
 
-    char path[FS_MAX_PATH];
+    char path[PATH_MAX];
     if (!common::fix_path(_path, path)) {
         set_errno(r, ENOENT);
         return NULL;
@@ -165,7 +165,7 @@ int devoptab_dirclose(struct _reent *r, DIR_ITER *dirState) {
 int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
     auto device = (Device*)r->deviceData;
 
-    char path[FS_MAX_PATH];
+    char path[PATH_MAX];
     if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }

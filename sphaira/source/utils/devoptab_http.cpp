@@ -13,10 +13,13 @@
 #include <vector>
 #include <memory>
 #include <cstring>
+#include <optional>
 #include <sys/stat.h>
 
 namespace sphaira::devoptab {
 namespace {
+
+constexpr int DEFAULT_HTTP_TIMEOUT = 3000; // 3 seconds.
 
 #define CURL_EASY_SETOPT_LOG(handle, opt, v) \
     if (auto r = curl_easy_setopt(handle, opt, v); r != CURLE_OK) { \
@@ -33,6 +36,8 @@ struct HttpMountConfig {
     std::string url{};
     std::string user{};
     std::string pass{};
+    std::optional<int> port{};
+    int timeout{DEFAULT_HTTP_TIMEOUT};
 };
 using HttpMountConfigs = std::vector<HttpMountConfig>;
 
@@ -128,9 +133,8 @@ std::string build_url(const std::string& base, const std::string& path, bool is_
 void http_set_common_options(Device& client, const std::string& url) {
     curl_easy_reset(client.curl);
     CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_URL, url.c_str());
-    // todo: make the timeouts configurable.
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_TIMEOUT, 5L);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_CONNECTTIMEOUT, 5L);
+    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_TIMEOUT, (long)client.config.timeout);
+    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_CONNECTTIMEOUT, (long)client.config.timeout);
     CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_AUTOREFERER, 1L);
     CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_FOLLOWLOCATION, 1L);
     CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_SSL_VERIFYPEER, 0L);
@@ -139,6 +143,10 @@ void http_set_common_options(Device& client, const std::string& url) {
     // CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_FAILONERROR, 1L);
     CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_NOPROGRESS, 0L);
     CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_BUFFERSIZE, 1024L * 512L);
+
+    if (client.config.port) {
+        CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_PORT, (long)client.config.port.value());
+    }
 
     // enable all forms of compression supported by libcurl.
     CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_ACCEPT_ENCODING, "");
@@ -345,10 +353,11 @@ int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int fla
 
     // todo: add this check to all devoptabs.
     if ((flags & O_ACCMODE) != O_RDONLY) {
+        log_write("[HTTP] Only read-only mode is supported\n");
         return set_errno(r, EINVAL);
     }
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -359,10 +368,12 @@ int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int fla
 
     struct stat st;
     if (!http_stat(*device, path, &st, false)) {
+        log_write("[HTTP] http_stat() failed for file: %s\n", path);
         return set_errno(r, ENOENT);
     }
 
     if (st.st_mode & S_IFDIR) {
+        log_write("[HTTP] Attempted to open a directory as a file: %s\n", path);
         return set_errno(r, EISDIR);
     }
 
@@ -425,7 +436,7 @@ DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_pa
     std::memset(dir, 0, sizeof(*dir));
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH];
+    char path[PATH_MAX];
     if (!common::fix_path(_path, path)) {
         set_errno(r, ENOENT);
         return NULL;
@@ -493,7 +504,7 @@ int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
     auto device = (Device*)r->deviceData;
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH];
+    char path[PATH_MAX];
     if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -559,13 +570,17 @@ Result MountHttpAll() {
             e->emplace_back(Section);
         }
 
-        HttpMountConfig config;
-        if (std::strcmp(Key, "url") == 0) {
-            config.url = Value;
-        } else if (std::strcmp(Key, "user") == 0) {
-            config.user = Value;
-        } else if (std::strcmp(Key, "pass") == 0) {
-            config.pass = Value;
+        if (!std::strcmp(Key, "url")) {
+            e->back().url = Value;
+        } else if (!std::strcmp(Key, "user")) {
+            e->back().user = Value;
+        } else if (!std::strcmp(Key, "pass")) {
+            e->back().pass = Value;
+        } else if (!std::strcmp(Key, "port")) {
+            // todo: idk what the default should be.
+            e->back().port = ini_parse_getl(Value, 8000);
+        } else if (!std::strcmp(Key, "timeout")) {
+            e->back().timeout = ini_parse_getl(Value, DEFAULT_HTTP_TIMEOUT);
         } else {
             log_write("[HTTP] INI: Unknown key %s=%s\n", Key, Value);
         }
@@ -607,8 +622,8 @@ Result MountHttpAll() {
         entry->devoptab.name = entry->name;
         entry->devoptab.deviceData = &entry->device;
         entry->device.config = config;
-        std::snprintf(entry->name, sizeof(entry->name), "%s", config.name.c_str());
-        std::snprintf(entry->mount, sizeof(entry->mount), "%s:/", config.name.c_str());
+        std::snprintf(entry->name, sizeof(entry->name), "[HTTP] %s", config.name.c_str());
+        std::snprintf(entry->mount, sizeof(entry->mount), "[HTTP] %s:/", config.name.c_str());
 
         R_UNLESS(AddDevice(&entry->devoptab) >= 0, 0x1);
         log_write("[HTTP] DEVICE SUCCESS %s %s\n", entry->device.config.url.c_str(), entry->name);

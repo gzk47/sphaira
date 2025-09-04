@@ -20,7 +20,7 @@ auto OptionBase<T>::GetInternal(const char* name) -> T {
             } else if constexpr(std::is_same_v<T, float>) {
                 m_value = ini_getf(m_section.c_str(), name, m_default_value, App::CONFIG_PATH);
             } else if constexpr(std::is_same_v<T, std::string>) {
-                char buf[FS_MAX_PATH];
+                char buf[PATH_MAX]{};
                 ini_gets(m_section.c_str(), name, m_default_value.c_str(), buf, sizeof(buf), App::CONFIG_PATH);
                 m_value = buf;
             }

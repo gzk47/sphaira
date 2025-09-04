@@ -6,7 +6,7 @@ namespace sphaira::swkbd {
 namespace {
 
 struct Config {
-    char out_text[FS_MAX_PATH]{};
+    char out_text[PATH_MAX]{};
     bool numpad{};
 };
 

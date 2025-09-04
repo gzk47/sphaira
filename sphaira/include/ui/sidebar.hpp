@@ -7,6 +7,7 @@
 #include <memory>
 #include <concepts>
 #include <utility>
+#include <sys/syslimits.h>
 
 namespace sphaira::ui {
 
@@ -174,7 +175,7 @@ private:
 
 class SidebarEntryTextInput final : public SidebarEntryTextBase {
 public:
-    explicit SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide = {}, s64 len_min = -1, s64 len_max = FS_MAX_PATH, const std::string& info = "");
+    explicit SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide = {}, s64 len_min = -1, s64 len_max = PATH_MAX, const std::string& info = "");
 
 private:
     const std::string m_guide;

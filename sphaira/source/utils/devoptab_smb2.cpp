@@ -16,11 +16,16 @@
 namespace sphaira::devoptab {
 namespace {
 
+constexpr int DEFAULT_SMB2_TIMEOUT = 3000; // 3 seconds.
+
 struct Smb2MountConfig {
     std::string name{};
     std::string url{};
     std::string user{};
     std::string pass{};
+    std::string domain{};
+    std::string workstation{};
+    int timeout{DEFAULT_SMB2_TIMEOUT};
     bool read_only{};
 };
 using Smb2MountConfigs = std::vector<Smb2MountConfig>;
@@ -64,6 +69,16 @@ bool mount_smb2(Device& device) {
         if (!device.config.pass.empty()) {
             smb2_set_password(device.smb2, device.config.pass.c_str());
         }
+
+        if (!device.config.domain.empty()) {
+            smb2_set_domain(device.smb2, device.config.domain.c_str());
+        }
+
+        if (!device.config.workstation.empty()) {
+            smb2_set_workstation(device.smb2, device.config.workstation.c_str());
+        }
+
+        smb2_set_timeout(device.smb2, device.config.timeout);
     }
 
     if (!device.url) {
@@ -74,10 +89,6 @@ bool mount_smb2(Device& device) {
         }
     }
 
-    log_write("[SMB2] Connecting to %s/%s as %s\n",
-              device.url->server,
-              device.url->share,
-              device.url->user ? device.url->user : "guest");
     const auto ret = smb2_connect_share(device.smb2, device.url->server, device.url->share, device.url->user);
     if (ret) {
         log_write("[SMB2] smb2_connect_share() failed: %s errno: %s\n", smb2_get_error(device.smb2), std::strerror(-ret));
@@ -127,7 +138,7 @@ int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int fla
         return set_errno(r, EROFS);
     }
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -217,7 +228,7 @@ int devoptab_unlink(struct _reent *r, const char *_path) {
     auto device = static_cast<Device*>(r->deviceData);
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -239,12 +250,12 @@ int devoptab_rename(struct _reent *r, const char *_oldName, const char *_newName
     auto device = static_cast<Device*>(r->deviceData);
     SCOPED_MUTEX(&device->mutex);
 
-    char oldName[FS_MAX_PATH]{};
+    char oldName[PATH_MAX]{};
     if (!fix_path(_oldName, oldName)) {
         return set_errno(r, ENOENT);
     }
 
-    char newName[FS_MAX_PATH]{};
+    char newName[PATH_MAX]{};
     if (!fix_path(_newName, newName)) {
         return set_errno(r, ENOENT);
     }
@@ -266,7 +277,7 @@ int devoptab_mkdir(struct _reent *r, const char *_path, int mode) {
     auto device = static_cast<Device*>(r->deviceData);
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -288,7 +299,7 @@ int devoptab_rmdir(struct _reent *r, const char *_path) {
     auto device = static_cast<Device*>(r->deviceData);
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -312,7 +323,7 @@ DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_pa
     std::memset(dir, 0, sizeof(*dir));
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!fix_path(_path, path)) {
         set_errno(r, ENOENT);
         return nullptr;
@@ -376,7 +387,7 @@ int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
     std::memset(st, 0, sizeof(*st));
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -413,7 +424,7 @@ int devoptab_statvfs(struct _reent *r, const char *_path, struct statvfs *buf) {
     auto device = static_cast<Device*>(r->deviceData);
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -532,6 +543,12 @@ Result MountSmb2All() {
             e->back().user = Value;
         } else if (!std::strcmp(Key, "pass")) {
             e->back().pass = Value;
+        } else if (!std::strcmp(Key, "domain")) {
+            e->back().domain = Value;
+        } else if (!std::strcmp(Key, "workstation")) {
+            e->back().workstation = Value;
+        } else if (!std::strcmp(Key, "timeout")) {
+            e->back().timeout = ini_parse_getl(Value, DEFAULT_SMB2_TIMEOUT);
         } else if (!std::strcmp(Key, "read_only")) {
             e->back().read_only = ini_parse_getbool(Value, false);
         } else {
@@ -576,8 +593,8 @@ Result MountSmb2All() {
         entry->devoptab.name = entry->name;
         entry->devoptab.deviceData = &entry->device;
         entry->device.config = config;
-        std::snprintf(entry->name, sizeof(entry->name), "%s", config.name.c_str());
-        std::snprintf(entry->mount, sizeof(entry->mount), "%s:/", config.name.c_str());
+        std::snprintf(entry->name, sizeof(entry->name), "[SMB] %s", config.name.c_str());
+        std::snprintf(entry->mount, sizeof(entry->mount), "[SMB] %s:/", config.name.c_str());
         common::update_devoptab_for_read_only(&entry->devoptab, config.read_only);
 
         R_UNLESS(AddDevice(&entry->devoptab) >= 0, 0x1);

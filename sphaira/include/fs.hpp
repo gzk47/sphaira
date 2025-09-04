@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <string_view>
+#include <sys/syslimits.h>
 #include "defines.hpp"
 
 namespace fs {
@@ -168,7 +169,7 @@ struct FsPath {
         return path[0] == str[0];
     }
 
-    char s[FS_MAX_PATH]{};
+    char s[PATH_MAX]{};
 };
 
 inline FsPath operator+(const char* v, const FsPath& fp) {
@@ -187,8 +188,12 @@ inline FsPath operator+(const std::string_view& v, const FsPath& fp) {
 }
 
 // Fs seems to be limted to file paths of 255 characters.
+// i've disabled this as network mounts will often have very long paths
+// that do not have this limit.
+// a proper fix would be to return an error if the path is too long and the path
+// is native.
 struct FsPathReal {
-    static constexpr inline size_t FS_REAL_MAX_LENGTH = 255;
+    static constexpr inline size_t FS_REAL_MAX_LENGTH = PATH_MAX;
 
     constexpr FsPathReal(const FsPath& str) : FsPathReal{str.s} { }
     explicit constexpr FsPathReal(const char* str) {
@@ -215,7 +220,7 @@ struct FsPathReal {
     constexpr operator const char*() const { return s; }
     constexpr operator std::string_view() const { return s; }
 
-    char s[FS_MAX_PATH];
+    char s[PATH_MAX];
 };
 
 // fwd

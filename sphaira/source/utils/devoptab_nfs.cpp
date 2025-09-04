@@ -15,16 +15,25 @@
 namespace sphaira::devoptab {
 namespace {
 
+constexpr int DEFAULT_NFS_UID = 0;
+constexpr int DEFAULT_NFS_GID = 0;
+constexpr int DEFAULT_NFS_VERSION = 3;
+constexpr int DEFAULT_NFS_TIMEOUT = 3000; // 3 seconds.
+
 struct NfsMountConfig {
     std::string name{};
     std::string url{};
-    std::string path{};
+    int uid{DEFAULT_NFS_UID};
+    int gid{DEFAULT_NFS_GID};
+    int version{DEFAULT_NFS_VERSION};
+    int timeout{DEFAULT_NFS_TIMEOUT};
     bool read_only{};
 };
 using NfsMountConfigs = std::vector<NfsMountConfig>;
 
 struct Device {
     nfs_context* nfs{};
+    nfs_url* url{};
     NfsMountConfig config;
     bool mounted{};
     Mutex mutex{};
@@ -51,9 +60,31 @@ bool mount_nfs(Device& device) {
             log_write("[NFS] nfs_init_context() failed\n");
             return false;
         }
+
+        nfs_set_uid(device.nfs, device.config.uid);
+        nfs_set_gid(device.nfs, device.config.gid);
+        nfs_set_version(device.nfs, device.config.version);
+        nfs_set_timeout(device.nfs, device.config.timeout);
+        nfs_set_readonly(device.nfs, device.config.read_only);
+        // nfs_set_mountport(device.nfs, device.url->port);
     }
 
-    const auto ret = nfs_mount(device.nfs, device.config.url.c_str(), device.config.path.c_str());
+    // fix the url if needed.
+    if (!device.config.url.starts_with("nfs://")) {
+        log_write("[NFS] Prepending nfs:// to url: %s\n", device.config.url.c_str());
+        device.config.url = "nfs://" + device.config.url;
+    }
+
+    if (!device.url) {
+        // todo: check all parse options.
+        device.url = nfs_parse_url_dir(device.nfs, device.config.url.c_str());
+        if (!device.url) {
+            log_write("[NFS] nfs_parse_url() failed for url: %s\n", device.config.url.c_str());
+            return false;
+        }
+    }
+
+    const auto ret = nfs_mount(device.nfs, device.url->server, device.url->path);
     if (ret) {
         log_write("[NFS] nfs_mount() failed: %s errno: %s\n", nfs_get_error(device.nfs), std::strerror(-ret));
         return false;
@@ -78,7 +109,7 @@ int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int fla
         return set_errno(r, EROFS);
     }
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -209,7 +240,7 @@ int devoptab_unlink(struct _reent *r, const char *_path) {
     auto device = static_cast<Device*>(r->deviceData);
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -231,12 +262,12 @@ int devoptab_rename(struct _reent *r, const char *_oldName, const char *_newName
     auto device = static_cast<Device*>(r->deviceData);
     SCOPED_MUTEX(&device->mutex);
 
-    char oldName[FS_MAX_PATH]{};
+    char oldName[PATH_MAX]{};
     if (!common::fix_path(_oldName, oldName)) {
         return set_errno(r, ENOENT);
     }
 
-    char newName[FS_MAX_PATH]{};
+    char newName[PATH_MAX]{};
     if (!common::fix_path(_newName, newName)) {
         return set_errno(r, ENOENT);
     }
@@ -258,7 +289,7 @@ int devoptab_mkdir(struct _reent *r, const char *_path, int mode) {
     auto device = static_cast<Device*>(r->deviceData);
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -280,7 +311,7 @@ int devoptab_rmdir(struct _reent *r, const char *_path) {
     auto device = static_cast<Device*>(r->deviceData);
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -304,7 +335,7 @@ DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_pa
     std::memset(dir, 0, sizeof(*dir));
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!common::fix_path(_path, path)) {
         set_errno(r, ENOENT);
         return nullptr;
@@ -380,7 +411,7 @@ int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
     auto device = static_cast<Device*>(r->deviceData);
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -415,7 +446,7 @@ int devoptab_statvfs(struct _reent *r, const char *_path, struct statvfs *buf) {
     auto device = static_cast<Device*>(r->deviceData);
     SCOPED_MUTEX(&device->mutex);
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -455,7 +486,7 @@ int devoptab_utimes(struct _reent *r, const char *_path, const struct timeval ti
         return set_errno(r, EINVAL);
     }
 
-    char path[FS_MAX_PATH]{};
+    char path[PATH_MAX]{};
     if (!common::fix_path(_path, path)) {
         return set_errno(r, ENOENT);
     }
@@ -514,6 +545,11 @@ struct Entry {
             if (device.mounted) {
                 nfs_umount(device.nfs);
             }
+
+            if (device.url) {
+                nfs_destroy_url(device.url);
+            }
+
             nfs_destroy_context(device.nfs);
         }
 
@@ -542,10 +578,16 @@ Result MountNfsAll() {
 
         if (!std::strcmp(Key, "url")) {
             e->back().url = Value;
-        } else if (!std::strcmp(Key, "path")) {
-            e->back().path = Value;
         } else if (!std::strcmp(Key, "name")) {
             e->back().name = Value;
+        } else if (!std::strcmp(Key, "uid")) {
+            e->back().uid = ini_parse_getl(Value, DEFAULT_NFS_UID);
+        } else if (!std::strcmp(Key, "gid")) {
+            e->back().gid = ini_parse_getl(Value, DEFAULT_NFS_GID);
+        } else if (!std::strcmp(Key, "version")) {
+            e->back().version = ini_parse_getl(Value, DEFAULT_NFS_VERSION);
+        } else if (!std::strcmp(Key, "timeout")) {
+            e->back().timeout = ini_parse_getl(Value, DEFAULT_NFS_TIMEOUT);
         } else if (!std::strcmp(Key, "read_only")) {
             e->back().read_only = ini_parse_getbool(Value, false);
         } else {
@@ -590,8 +632,8 @@ Result MountNfsAll() {
         entry->devoptab.name = entry->name;
         entry->devoptab.deviceData = &entry->device;
         entry->device.config = config;
-        std::snprintf(entry->name, sizeof(entry->name), "%s", config.name.c_str());
-        std::snprintf(entry->mount, sizeof(entry->mount), "%s:/", config.name.c_str());
+        std::snprintf(entry->name, sizeof(entry->name), "[NFS] %s", config.name.c_str());
+        std::snprintf(entry->mount, sizeof(entry->mount), "[NFS] %s:/", config.name.c_str());
         common::update_devoptab_for_read_only(&entry->devoptab, config.read_only);
 
         R_UNLESS(AddDevice(&entry->devoptab) >= 0, 0x1);
