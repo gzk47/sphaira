@@ -108,6 +108,7 @@ add_executable(sphaira
     source/utils/devoptab_http.cpp
     source/utils/devoptab_nfs.cpp
     source/utils/devoptab_smb2.cpp
+    source/utils/devoptab_ftp.cpp
 
     source/usb/base.cpp
     source/usb/usbds.cpp

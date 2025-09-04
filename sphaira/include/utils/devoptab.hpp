@@ -37,6 +37,10 @@ Result MountHttpAll();
 Result GetHttpMounts(location::StdioEntries& out);
 void UnmountHttpAll();
 
+Result MountFtpAll();
+Result GetFtpMounts(location::StdioEntries& out);
+void UnmountFtpAll();
+
 Result MountNfsAll();
 Result GetNfsMounts(location::StdioEntries& out);
 void UnmountNfsAll();

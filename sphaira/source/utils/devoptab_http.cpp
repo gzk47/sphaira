@@ -92,17 +92,11 @@ size_t dirlist_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
 
 size_t write_data_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
     auto data = static_cast<std::span<char>*>(userdata);
+    const auto rsize = std::min(size * nmemb, data->size());
 
-    const auto realsize = size * nmemb;
-    if (data->size() < realsize) {
-        log_write("[HTTP] buffer is too small: %zu < %zu\n", data->size(), realsize);
-        return 0; // buffer is too small
-    }
-
-    std::memcpy(data->data(), ptr, realsize);
-    *data = data->subspan(realsize); // advance the span
-
-    return realsize;
+    std::memcpy(data->data(), ptr, rsize);
+    *data = data->subspan(rsize);
+    return rsize;
 }
 
 std::string url_encode(const std::string& str) {

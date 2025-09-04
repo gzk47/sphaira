@@ -1598,6 +1598,11 @@ App::App(const char* argv0) {
         }
 
         {
+            SCOPED_TIMESTAMP("ftp init");
+            devoptab::MountFtpAll();
+        }
+
+        {
             SCOPED_TIMESTAMP("nfs init");
             devoptab::MountNfsAll();
         }
@@ -2203,6 +2208,11 @@ App::~App() {
             {
                 SCOPED_TIMESTAMP("http exit");
                 devoptab::UnmountHttpAll();
+            }
+
+            {
+                SCOPED_TIMESTAMP("ftp exit");
+                devoptab::UnmountFtpAll();
             }
 
             {

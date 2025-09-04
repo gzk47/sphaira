@@ -80,11 +80,22 @@ auto Load() -> Entries {
 auto GetStdio(bool write) -> StdioEntries {
     StdioEntries out{};
 
+    const auto add_from_entries = [](const StdioEntries& entries, StdioEntries& out, bool write) {
+        for (const auto& e : entries) {
+            if (write && e.write_protect) {
+                log_write("[STDIO] skipping read only mount: %s\n", e.name.c_str());
+                continue;
+            }
+
+            out.emplace_back(e);
+        }
+    };
+
     {
         StdioEntries entries;
         if (R_SUCCEEDED(devoptab::GetNfsMounts(entries))) {
             log_write("[NFS] got nfs mounts: %zu\n", entries.size());
-            out.insert(out.end(), entries.begin(), entries.end());
+            add_from_entries(entries, out, write);
         }
     }
 
@@ -92,7 +103,7 @@ auto GetStdio(bool write) -> StdioEntries {
         StdioEntries entries;
         if (R_SUCCEEDED(devoptab::GetSmb2Mounts(entries))) {
             log_write("[SMB2] got smb2 mounts: %zu\n", entries.size());
-            out.insert(out.end(), entries.begin(), entries.end());
+            add_from_entries(entries, out, write);
         }
     }
 
@@ -100,7 +111,15 @@ auto GetStdio(bool write) -> StdioEntries {
         StdioEntries entries;
         if (R_SUCCEEDED(devoptab::GetHttpMounts(entries))) {
             log_write("[HTTP] got http mounts: %zu\n", entries.size());
-            out.insert(out.end(), entries.begin(), entries.end());
+            add_from_entries(entries, out, write);
+        }
+    }
+
+    {
+        StdioEntries entries;
+        if (R_SUCCEEDED(devoptab::GetFtpMounts(entries))) {
+            log_write("[FTP] got ftp mounts: %zu\n", entries.size());
+            add_from_entries(entries, out, write);
         }
     }
 
