@@ -65,7 +65,7 @@ bool GetMountPoint(location::StdioEntry& out) {
 
     out.mount = fs.mountpoint;
     out.name = display_name;
-    out.write_protect = true;
+    out.flags = location::FsEntryFlag::FsEntryFlag_ReadOnly;
 
     return true;
 }

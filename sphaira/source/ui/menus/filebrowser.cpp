@@ -591,8 +591,7 @@ void FsView::Draw(NVGcontext* vg, Theme* theme) {
 
         m_scroll_name.Draw(vg, selected, x + text_xoffset+65, y + (h / 2.f), w-(75+text_xoffset+65+50), 20, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), e.name);
 
-        // NOTE: make this native only if i disable dir scan from above.
-        if (e.IsDir()) {
+        if (e.IsDir() && !m_fs_entry.IsNoStatDir() && (e.dir_count != -1 || !e.done_stat)) {
             // NOTE: this takes longer than 16ms when opening a new folder due to it
             // checking all 9 folders at once.
             if (!got_dir_count && !e.done_stat && e.file_count == -1 && e.dir_count == -1) {
@@ -607,7 +606,7 @@ void FsView::Draw(NVGcontext* vg, Theme* theme) {
             if (e.dir_count != -1) {
                 gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) + 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP, theme->GetColour(text_id), "%zd dirs"_i18n.c_str(), e.dir_count);
             }
-        } else if (e.IsFile()) {
+        } else if (e.IsFile() && !m_fs_entry.IsNoStatFile() && (e.file_size != -1 || !e.time_stamp.is_valid)) {
             if (!e.time_stamp.is_valid && !e.done_stat) {
                 e.done_stat = true;
                 const auto path = GetNewPath(e);
@@ -1706,12 +1705,7 @@ void FsView::DisplayOptions() {
 
     const auto stdio_locations = location::GetStdio(false);
     for (const auto& e: stdio_locations) {
-        u32 flags{};
-        if (e.write_protect) {
-            flags |= FsEntryFlag_ReadOnly;
-        }
-
-        fs_entries.emplace_back(e.name, e.mount, FsType::Stdio, flags);
+        fs_entries.emplace_back(e.name, e.mount, FsType::Stdio, e.flags);
         mount_items.push_back(e.name);
     }
 
@@ -1727,12 +1721,7 @@ void FsView::DisplayOptions() {
 
     const auto fat_entries = location::GetFat();
     for (const auto& e: fat_entries) {
-        u32 flags{};
-        if (e.write_protect) {
-            flags |= FsEntryFlag_ReadOnly;
-        }
-
-        fs_entries.emplace_back(e.name, e.mount, FsType::Stdio, flags);
+        fs_entries.emplace_back(e.name, e.mount, FsType::Stdio, e.flags);
         mount_items.push_back(e.name);
     }
 

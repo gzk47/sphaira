@@ -28,6 +28,8 @@ struct NfsMountConfig {
     int version{DEFAULT_NFS_VERSION};
     int timeout{DEFAULT_NFS_TIMEOUT};
     bool read_only{};
+    bool no_stat_file{false};
+    bool no_stat_dir{true};
 };
 using NfsMountConfigs = std::vector<NfsMountConfig>;
 
@@ -581,15 +583,19 @@ Result MountNfsAll() {
         } else if (!std::strcmp(Key, "name")) {
             e->back().name = Value;
         } else if (!std::strcmp(Key, "uid")) {
-            e->back().uid = ini_parse_getl(Value, DEFAULT_NFS_UID);
+            e->back().uid = ini_parse_getl(Value, e->back().uid);
         } else if (!std::strcmp(Key, "gid")) {
-            e->back().gid = ini_parse_getl(Value, DEFAULT_NFS_GID);
+            e->back().gid = ini_parse_getl(Value, e->back().gid);
         } else if (!std::strcmp(Key, "version")) {
-            e->back().version = ini_parse_getl(Value, DEFAULT_NFS_VERSION);
+            e->back().version = ini_parse_getl(Value, e->back().version);
         } else if (!std::strcmp(Key, "timeout")) {
-            e->back().timeout = ini_parse_getl(Value, DEFAULT_NFS_TIMEOUT);
+            e->back().timeout = ini_parse_getl(Value, e->back().timeout);
         } else if (!std::strcmp(Key, "read_only")) {
-            e->back().read_only = ini_parse_getbool(Value, false);
+            e->back().read_only = ini_parse_getbool(Value, e->back().read_only);
+        } else if (!std::strcmp(Key, "no_stat_file")) {
+            e->back().no_stat_file = ini_parse_getbool(Value, e->back().no_stat_file);
+        } else if (!std::strcmp(Key, "no_stat_dir")) {
+            e->back().no_stat_dir = ini_parse_getbool(Value, e->back().no_stat_dir);
         } else {
             log_write("[NFS] INI: Unknown key %s=%s\n", Key, Value);
         }
@@ -663,7 +669,18 @@ Result GetNfsMounts(location::StdioEntries& out) {
 
     for (const auto& entry : g_entries) {
         if (entry) {
-            out.emplace_back(entry->mount, entry->name, entry->device.config.read_only);
+            u32 flags = 0;
+            if (entry->device.config.read_only) {
+                flags |= location::FsEntryFlag::FsEntryFlag_ReadOnly;
+            }
+            if (entry->device.config.no_stat_file) {
+                flags |= location::FsEntryFlag::FsEntryFlag_NoStatFile;
+            }
+            if (entry->device.config.no_stat_dir) {
+                flags |= location::FsEntryFlag::FsEntryFlag_NoStatDir;
+            }
+
+            out.emplace_back(entry->mount, entry->name, flags);
         }
     }
 

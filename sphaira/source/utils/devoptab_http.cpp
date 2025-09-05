@@ -19,7 +19,7 @@
 namespace sphaira::devoptab {
 namespace {
 
-constexpr int DEFAULT_HTTP_TIMEOUT = 3000; // 3 seconds.
+constexpr long DEFAULT_HTTP_TIMEOUT = 3000; // 3 seconds.
 
 #define CURL_EASY_SETOPT_LOG(handle, opt, v) \
     if (auto r = curl_easy_setopt(handle, opt, v); r != CURLE_OK) { \
@@ -36,8 +36,10 @@ struct HttpMountConfig {
     std::string url{};
     std::string user{};
     std::string pass{};
-    std::optional<int> port{};
-    int timeout{DEFAULT_HTTP_TIMEOUT};
+    std::optional<long> port{};
+    long timeout{DEFAULT_HTTP_TIMEOUT};
+    bool no_stat_file{true};
+    bool no_stat_dir{true};
 };
 using HttpMountConfigs = std::vector<HttpMountConfig>;
 
@@ -127,8 +129,8 @@ std::string build_url(const std::string& base, const std::string& path, bool is_
 void http_set_common_options(Device& client, const std::string& url) {
     curl_easy_reset(client.curl);
     CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_URL, url.c_str());
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_TIMEOUT, (long)client.config.timeout);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_CONNECTTIMEOUT, (long)client.config.timeout);
+    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_TIMEOUT, client.config.timeout);
+    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_CONNECTTIMEOUT, client.config.timeout);
     CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_AUTOREFERER, 1L);
     CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_FOLLOWLOCATION, 1L);
     CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_SSL_VERIFYPEER, 0L);
@@ -139,7 +141,7 @@ void http_set_common_options(Device& client, const std::string& url) {
     CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_BUFFERSIZE, 1024L * 512L);
 
     if (client.config.port) {
-        CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_PORT, (long)client.config.port.value());
+        CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_PORT, client.config.port.value());
     }
 
     // enable all forms of compression supported by libcurl.
@@ -175,65 +177,73 @@ bool http_dirlist(Device& client, const std::string& path, DirEntries& out) {
         return false;
     }
 
-    chunk.emplace_back('\0'); // null-terminate the chunk
-    const char* dilim = "<a href=\"";
-    const char* ptr = chunk.data();
+    log_write("[HTTP] Received %zu bytes for directory listing\n", chunk.size());
 
-    // try and parse the href links.
-    // it works with python http.serve, npm http-server and rclone http server.
-    while ((ptr = std::strstr(ptr, dilim))) {
-        // skip the delimiter.
-        ptr += std::strlen(dilim);
+    SCOPED_TIMESTAMP("http_dirlist parse");
 
-        const auto href_begin = ptr;
-        const auto href_end = std::strstr(href_begin, "\">");
-        if (!href_end) {
-            continue;
+    // very fast/basic html parsing.
+    // takes 17ms to parse 3MB html with 7641 entries.
+    // todo: if i ever add an xml parser to sphaira, use that instead.
+    // todo: for the above, benchmark the parser to ensure its faster than the my code.
+    std::string_view chunk_view{chunk.data(), chunk.size()};
+    const auto table_start = chunk_view.find("<table");
+    const auto table_end = chunk_view.rfind("</table>");
+
+    if (table_start != std::string_view::npos && table_end != std::string_view::npos && table_end > table_start) {
+        const std::string_view href_tag_start = "<a href=\"";
+        const std::string_view href_tag_end = "\">";
+        const std::string_view anchor_tag_end = "</a>";
+        const auto table_view = chunk_view.substr(table_start, table_end - table_start);
+
+        size_t pos = 0;
+        out.reserve(10000);
+
+        for (;;) {
+            const auto href_pos = table_view.find(href_tag_start, pos);
+            if (href_pos == std::string_view::npos) {
+                break; // no more href.
+            }
+            pos = href_pos + href_tag_start.length();
+
+            const auto href_begin = pos;
+            const auto href_end = table_view.find(href_tag_end, href_begin);
+            if (href_end == std::string_view::npos) {
+                break; // no more href.
+            }
+
+            const auto name_begin = href_end + href_tag_end.length();
+            const auto name_end = table_view.find(anchor_tag_end, name_begin);
+            if (name_end == std::string_view::npos) {
+                break; // no more names.
+            }
+
+            pos = name_end + anchor_tag_end.length();
+            const auto href_view = table_view.substr(href_begin, href_end - href_begin);
+            const auto name_view = table_view.substr(name_begin, name_end - name_begin);
+
+            // skip empty names/links, root dir entry and links that are not actual files/dirs (e.g. sorting/filter controls).
+            if (name_view.empty() || href_view.empty() || name_view == "/" || href_view.starts_with('?') || href_view.starts_with('#')) {
+                continue;
+            }
+
+            // skip parent directory entry and external links.
+            if (href_view == ".." || name_view == ".." || href_view.starts_with("../") || name_view.starts_with("../") || href_view.find("://") != std::string::npos) {
+                continue;
+            }
+
+            std::string name{name_view};
+            const std::string href{href_view};
+
+            const auto is_dir = name.ends_with('/');
+            if (is_dir) {
+                name.pop_back(); // remove the trailing '/'
+            }
+
+            out.emplace_back(name, href, is_dir);
         }
-        const auto href_len = href_end - href_begin;
-
-        const auto name_begin = href_end + std::strlen("\">");
-        const auto name_end = std::strstr(name_begin, "</a>");
-        if (!name_end) {
-            continue;
-        }
-        const auto name_len = name_end - name_begin;
-
-        if (href_len <= 0 || name_len <= 0) {
-            continue;
-        }
-
-        // skip if inside <script> or <style> tags (simple check)
-        const auto script_tag = std::strstr(href_begin - 32, "<script");
-        const auto style_tag = std::strstr(href_begin - 32, "<style");
-        if ((script_tag && script_tag < href_begin) || (style_tag && style_tag < href_begin)) {
-            continue;
-        }
-
-        std::string href(href_begin, href_len);
-        std::string name(name_begin, name_len);
-
-        // skip parent directory entry and external links.
-        if (href == ".." || name == ".." || href.starts_with("../") || name.starts_with("../") || href.find("://") != std::string::npos) {
-            continue;
-        }
-
-        // skip links that are not actual files/dirs (e.g. sorting/filter controls)
-        if (href.starts_with('?')) {
-            continue;
-        }
-
-        if (name.empty() || href.empty() || name == "/" || href.starts_with('?') || href.starts_with('#')) {
-            continue;
-        }
-
-        const auto is_dir = name.ends_with('/');
-        if (is_dir) {
-            name.pop_back(); // remove the trailing '/'
-        }
-
-        out.emplace_back(name, href, is_dir);
     }
+
+    log_write("[HTTP] Parsed %zu entries from directory listing\n", out.size());
 
     return true;
 }
@@ -574,7 +584,11 @@ Result MountHttpAll() {
             // todo: idk what the default should be.
             e->back().port = ini_parse_getl(Value, 8000);
         } else if (!std::strcmp(Key, "timeout")) {
-            e->back().timeout = ini_parse_getl(Value, DEFAULT_HTTP_TIMEOUT);
+            e->back().timeout = ini_parse_getl(Value, e->back().timeout);
+        } else if (!std::strcmp(Key, "no_stat_file")) {
+            e->back().no_stat_file = ini_parse_getbool(Value, e->back().no_stat_file);
+        } else if (!std::strcmp(Key, "no_stat_dir")) {
+            e->back().no_stat_dir = ini_parse_getbool(Value, e->back().no_stat_dir);
         } else {
             log_write("[HTTP] INI: Unknown key %s=%s\n", Key, Value);
         }
@@ -646,7 +660,16 @@ Result GetHttpMounts(location::StdioEntries& out) {
 
     for (const auto& entry : g_entries) {
         if (entry) {
-            out.emplace_back(entry->mount, entry->name, true);
+            u32 flags = 0;
+            flags |= location::FsEntryFlag::FsEntryFlag_ReadOnly;
+            if (entry->device.config.no_stat_file) {
+                flags |= location::FsEntryFlag::FsEntryFlag_NoStatFile;
+            }
+            if (entry->device.config.no_stat_dir) {
+                flags |= location::FsEntryFlag::FsEntryFlag_NoStatDir;
+            }
+
+            out.emplace_back(entry->mount, entry->name, flags);
         }
     }
 

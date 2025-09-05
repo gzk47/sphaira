@@ -39,7 +39,12 @@ enum FsEntryFlag {
     // supports file assoc.
     FsEntryFlag_Assoc = 1 << 1,
     // this is an sd card, files can be launched from here.
-    FsEntryFlag_IsSd = 1 << 2,
+    FsEntryFlag_IsSd = 1 << 2, // todo: remove this.
+    // do not stat files in this entry (faster for network mount).
+    FsEntryFlag_NoStatFile = 1 << 3,
+    FsEntryFlag_NoStatDir = 1 << 4,
+    FsEntryFlag_NoRandomReads = 1 << 5,
+    FsEntryFlag_NoRandomWrites = 1 << 6,
 };
 
 enum class FsType {
@@ -88,6 +93,22 @@ struct FsEntry {
 
     auto IsSd() const -> bool {
         return flags & FsEntryFlag_IsSd;
+    }
+
+    auto IsNoStatFile() const -> bool {
+        return flags & FsEntryFlag_NoStatFile;
+    }
+
+    auto IsNoStatDir() const -> bool {
+        return flags & FsEntryFlag_NoStatDir;
+    }
+
+    auto IsNoRandomReads() const -> bool {
+        return flags & FsEntryFlag_NoRandomReads;
+    }
+
+    auto IsNoRandomWrites() const -> bool {
+        return flags & FsEntryFlag_NoRandomWrites;
     }
 
     auto IsSame(const FsEntry& e) const {
