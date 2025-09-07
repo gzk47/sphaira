@@ -215,14 +215,18 @@ Result CreateDirectoryRecursively(FsFileSystem* fs, const FsPath& _path, bool ig
             rc = CreateDirectory(path, ignore_read_only);
         }
 
-        if (R_FAILED(rc) && rc != FsError_PathAlreadyExists) {
-            log_write("failed to create folder: %s\n", path.s);
-            return rc;
-        }
-
-        // log_write("created_directory: %s\n", path);
         std::strcat(path, "/");
     }
+
+    // only check if the last folder creation failed.
+    // reason being is that it may try to create "/" root folder, which some network
+    // fs will return a EPERM/EACCES error.
+    // however if the last directory failed, then it is a real error.
+    if (R_FAILED(rc) && rc != FsError_PathAlreadyExists) {
+        log_write("failed to create folder: %s\n", path.s);
+        return rc;
+    }
+
     R_SUCCEED();
 }
 

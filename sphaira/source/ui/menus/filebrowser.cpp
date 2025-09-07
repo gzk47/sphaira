@@ -1005,114 +1005,6 @@ void FsView::ZipFiles(fs::FsPath zip_out) {
     });
 }
 
-void FsView::UploadFiles() {
-    const auto targets = GetSelectedEntries();
-
-    const auto network_locations = location::Load();
-    if (network_locations.empty()) {
-        App::Notify("No upload locations set!"_i18n);
-        return;
-    }
-
-    PopupList::Items items;
-    for (const auto&p : network_locations) {
-        items.emplace_back(p.name);
-    }
-
-    App::Push<PopupList>(
-        "Select upload location"_i18n, items, [this, network_locations](auto op_index){
-            if (!op_index) {
-                return;
-            }
-
-            const auto loc = network_locations[*op_index];
-            App::Push<ProgressBox>(0, "Uploading"_i18n, "", [this, loc](auto pbox) -> Result {
-                auto targets = GetSelectedEntries();
-                const auto is_file_based_emummc = App::IsFileBaseEmummc();
-
-                const auto file_add = [&](s64 file_size, const fs::FsPath& file_path, const char* name) -> Result {
-                    // the file name needs to be relative to the current directory.
-                    const auto relative_file_name = file_path.s + std::strlen(m_path);
-                    pbox->SetTitle(name);
-                    pbox->NewTransfer(relative_file_name);
-
-                    fs::File f;
-                    R_TRY(m_fs->OpenFile(file_path, FsOpenMode_Read, &f));
-
-                    return thread::TransferPull(pbox, file_size,
-                        [&](void* data, s64 off, s64 size, u64* bytes_read) -> Result {
-                            const auto rc = f.Read(off, data, size, FsReadOption_None, bytes_read);
-                            if (m_fs->IsNative() && is_file_based_emummc) {
-                                svcSleepThread(2e+6); // 2ms
-                            }
-                            return rc;
-                        },
-                        [&](thread::PullCallback pull) -> Result {
-                            s64 offset{};
-                            const auto result = curl::Api().FromMemory(
-                                CURL_LOCATION_TO_API(loc),
-                                curl::OnProgress{pbox->OnDownloadProgressCallback()},
-                                curl::UploadInfo{
-                                    relative_file_name, file_size,
-                                    [&](void *ptr, size_t size) -> size_t {
-                                        // curl will request past the size of the file, causing an error.
-                                        if (offset >= file_size) {
-                                            log_write("finished file upload\n");
-                                            return 0;
-                                        }
-
-                                        u64 bytes_read{};
-                                        if (R_FAILED(pull(ptr, size, &bytes_read))) {
-                                            log_write("failed to read in custom callback: %zd size: %zd\n", offset, size);
-                                            return 0;
-                                        }
-
-                                        offset += bytes_read;
-                                        return bytes_read;
-                                    }
-                                }
-                            );
-
-                            R_UNLESS(result.success, Result_FileBrowserFailedUpload);
-                            R_SUCCEED();
-                        }
-                    );
-                };
-
-                for (auto& e : targets) {
-                    if (e.IsFile()) {
-                        const auto file_path = GetNewPath(e);
-                        R_TRY(file_add(e.file_size, file_path, e.GetName().c_str()));
-                    } else {
-                        FsDirCollections collections;
-                        get_collections(GetNewPath(e), e.name, collections, true);
-
-                        for (const auto& collection : collections) {
-                            for (const auto& file : collection.files) {
-                                const auto file_path = fs::AppendPath(collection.path, file.name);
-                                R_TRY(file_add(file.file_size, file_path, file.name));
-                            }
-                        }
-                    }
-                }
-
-                R_SUCCEED();
-            }, [this](Result rc){
-                App::PushErrorBox(rc, "Failed to, TODO: add message here"_i18n);
-                m_menu->ResetSelection();
-
-                if (R_SUCCEEDED(rc)) {
-                    App::Notify("Upload successfull!"_i18n);
-                    log_write("Upload successfull!!!\n");
-                } else {
-                    App::Notify("Upload failed!"_i18n);
-                    log_write("Upload failed!!!\n");
-                }
-            });
-        }
-    );
-}
-
 auto FsView::Scan(fs::FsPath new_path, bool is_walk_up) -> Result {
     App::SetBoostMode(true);
     ON_SCOPE_EXIT(App::SetBoostMode(false));
@@ -1975,12 +1867,6 @@ void FsView::DisplayAdvancedOptions() {
     if (m_entries_current.size() && !m_selected_count && GetEntry().IsFile() && GetEntry().file_size < 1024*64) {
         options->Add<SidebarEntryCallback>("View as text (unfinished)"_i18n, [this](){
             App::Push<fileview::Menu>(GetFs(), GetNewPathCurrent());
-        });
-    }
-
-    if (m_entries_current.size() && (m_menu->m_options & FsOption_CanUpload)) {
-        options->Add<SidebarEntryCallback>("Upload"_i18n, [this](){
-            UploadFiles();
         });
     }
 

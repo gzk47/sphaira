@@ -23,8 +23,6 @@ enum DumpLocationType {
     DumpLocationType_DevNull,
     // dump to stdio, ideal for custom mount points using devoptab, such as hdd.
     DumpLocationType_Stdio,
-    // dump to custom locations found in locations.ini.
-    DumpLocationType_Network,
 };
 
 enum DumpLocationFlag {
@@ -33,8 +31,7 @@ enum DumpLocationFlag {
     DumpLocationFlag_UsbS2S = 1 << DumpLocationType_UsbS2S,
     DumpLocationFlag_DevNull = 1 << DumpLocationType_DevNull,
     DumpLocationFlag_Stdio = 1 << DumpLocationType_Stdio,
-    DumpLocationFlag_Network = 1 << DumpLocationType_Network,
-    DumpLocationFlag_All = DumpLocationFlag_SdCard | DumpLocationFlag_Usb | DumpLocationFlag_UsbS2S | DumpLocationFlag_DevNull | DumpLocationFlag_Stdio | DumpLocationFlag_Network,
+    DumpLocationFlag_All = DumpLocationFlag_SdCard | DumpLocationFlag_Usb | DumpLocationFlag_UsbS2S | DumpLocationFlag_DevNull | DumpLocationFlag_Stdio,
 };
 
 struct DumpEntry {
@@ -44,7 +41,6 @@ struct DumpEntry {
 
 struct DumpLocation {
     DumpEntry entry{};
-    location::Entries network{};
     location::StdioEntries stdio{};
 };
 

@@ -16,18 +16,16 @@ enum FsOption : u32 {
 
     // can split screen.
     FsOption_CanSplit = BIT(0),
-    // can upload files.
-    FsOption_CanUpload = BIT(1),
     // can selected multiple files.
-    FsOption_CanSelect = BIT(2),
+    FsOption_CanSelect = BIT(1),
     // shows the option to install.
-    FsOption_CanInstall = BIT(3),
+    FsOption_CanInstall = BIT(2),
     // loads file assoc.
-    FsOption_LoadAssoc = BIT(4),
+    FsOption_LoadAssoc = BIT(3),
     // do not prompt on exit even if not tabbed.
-    FsOption_DoNotPrompt = BIT(5),
+    FsOption_DoNotPrompt = BIT(4),
 
-    FsOption_Normal = FsOption_LoadAssoc | FsOption_CanInstall | FsOption_CanSplit | FsOption_CanUpload | FsOption_CanSelect,
+    FsOption_Normal = FsOption_LoadAssoc | FsOption_CanInstall | FsOption_CanSplit | FsOption_CanSelect,
     FsOption_All = FsOption_DoNotPrompt | FsOption_Normal,
     FsOption_Picker = FsOption_NONE,
 };

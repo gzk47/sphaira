@@ -181,7 +181,7 @@ bool Device::http_stat(const std::string& path, struct stat* st, bool is_dir) {
 
     // handle error codes.
     if (response_code != 200 && response_code != 206) {
-        log_write("[WEBDAV] Unexpected HTTP response code: %ld\n", response_code);
+        log_write("[HTTP] Unexpected HTTP response code: %ld\n", response_code);
         return false;
     }
 

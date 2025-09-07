@@ -128,6 +128,7 @@ struct MountConfig {
     std::string url{};
     std::string user{};
     std::string pass{};
+    std::string dump_path{};
     std::optional<long> port{};
     int timeout{3000}; // 3 seconds.
     bool read_only{};

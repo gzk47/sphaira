@@ -792,6 +792,8 @@ Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file
             e->back().user = Value;
         } else if (!std::strcmp(Key, "pass")) {
             e->back().pass = Value;
+        } else if (!std::strcmp(Key, "dump_path")) {
+            e->back().dump_path = Value;
         } else if (!std::strcmp(Key, "port")) {
             const auto port = ini_parse_getl(Value, -1);
             if (port < 0 || port > 65535) {
@@ -1379,7 +1381,7 @@ Result GetNetworkDevices(location::StdioEntries& out) {
                 flags |= location::FsEntryFlag::FsEntryFlag_NoStatDir;
             }
 
-            out.emplace_back(entry->mount, entry->name, flags);
+            out.emplace_back(entry->mount, entry->name, flags, entry->device.config.dump_path);
         }
     }
 

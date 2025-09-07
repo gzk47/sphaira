@@ -33,8 +33,6 @@ namespace {
 constexpr auto API_AGENT = "TotalJustice";
 constexpr u64 CHUNK_SIZE = 1024*1024;
 constexpr auto MAX_THREADS = 4;
-constexpr int THREAD_PRIO = 0x2F;
-constexpr int THREAD_CORE = 2;
 
 std::atomic_bool g_running{};
 CURLSH* g_curl_share{};
@@ -61,11 +59,6 @@ struct SeekCustomData {
     OnUploadSeek cb{};
     s64 size{};
 };
-
-// helper for creating webdav folders as libcurl does not have built-in
-// support for it.
-// only creates the folders if they don't exist.
-auto WebdavCreateFolder(CURL* curl, const Api& e) -> bool;
 
 auto generate_key_from_path(const fs::FsPath& path) -> std::string {
     const auto key = crc32Calculate(path.s, path.size());
@@ -595,14 +588,8 @@ auto EscapeString(CURL* curl, const std::string& str) -> std::string {
     return result;
 }
 
-auto EncodeUrl(std::string url) -> std::string {
+auto EncodeUrl(const std::string& url) -> std::string {
     log_write("[CURL] encoding url\n");
-
-    if (url.starts_with("webdav://")) {
-        log_write("[CURL] updating host\n");
-        url.replace(0, std::strlen("webdav"), "https");
-        log_write("[CURL] updated host: %s\n", url.c_str());
-    }
 
     auto clu = curl_url();
     R_UNLESS(clu, url);
@@ -610,7 +597,7 @@ auto EncodeUrl(std::string url) -> std::string {
 
     log_write("[CURL] setting url\n");
     CURLUcode clu_code;
-    clu_code = curl_url_set(clu, CURLUPART_URL, url.c_str(), CURLU_URLENCODE);
+    clu_code = curl_url_set(clu, CURLUPART_URL, url.c_str(), CURLU_DEFAULT_SCHEME | CURLU_URLENCODE);
     R_UNLESS(clu_code == CURLUE_OK, url);
     log_write("[CURL] set url success\n");
 
@@ -834,13 +821,6 @@ auto UploadInternal(CURL* curl, const Api& e) -> ApiResult {
         return {};
     }
 
-    if (e.GetUrl().starts_with("webdav://")) {
-        if (!WebdavCreateFolder(curl, e)) {
-            log_write("[CURL] failed to create webdav folder, aborting\n");
-            return {};
-        }
-    }
-
     const auto& info = e.GetUploadInfo();
     const auto url = e.GetUrl() + "/" + info.m_name;
     const auto encoded_url = EncodeUrl(url);
@@ -958,76 +938,6 @@ auto UploadInternal(CURL* curl, const Api& e) -> ApiResult {
 
     log_write("Uploaded %s code: %ld %s\n", url.c_str(), http_code, curl_easy_strerror(res));
     return {success, http_code, header_out, chunk_out.data};
-}
-
-auto WebdavCreateFolder(CURL* curl, const Api& e) -> bool {
-    // if using webdav, extract the file path and create the directories.
-    // https://github.com/WebDAVDevs/webdav-request-samples/blob/master/webdav_curl.md
-    if (e.GetUrl().starts_with("webdav://")) {
-        log_write("[CURL] found webdav url\n");
-
-        const auto info = e.GetUploadInfo();
-        if (info.m_name.empty()) {
-            return true;
-        }
-
-        const auto& file_path = info.m_name;
-        log_write("got file path: %s\n", file_path.c_str());
-
-        const auto file_loc = file_path.find_last_of('/');
-        if (file_loc == file_path.npos) {
-            log_write("failed to find last slash\n");
-            return true;
-        }
-
-        const auto path_view = file_path.substr(0, file_loc);
-        log_write("got folder path: %s\n", path_view.c_str());
-
-        auto e2 = e;
-        e2.SetOption(Path{});
-        e2.SetOption(Url{e.GetUrl() + "/" + path_view});
-        e2.SetOption(Flags{e.GetFlags() | Flag_NoBody});
-        e2.SetOption(CustomRequest{"PROPFIND"});
-        e2.SetOption(Header{
-            { "Depth", "0" },
-        });
-
-        // test to see if the directory exists first.
-        const auto exist_result = DownloadInternal(curl, e2);
-        if (exist_result.success) {
-            log_write("[CURL] folder already exist: %s\n", path_view.c_str());
-            return true;
-        } else {
-            log_write("[CURL] folder does NOT exist, manually creating: %s\n", path_view.c_str());
-        }
-
-        // make the request to create the folder.
-        std::string folder;
-        for (const auto dir : std::views::split(path_view, '/')) {
-            if (dir.empty()) {
-                continue;
-            }
-
-            folder += "/" + std::string{dir.data(), dir.size()};
-            e2.SetOption(Url{e.GetUrl() + folder});
-            e2.SetOption(Header{});
-            e2.SetOption(CustomRequest{"MKCOL"});
-
-            const auto result = DownloadInternal(curl, e2);
-            if (result.code == 201) {
-                log_write("[CURL] created webdav directory\n");
-            } else if (result.code == 405) {
-                log_write("[CURL] webdav directory already exists: %ld\n", result.code);
-            } else {
-                log_write("[CURL] failed to create webdav directory: %ld\n", result.code);
-                return false;
-            }
-        }
-    } else {
-        log_write("[CURL] not a webdav url: %s\n", e.GetUrl().c_str());
-    }
-
-    return true;
 }
 
 void my_lock(CURL *handle, curl_lock_data data, curl_lock_access laccess, void *useptr) {

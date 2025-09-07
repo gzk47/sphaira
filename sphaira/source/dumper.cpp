@@ -372,7 +372,8 @@ Result DumpToFileNative(ui::ProgressBox* pbox, BaseSource* source, std::span<con
 
 Result DumpToStdio(ui::ProgressBox* pbox, const location::StdioEntry& loc, BaseSource* source, std::span<const fs::FsPath> paths, const CustomTransfer& custom_transfer) {
     fs::FsStdio fs{};
-    return DumpToFile(pbox, &fs, loc.mount, source, paths, custom_transfer);
+    const auto mount_path = fs::AppendPath(loc.mount, loc.dump_path);
+    return DumpToFile(pbox, &fs, mount_path, source, paths, custom_transfer);
 }
 
 Result DumpToUsbS2SInternal(ui::ProgressBox* pbox, UsbTest* usb) {
@@ -486,68 +487,12 @@ Result DumpToDevNull(ui::ProgressBox* pbox, BaseSource* source, std::span<const 
     R_SUCCEED();
 }
 
-Result DumpToNetwork(ui::ProgressBox* pbox, const location::Entry& loc, BaseSource* source, std::span<const fs::FsPath> paths) {
-    for (auto path : paths) {
-        R_TRY(pbox->ShouldExitResult());
-
-        const auto file_size = source->GetSize(path);
-        pbox->SetImage(source->GetIcon(path));
-        pbox->SetTitle(source->GetName(path));
-        pbox->NewTransfer(path);
-
-        R_TRY(thread::TransferPull(pbox, file_size,
-            [&](void* data, s64 off, s64 size, u64* bytes_read) -> Result {
-                return source->Read(path, data, off, size, bytes_read);
-            },
-            [&](thread::PullCallback pull) -> Result {
-                s64 offset{};
-                const auto result = curl::Api().FromMemory(
-                    CURL_LOCATION_TO_API(loc),
-                    curl::OnProgress{pbox->OnDownloadProgressCallback()},
-                    curl::UploadInfo{
-                        path, file_size,
-                        [&](void *ptr, size_t size) -> size_t {
-                            // curl will request past the size of the file, causing an error.
-                            if (offset >= file_size) {
-                                log_write("finished file upload\n");
-                                return 0;
-                            }
-
-                            u64 bytes_read{};
-                            if (R_FAILED(pull(ptr, size, &bytes_read))) {
-                                log_write("failed to read in custom callback: %zd size: %zd\n", offset, size);
-                                return 0;
-                            }
-
-                            offset += bytes_read;
-                            return bytes_read;
-                        }
-                    }
-                );
-
-                R_UNLESS(result.success, Result_DumpFailedNetworkUpload);
-                R_SUCCEED();
-            }
-        ));
-    }
-
-    R_SUCCEED();
-}
-
 } // namespace
 
 void DumpGetLocation(const std::string& title, u32 location_flags, const OnLocation& on_loc, const CustomTransfer& custom_transfer) {
     DumpLocation out;
     ui::PopupList::Items items;
     std::vector<DumpEntry> dump_entries;
-
-    out.network = location::Load();
-    if (!custom_transfer && location_flags & (1 << DumpLocationType_Network)) {
-        for (s32 i = 0; i < std::size(out.network); i++) {
-            dump_entries.emplace_back(DumpLocationType_Network, i);
-            items.emplace_back(out.network[i].name);
-        }
-    }
 
     out.stdio = location::GetStdio(true);
     if (location_flags & (1 << DumpLocationType_Stdio)) {
@@ -578,9 +523,7 @@ void DumpGetLocation(const std::string& title, u32 location_flags, const OnLocat
 }
 
 Result Dump(ui::ProgressBox* pbox, const std::shared_ptr<BaseSource>& source, const DumpLocation& location, const std::vector<fs::FsPath>& paths, const CustomTransfer& custom_transfer) {
-    if (location.entry.type == DumpLocationType_Network) {
-        R_TRY(DumpToNetwork(pbox, location.network[location.entry.index], source.get(), paths));
-    } else if (location.entry.type == DumpLocationType_Stdio) {
+    if (location.entry.type == DumpLocationType_Stdio) {
         R_TRY(DumpToStdio(pbox, location.stdio[location.entry.index], source.get(), paths, custom_transfer));
     } else if (location.entry.type == DumpLocationType_SdCard) {
         R_TRY(DumpToFileNative(pbox, source.get(), paths, custom_transfer));
