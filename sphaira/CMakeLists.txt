@@ -109,6 +109,7 @@ add_executable(sphaira
     source/utils/devoptab_nfs.cpp
     source/utils/devoptab_smb2.cpp
     source/utils/devoptab_ftp.cpp
+    source/utils/devoptab_webdav.cpp
 
     source/usb/base.cpp
     source/usb/usbds.cpp
@@ -269,6 +270,15 @@ FetchContent_Declare(libsmb2
     GIT_TAG 867beea
 )
 
+FetchContent_Declare(pugixml
+    GIT_REPOSITORY https://github.com/zeux/pugixml.git
+    GIT_TAG v1.15
+)
+
+set(PUGIXML_NO_EXCEPTIONS ON)
+# set(PUGIXML_NO_XPATH ON)
+set(PUGIXML_WCHAR_MODE OFF)
+
 set(USE_NEW_ZSTD ON)
 # has issues with some homebrew and game icons (oxenfree, overwatch2).
 set(USE_NVJPG OFF)
@@ -331,6 +341,7 @@ FetchContent_MakeAvailable(
     libusbdvd
     libnfs
     libsmb2
+    pugixml
 )
 
 set(FTPSRV_LIB_BUILD TRUE)
@@ -464,6 +475,7 @@ target_link_libraries(sphaira PRIVATE
     libusbdvd
     nfs
     smb2
+    pugixml
 
     ${minizip_lib}
     ZLIB::ZLIB

@@ -1,13 +1,10 @@
 #include "utils/devoptab_common.hpp"
 #include "utils/profile.hpp"
 
-#include "location.hpp"
 #include "log.hpp"
 #include "defines.hpp"
-#include <sys/iosupport.h>
 #include <fcntl.h>
 #include <curl/curl.h>
-#include <minIni.h>
 
 #include <string>
 #include <vector>
@@ -21,39 +18,6 @@
 namespace sphaira::devoptab {
 namespace {
 
-constexpr long DEFAULT_FTP_PORT = 21;
-constexpr long DEFAULT_FTP_TIMEOUT = 3000; // 3 seconds.
-
-#define CURL_EASY_SETOPT_LOG(handle, opt, v) \
-    if (auto r = curl_easy_setopt(handle, opt, v); r != CURLE_OK) { \
-        log_write("curl_easy_setopt(%s, %s) msg: %s\n", #opt, #v, curl_easy_strerror(r)); \
-    } \
-
-#define CURL_EASY_GETINFO_LOG(handle, opt, v) \
-    if (auto r = curl_easy_getinfo(handle, opt, v); r != CURLE_OK) { \
-        log_write("curl_easy_getinfo(%s, %s) msg: %s\n", #opt, #v, curl_easy_strerror(r)); \
-    } \
-
-struct FtpMountConfig {
-    std::string name{};
-    std::string url{};
-    std::string user{};
-    std::string pass{};
-    std::optional<long> port{};
-    long timeout{DEFAULT_FTP_TIMEOUT};
-    bool read_only{};
-    bool no_stat_file{false};
-    bool no_stat_dir{true};
-};
-using FtpMountConfigs = std::vector<FtpMountConfig>;
-
-struct Device {
-    CURL* curl{};
-    FtpMountConfig config{};
-    Mutex mutex{};
-    bool mounted{};
-};
-
 struct DirEntry {
     std::string name{};
     bool is_dir{};
@@ -65,102 +29,68 @@ struct FileEntry {
     struct stat st{};
 };
 
+struct Device final : common::MountCurlDevice {
+    using MountCurlDevice::MountCurlDevice;
+
+private:
+    bool Mount() override;
+    int devoptab_open(void *fileStruct, const char *path, int flags, int mode) override;
+    int devoptab_close(void *fd) override;
+    ssize_t devoptab_read(void *fd, char *ptr, size_t len) override;
+    ssize_t devoptab_write(void *fd, const char *ptr, size_t len) override;
+    off_t devoptab_seek(void *fd, off_t pos, int dir) override;
+    int devoptab_fstat(void *fd, struct stat *st) override;
+    int devoptab_unlink(const char *path) override;
+    int devoptab_rename(const char *oldName, const char *newName) override;
+    int devoptab_mkdir(const char *path, int mode) override;
+    int devoptab_rmdir(const char *path) override;
+    int devoptab_diropen(void* fd, const char *path) override;
+    int devoptab_dirreset(void* fd) override;
+    int devoptab_dirnext(void* fd, char *filename, struct stat *filestat) override;
+    int devoptab_dirclose(void* fd) override;
+    int devoptab_lstat(const char *path, struct stat *st) override;
+    int devoptab_ftruncate(void *fd, off_t len) override;
+    int devoptab_fsync(void *fd) override;
+    void curl_set_common_options(CURL* curl,  const std::string& url) override;
+
+    static bool ftp_parse_mlst_line(std::string_view line, struct stat* st, std::string* file_out, bool type_only);
+    static void ftp_parse_mlsd(std::string_view chunk, DirEntries& out);
+    static bool ftp_parse_mlist(std::string_view chunk, struct stat* st);
+
+    std::pair<bool, long> ftp_quote(std::span<const std::string> commands, bool is_dir, std::vector<char>* response_data = nullptr);
+    bool ftp_dirlist(const std::string& path, DirEntries& out);
+    bool ftp_stat(const std::string& path, struct stat* st, bool is_dir);
+    bool ftp_remove_file_folder(const std::string& path, bool is_dir);
+    bool ftp_unlink(const std::string& path);
+    bool ftp_rename(const std::string& old_path, const std::string& new_path, bool is_dir);
+    bool ftp_mkdir(const std::string& path);
+    bool ftp_rmdir(const std::string& path);
+
+private:
+    bool mounted{};
+};
+
 struct File {
-    Device* client;
     FileEntry* entry;
+    common::PushPullThreadData* push_pull_thread_data;
     size_t off;
+    size_t last_off;
     bool write_mode;
+    bool append_mode;
 };
 
 struct Dir {
-    Device* client;
     DirEntries* entries;
     size_t index;
 };
 
-size_t write_memory_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    auto data = static_cast<std::vector<char>*>(userdata);
-
-    // increase by chunk size.
-    const auto realsize = size * nmemb;
-    if (data->capacity() < data->size() + realsize) {
-        const auto rsize = std::max(realsize, data->size() + 1024 * 1024);
-        data->reserve(rsize);
-    }
-
-    // store the data.
-    const auto offset = data->size();
-    data->resize(offset + realsize);
-    std::memcpy(data->data() + offset, ptr, realsize);
-
-    return realsize;
+void Device::curl_set_common_options(CURL* curl, const std::string& url) {
+    MountCurlDevice::curl_set_common_options(curl, url);
+    curl_easy_setopt(curl, CURLOPT_FTP_CREATE_MISSING_DIRS, CURLFTP_CREATE_DIR_NONE);
+    curl_easy_setopt(curl, CURLOPT_FTP_FILEMETHOD, CURLFTPMETHOD_NOCWD);
 }
 
-size_t write_data_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    auto data = static_cast<std::span<char>*>(userdata);
-    const auto rsize = std::min(size * nmemb, data->size());
-
-    std::memcpy(data->data(), ptr, rsize);
-    *data = data->subspan(rsize);
-    return rsize;
-}
-
-size_t read_data_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    auto data = static_cast<std::span<const char>*>(userdata);
-    const auto rsize = std::min(size * nmemb, data->size());
-
-    std::memcpy(ptr, data->data(), rsize);
-    *data = data->subspan(rsize);
-    return rsize;
-}
-
-std::string url_encode(const std::string& str) {
-    auto escaped = curl_escape(str.c_str(), str.length());
-    if (!escaped) {
-        return str;
-    }
-
-    std::string result(escaped);
-    curl_free(escaped);
-    return result;
-}
-
-std::string build_url(const std::string& base, const std::string& path, bool is_dir) {
-    std::string url = base;
-    if (!url.ends_with('/')) {
-        url += '/';
-    }
-
-    url += url_encode(path);
-    if (is_dir && !url.ends_with('/')) {
-        url += '/'; // append trailing slash for folder.
-    }
-
-    return url;
-}
-
-void ftp_set_common_options(Device& client, const std::string& url) {
-    curl_easy_reset(client.curl);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_URL, url.c_str());
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_TIMEOUT_MS, client.config.timeout);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_CONNECTTIMEOUT_MS, client.config.timeout);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_NOPROGRESS, 0L);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_FTP_CREATE_MISSING_DIRS, CURLFTP_CREATE_DIR_NONE);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_FTP_FILEMETHOD, CURLFTPMETHOD_NOCWD);
-
-    if (client.config.port) {
-        CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_PORT, client.config.port.value());
-    }
-
-    if (!client.config.user.empty()) {
-        CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_USERNAME, client.config.user.c_str());
-    }
-    if (!client.config.pass.empty()) {
-        CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_PASSWORD, client.config.pass.c_str());
-    }
-}
-
-bool ftp_parse_mlst_line(std::string_view line, struct stat* st, std::string* file_out, bool type_only) {
+bool Device::ftp_parse_mlst_line(std::string_view line, struct stat* st, std::string* file_out, bool type_only) {
     // trim leading white space.
     while (line.size() > 0 && std::isspace(line[0])) {
         line = line.substr(1);
@@ -250,7 +180,7 @@ S> 250- Listing file1
 S>  Type=file;Modify=19990929003355.237; file1
 S> 250 End
 */
-bool ftp_parse_mlist(std::string_view chunk, struct stat* st) {
+bool Device::ftp_parse_mlist(std::string_view chunk, struct stat* st) {
     // sometimes the header data includes the full login exchange
     // so we need to find the actual start of the MLST response.
     const auto start_pos = chunk.find("250-");
@@ -281,7 +211,7 @@ D> Type=file;Size=25730;Modify=19940728095854;Perm=; capmux.tar.z
 D> Type=file;Size=1024990;Modify=19980130010322;Perm=r; cap60.pl198.tar.gz
 S> 226 MLSD completed
 */
-void ftp_parse_mlsd(std::string_view chunk, DirEntries& out) {
+void Device::ftp_parse_mlsd(std::string_view chunk, DirEntries& out) {
     if (chunk.ends_with("\r\n")) {
         chunk = chunk.substr(0, chunk.size() - 2);
     } else if (chunk.ends_with('\n')) {
@@ -306,8 +236,8 @@ void ftp_parse_mlsd(std::string_view chunk, DirEntries& out) {
     }
 }
 
-std::pair<bool, long> ftp_quote(Device& client, std::span<const std::string> commands, bool is_dir, std::vector<char>* response_data = nullptr) {
-    const auto url = build_url(client.config.url, "/", is_dir);
+std::pair<bool, long> Device::ftp_quote(std::span<const std::string> commands, bool is_dir, std::vector<char>* response_data) {
+    const auto url = build_url("/", is_dir);
 
     curl_slist* cmdlist{};
     ON_SCOPE_EXIT(curl_slist_free_all(cmdlist));
@@ -316,37 +246,37 @@ std::pair<bool, long> ftp_quote(Device& client, std::span<const std::string> com
         cmdlist = curl_slist_append(cmdlist, cmd.c_str());
     }
 
-    ftp_set_common_options(client, url);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_QUOTE, cmdlist);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_NOBODY, 1L);
+    curl_set_common_options(this->curl, url);
+    curl_easy_setopt(this->curl, CURLOPT_QUOTE, cmdlist);
+    curl_easy_setopt(this->curl, CURLOPT_NOBODY, 1L);
 
     if (response_data) {
         response_data->clear();
-        CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_HEADERFUNCTION, write_memory_callback);
-        CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_HEADERDATA, (void *)response_data);
+        curl_easy_setopt(this->curl, CURLOPT_HEADERFUNCTION, write_memory_callback);
+        curl_easy_setopt(this->curl, CURLOPT_HEADERDATA, (void *)response_data);
     }
 
-    const auto res = curl_easy_perform(client.curl);
+    const auto res = curl_easy_perform(this->curl);
     if (res != CURLE_OK) {
         log_write("[FTP] curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
         return {false, 0};
     }
 
     long response_code = 0;
-    CURL_EASY_GETINFO_LOG(client.curl, CURLINFO_RESPONSE_CODE, &response_code);
+    curl_easy_getinfo(this->curl, CURLINFO_RESPONSE_CODE, &response_code);
     return {true, response_code};
 }
 
-bool ftp_dirlist(Device& client, const std::string& path, DirEntries& out) {
-    const auto url = build_url(client.config.url, path, true);
+bool Device::ftp_dirlist(const std::string& path, DirEntries& out) {
+    const auto url = build_url(path, true);
     std::vector<char> chunk;
 
-    ftp_set_common_options(client, url);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_WRITEFUNCTION, write_memory_callback);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_WRITEDATA, (void *)&chunk);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_CUSTOMREQUEST, "MLSD");
+    curl_set_common_options(this->curl, url);
+    curl_easy_setopt(this->curl, CURLOPT_WRITEFUNCTION, write_memory_callback);
+    curl_easy_setopt(this->curl, CURLOPT_WRITEDATA, (void *)&chunk);
+    curl_easy_setopt(this->curl, CURLOPT_CUSTOMREQUEST, "MLSD");
 
-    const auto res = curl_easy_perform(client.curl);
+    const auto res = curl_easy_perform(this->curl);
     if (res != CURLE_OK) {
         log_write("[FTP] curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
         return false;
@@ -356,11 +286,11 @@ bool ftp_dirlist(Device& client, const std::string& path, DirEntries& out) {
     return true;
 }
 
-bool ftp_stat(Device& client, const std::string& path, struct stat* st, bool is_dir) {
+bool Device::ftp_stat(const std::string& path, struct stat* st, bool is_dir) {
     std::memset(st, 0, sizeof(*st));
 
     std::vector<char> chunk;
-    const auto [success, response_code] = ftp_quote(client, {"MLST " + path}, is_dir, &chunk);
+    const auto [success, response_code] = ftp_quote({"MLST " + path}, is_dir, &chunk);
     if (!success) {
         return false;
     }
@@ -378,67 +308,9 @@ bool ftp_stat(Device& client, const std::string& path, struct stat* st, bool is_
     return true;
 }
 
-bool ftp_read_file_chunk(Device& client, const std::string& path, size_t start, std::span<char> buffer) {
-    const auto url = build_url(client.config.url, path, false);
-
-    char range[64]{};
-    std::snprintf(range, sizeof(range), "%zu-%zu", start, start + buffer.size() - 1);
-    log_write("[FTP] Requesting range: %s\n", range);
-
-    ftp_set_common_options(client, url);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_RANGE, range);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_WRITEFUNCTION, write_data_callback);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_WRITEDATA, (void *)&buffer);
-
-    const auto res = curl_easy_perform(client.curl);
-    if (res != CURLE_OK) {
-        log_write("[FTP] curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-        return false;
-    }
-
-    return true;
-}
-
-bool ftp_write_file_chunk(Device& client, const std::string& path, size_t start, std::span<const char> buffer) {
-    // manually set offset as curl seems to not do anything if CURLOPT_RESUME_FROM_LARGE is used for ftp.
-    // NOTE: RFC 3659 specifies that setting the offset to anything other than the end for STOR
-    // is undefined behavior, so random access writes are disabled for now.
-    #if 0
-    if (start || !buffer.empty()) {
-        const auto [success, response_code] = ftp_quote(client, {"REST " + std::to_string(start)}, false);
-        if (!success || response_code != 350) {
-            log_write("[FTP] REST command failed with response code: %ld\n", response_code);
-            return false;
-        }
-    }
-    #endif
-
-    const auto url = build_url(client.config.url, path, false);
-
-    log_write("[FTP] Writing %zu bytes at offset %zu to %s\n", buffer.size(), start, path.c_str());
-    ftp_set_common_options(client, url);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_UPLOAD, 1L);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)buffer.size());
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_READFUNCTION, read_data_callback);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_READDATA, (void *)&buffer);
-
-    // set resume from if needed.
-    if (start || !buffer.empty()) {
-        CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_APPEND, 1L);
-    }
-
-    const auto res = curl_easy_perform(client.curl);
-    if (res != CURLE_OK) {
-        log_write("[FTP] curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-        return false;
-    }
-
-    return true;
-}
-
-bool ftp_remove_file_folder(Device& client, const std::string& path, bool is_dir) {
+bool Device::ftp_remove_file_folder(const std::string& path, bool is_dir) {
     const auto cmd = (is_dir ? "RMD " : "DELE ") + path;
-    const auto [success, response_code] = ftp_quote(client, {cmd}, is_dir);
+    const auto [success, response_code] = ftp_quote({cmd}, is_dir);
     if (!success || response_code >= 400) {
         log_write("[FTP] MLST command failed with response code: %ld\n", response_code);
         return false;
@@ -447,18 +319,18 @@ bool ftp_remove_file_folder(Device& client, const std::string& path, bool is_dir
     return true;
 }
 
-bool ftp_unlink(Device& client, const std::string& path) {
-    return ftp_remove_file_folder(client, path, false);
+bool Device::ftp_unlink(const std::string& path) {
+    return ftp_remove_file_folder(path, false);
 }
 
-bool ftp_rename(Device& client, const std::string& old_path, const std::string& new_path, bool is_dir) {
-    const auto url = build_url(client.config.url, "/", is_dir);
+bool Device::ftp_rename(const std::string& old_path, const std::string& new_path, bool is_dir) {
+    const auto url = build_url("/", is_dir);
 
     std::vector<std::string> commands;
     commands.emplace_back("RNFR " + old_path);
     commands.emplace_back("RNTO " + new_path);
 
-    const auto [success, response_code] = ftp_quote(client, commands, is_dir);
+    const auto [success, response_code] = ftp_quote(commands, is_dir);
     if (!success || response_code >= 400) {
         log_write("[FTP] MLST command failed with response code: %ld\n", response_code);
         return false;
@@ -467,9 +339,9 @@ bool ftp_rename(Device& client, const std::string& old_path, const std::string& 
     return true;
 }
 
-bool ftp_mkdir(Device& client, const std::string& path) {
+bool Device::ftp_mkdir(const std::string& path) {
     std::vector<char> chunk;
-    const auto [success, response_code] = ftp_quote(client, {"MKD " + path}, true);
+    const auto [success, response_code] = ftp_quote({"MKD " + path}, true);
     if (!success) {
         return false;
     }
@@ -483,26 +355,22 @@ bool ftp_mkdir(Device& client, const std::string& path) {
     return true;
 }
 
-bool ftp_rmdir(Device& client, const std::string& path) {
-    return ftp_remove_file_folder(client, path, true);
+bool Device::ftp_rmdir(const std::string& path) {
+    return ftp_remove_file_folder(path, true);
 }
 
-bool mount_ftp(Device& client) {
-    if (client.mounted) {
+bool Device::Mount() {
+    if (mounted) {
         return true;
     }
 
-    if (!client.curl) {
-        client.curl = curl_easy_init();
-        if (!client.curl) {
-            log_write("[FTP] curl_easy_init() failed\n");
-            return false;
-        }
+    if (!MountCurlDevice::Mount()) {
+        return false;
     }
 
     // issue FEAT command to see if we support MLST/MLSD.
     std::vector<char> chunk;
-    const auto [success, response_code] = ftp_quote(client, {"FEAT"}, true, &chunk);
+    const auto [success, response_code] = ftp_quote({"FEAT"}, true, &chunk);
     if (!success || response_code != 211) {
         log_write("[FTP] FEAT command failed with response code: %ld\n", response_code);
         return false;
@@ -521,120 +389,115 @@ bool mount_ftp(Device& client) {
     if (view.find("UTF8") != std::string_view::npos) {
         // it doesn't matter if this fails tbh.
         // also, i am not sure if this persists between logins or not...
-        ftp_quote(client, {"OPTS UTF8 ON"}, true);
+        ftp_quote({"OPTS UTF8 ON"}, true);
     }
 
-    client.mounted = true;
-    return true;
+    return this->mounted = true;
 }
 
-int set_errno(struct _reent *r, int err) {
-    r->_errno = err;
-    return -1;
-}
-
-int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int flags, int mode) {
-    auto device = (Device*)r->deviceData;
+int Device::devoptab_open(void *fileStruct, const char *path, int flags, int mode) {
     auto file = static_cast<File*>(fileStruct);
-    std::memset(file, 0, sizeof(*file));
-    SCOPED_MUTEX(&device->mutex);
+    struct stat st{};
 
-    if (device->config.read_only && (flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC | O_APPEND))) {
-        return set_errno(r, EROFS);
-    }
+    if ((flags & O_ACCMODE) == O_RDONLY || (flags & O_APPEND)) {
+        // ensure the file exists and get its size.
+        if (!ftp_stat(path, &st, false)) {
+            log_write("[FTP] File not found: %s\n", path);
+            return -ENOENT;
+        }
 
-    char path[PATH_MAX]{};
-    if (!common::fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
-    }
-
-    if (!mount_ftp(*device)) {
-        return set_errno(r, EIO);
-    }
-
-    // create an empty file.
-    if (flags & (O_CREAT | O_TRUNC)) {
-        std::span<const char> empty{};
-        if (!ftp_write_file_chunk(*device, path, 0, empty)) {
-            log_write("[FTP] Failed to create file: %s\n", path);
-            return set_errno(r, EIO);
+        if (st.st_mode & S_IFDIR) {
+            log_write("[FTP] Path is a directory, not a file: %s\n", path);
+            return -EISDIR;
         }
     }
 
-    // ensure the file exists and get its size.
-    struct stat st{};
-    if (!ftp_stat(*device, path, &st, false)) {
-        log_write("[FTP] File not found: %s\n", path);
-        return set_errno(r, ENOENT);
-    }
-
-    if (st.st_mode & S_IFDIR) {
-        log_write("[FTP] Path is a directory, not a file: %s\n", path);
-        return set_errno(r, EISDIR);
-    }
-
-    if (flags & O_APPEND) {
-        file->off = st.st_size;
-    } else {
-        file->off = 0;
-    }
-
-    log_write("[FTP] Opened file: %s (size=%zu)\n", path, (size_t)st.st_size);
-    file->client = device;
     file->entry = new FileEntry{path, st};
     file->write_mode = (flags & (O_WRONLY | O_RDWR));
-    return r->_errno = 0;
+    file->append_mode = (flags & O_APPEND);
+
+    if (file->append_mode) {
+        file->off = st.st_size;
+        file->last_off = file->off;
+    }
+
+    return 0;
 }
 
-int devoptab_close(struct _reent *r, void *fd) {
+int Device::devoptab_close(void *fd) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->client->mutex);
 
+    delete file->push_pull_thread_data;
     delete file->entry;
-    std::memset(file, 0, sizeof(*file));
-    return r->_errno = 0;
+    return 0;
 }
 
-ssize_t devoptab_read(struct _reent *r, void *fd, char *ptr, size_t len) {
+ssize_t Device::devoptab_read(void *fd, char *ptr, size_t len) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->client->mutex);
     len = std::min(len, file->entry->st.st_size - file->off);
 
     if (file->write_mode) {
         log_write("[FTP] Attempt to read from a write-only file\n");
-        return set_errno(r, EBADF);
+        return -EBADF;
     }
 
     if (!len) {
         return 0;
     }
 
-    if (!ftp_read_file_chunk(*file->client, file->entry->path, file->off, {ptr, len})) {
-        log_write("[FTP] Failed to read file chunk: %s\n", file->entry->path.c_str());
-        return set_errno(r, EIO);
+    if (file->off != file->last_off) {
+        log_write("[FTP] File offset changed from %zu to %zu, resetting download thread\n", file->last_off, file->off);
+        file->last_off = file->off;
+        delete file->push_pull_thread_data;
+        file->push_pull_thread_data = nullptr;
     }
 
-    file->off += len;
-    return len;
+    if (!file->push_pull_thread_data) {
+        log_write("[FTP] Creating download thread data for file: %s\n", file->entry->path.c_str());
+        file->push_pull_thread_data = CreatePushData(this->transfer_curl, build_url(file->entry->path, false), file->off);
+        if (!file->push_pull_thread_data) {
+            log_write("[FTP] Failed to create download thread data for file: %s\n", file->entry->path.c_str());
+            return -EIO;
+        }
+    }
+
+    const auto ret = file->push_pull_thread_data->PullData(ptr, len);
+
+    file->off += ret;
+    file->last_off = file->off;
+    return ret;
 }
 
-ssize_t devoptab_write(struct _reent *r, void *fd, const char *ptr, size_t len) {
+ssize_t Device::devoptab_write(void *fd, const char *ptr, size_t len) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->client->mutex);
 
-    if (!ftp_write_file_chunk(*file->client, file->entry->path, file->off, {ptr, len})) {
-        log_write("[FTP] Failed to write file chunk: %s\n", file->entry->path.c_str());
-        return set_errno(r, EIO);
+    if (!file->write_mode) {
+        log_write("[FTP] Attempt to write to a read-only file\n");
+        return -EBADF;
     }
 
-    file->off += len;
+    if (!len) {
+        return 0;
+    }
+
+    if (!file->push_pull_thread_data) {
+        log_write("[FTP] Creating upload thread data for file: %s\n", file->entry->path.c_str());
+        file->push_pull_thread_data = CreatePullData(this->transfer_curl, build_url(file->entry->path, false), file->append_mode);
+        if (!file->push_pull_thread_data) {
+            log_write("[FTP] Failed to create upload thread data for file: %s\n", file->entry->path.c_str());
+            return -EIO;
+        }
+    }
+
+    const auto ret = file->push_pull_thread_data->PushData(ptr, len);
+
+    file->off += ret;
     file->entry->st.st_size = std::max<off_t>(file->entry->st.st_size, file->off);
-    return len;
+    return ret;
 }
 
-off_t devoptab_seek(struct _reent *r, void *fd, off_t pos, int dir) {
+off_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->client->mutex);
 
     if (dir == SEEK_CUR) {
         pos += file->off;
@@ -644,152 +507,77 @@ off_t devoptab_seek(struct _reent *r, void *fd, off_t pos, int dir) {
 
     // for now, random access writes are disabled.
     if (file->write_mode && pos != file->off) {
-        set_errno(r, ESPIPE);
+        log_write("[FTP] Random access writes are not supported\n");
         return file->off;
     }
 
-    r->_errno = 0;
     return file->off = std::clamp<u64>(pos, 0, file->entry->st.st_size);
 }
 
-int devoptab_fstat(struct _reent *r, void *fd, struct stat *st) {
+int Device::devoptab_fstat(void *fd, struct stat *st) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->client->mutex);
 
     std::memcpy(st, &file->entry->st, sizeof(*st));
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_unlink(struct _reent *r, const char *_path) {
-    auto device = static_cast<Device*>(r->deviceData);
-    SCOPED_MUTEX(&device->mutex);
-
-    char path[PATH_MAX]{};
-    if (!common::fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
+int Device::devoptab_unlink(const char *path) {
+    if (!ftp_unlink(path)) {
+        return -EIO;
     }
 
-    if (!mount_ftp(*device)) {
-        return set_errno(r, EIO);
-    }
-
-    if (!ftp_unlink(*device, path)) {
-        return set_errno(r, EIO);
-    }
-
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_rename(struct _reent *r, const char *_oldName, const char *_newName) {
-    auto device = static_cast<Device*>(r->deviceData);
-    SCOPED_MUTEX(&device->mutex);
-
-    char oldName[PATH_MAX]{};
-    if (!common::fix_path(_oldName, oldName)) {
-        return set_errno(r, ENOENT);
+int Device::devoptab_rename(const char *oldName, const char *newName) {
+    if (!ftp_rename(oldName, newName, false) && !ftp_rename(oldName, newName, true)) {
+        return -EIO;
     }
 
-    char newName[PATH_MAX]{};
-    if (!common::fix_path(_newName, newName)) {
-        return set_errno(r, ENOENT);
-    }
-
-    if (!mount_ftp(*device)) {
-        return set_errno(r, EIO);
-    }
-
-    if (!ftp_rename(*device, oldName, newName, false) && !ftp_rename(*device, oldName, newName, true)) {
-        return set_errno(r, EIO);
-    }
-
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_mkdir(struct _reent *r, const char *_path, int mode) {
-    auto device = static_cast<Device*>(r->deviceData);
-    SCOPED_MUTEX(&device->mutex);
-
-    char path[PATH_MAX]{};
-    if (!common::fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
+int Device::devoptab_mkdir(const char *path, int mode) {
+    if (!ftp_mkdir(path)) {
+        return -EIO;
     }
 
-    if (!mount_ftp(*device)) {
-        return set_errno(r, EIO);
-    }
-
-    if (!ftp_mkdir(*device, path)) {
-        return set_errno(r, EIO);
-    }
-
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_rmdir(struct _reent *r, const char *_path) {
-    auto device = static_cast<Device*>(r->deviceData);
-    SCOPED_MUTEX(&device->mutex);
-
-    char path[PATH_MAX]{};
-    if (!common::fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
+int Device::devoptab_rmdir(const char *path) {
+    if (!ftp_rmdir(path)) {
+        return -EIO;
     }
 
-    if (!mount_ftp(*device)) {
-        return set_errno(r, EIO);
-    }
-
-    if (!ftp_rmdir(*device, path)) {
-        return set_errno(r, EIO);
-    }
-
-    return r->_errno = 0;
+    return 0;
 }
 
-DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_path) {
-    auto device = (Device*)r->deviceData;
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    std::memset(dir, 0, sizeof(*dir));
-    SCOPED_MUTEX(&device->mutex);
-
-    char path[PATH_MAX];
-    if (!common::fix_path(_path, path)) {
-        set_errno(r, ENOENT);
-        return NULL;
-    }
-
-    if (!mount_ftp(*device)) {
-        set_errno(r, EIO);
-        return NULL;
-    }
+int Device::devoptab_diropen(void* fd, const char *path) {
+    auto dir = static_cast<Dir*>(fd);
 
     auto entries = new DirEntries();
-    if (!ftp_dirlist(*device, path, *entries)) {
+    if (!ftp_dirlist(path, *entries)) {
         delete entries;
-        set_errno(r, ENOENT);
-        return NULL;
+        return -ENOENT;
     }
 
-    dir->client = device;
     dir->entries = entries;
-    r->_errno = 0;
-    return dirState;
+    return 0;
 }
 
-int devoptab_dirreset(struct _reent *r, DIR_ITER *dirState) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    SCOPED_MUTEX(&dir->client->mutex);
+int Device::devoptab_dirreset(void* fd) {
+    auto dir = static_cast<Dir*>(fd);
 
     dir->index = 0;
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struct stat *filestat) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    std::memset(filestat, 0, sizeof(*filestat));
-    SCOPED_MUTEX(&dir->client->mutex);
+int Device::devoptab_dirnext(void* fd, char *filename, struct stat *filestat) {
+    auto dir = static_cast<Dir*>(fd);
 
     if (dir->index >= dir->entries->size()) {
-        return set_errno(r, ENOENT);
+        return -ENOENT;
     }
 
     auto& entry = (*dir->entries)[dir->index];
@@ -803,214 +591,57 @@ int devoptab_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struc
     std::strcpy(filename, entry.name.c_str());
 
     dir->index++;
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_dirclose(struct _reent *r, DIR_ITER *dirState) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    SCOPED_MUTEX(&dir->client->mutex);
+int Device::devoptab_dirclose(void* fd) {
+    auto dir = static_cast<Dir*>(fd);
 
     delete dir->entries;
-    std::memset(dir, 0, sizeof(*dir));
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
-    auto device = (Device*)r->deviceData;
-    SCOPED_MUTEX(&device->mutex);
-    char path[PATH_MAX];
-
-    if (!common::fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
+int Device::devoptab_lstat(const char *path, struct stat *st) {
+    if (!ftp_stat(path, st, false) && !ftp_stat(path, st, true)) {
+        return -ENOENT;
     }
 
-    if (!mount_ftp(*device)) {
-        return set_errno(r, EIO);
-    }
-
-    if (!ftp_stat(*device, path, st, false) && !ftp_stat(*device, path, st, true)) {
-        return set_errno(r, ENOENT);
-    }
-
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_ftruncate(struct _reent *r, void *fd, off_t len) {
+int Device::devoptab_ftruncate(void *fd, off_t len) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->client->mutex);
 
     if (!file->write_mode) {
         log_write("[FTP] Attempt to truncate a read-only file\n");
-        return set_errno(r, EBADF);
+        return EBADF;
     }
 
     file->entry->st.st_size = len;
-    return r->_errno = 0;
+    return 0;
 }
 
-constexpr devoptab_t DEVOPTAB = {
-    .structSize   = sizeof(File),
-    .open_r       = devoptab_open,
-    .close_r      = devoptab_close,
-    .write_r      = devoptab_write,
-    .read_r       = devoptab_read,
-    .seek_r       = devoptab_seek,
-    .fstat_r      = devoptab_fstat,
-    .stat_r       = devoptab_lstat,
-    .unlink_r     = devoptab_unlink,
-    .rename_r     = devoptab_rename,
-    .mkdir_r      = devoptab_mkdir,
-    .dirStateSize = sizeof(Dir),
-    .diropen_r    = devoptab_diropen,
-    .dirreset_r   = devoptab_dirreset,
-    .dirnext_r    = devoptab_dirnext,
-    .dirclose_r   = devoptab_dirclose,
-    .ftruncate_r  = devoptab_ftruncate,
-    .rmdir_r      = devoptab_rmdir,
-    .lstat_r      = devoptab_lstat,
-};
+int Device::devoptab_fsync(void *fd) {
+    auto file = static_cast<File*>(fd);
 
-struct Entry {
-    Device device{};
-    devoptab_t devoptab{};
-    fs::FsPath mount{};
-    char name[32]{};
-    s32 ref_count{};
-
-    ~Entry() {
-        if (device.curl) {
-            curl_easy_cleanup(device.curl);
-        }
-
-        RemoveDevice(mount);
+    if (!file->write_mode) {
+        log_write("[FTP] Attempt to fsync a read-only file\n");
+        return -EBADF;
     }
-};
 
-Mutex g_mutex;
-std::array<std::unique_ptr<Entry>, common::MAX_ENTRIES> g_entries;
+    return 0;
+}
 
 } // namespace
 
 Result MountFtpAll() {
-    SCOPED_MUTEX(&g_mutex);
-
-    static const auto cb = [](const mTCHAR *Section, const mTCHAR *Key, const mTCHAR *Value, void *UserData) -> int {
-        auto e = static_cast<FtpMountConfigs*>(UserData);
-        if (!Section || !Key || !Value) return 1;
-
-        if (!Section || !Key || !Value) {
-            return 1;
-        }
-
-        // add new entry if use section changed.
-        if (e->empty() || std::strcmp(Section, e->back().name.c_str())) {
-            e->emplace_back(Section);
-        }
-
-        if (!std::strcmp(Key, "url")) {
-            e->back().url = Value;
-        } else if (!std::strcmp(Key, "user")) {
-            e->back().user = Value;
-        } else if (!std::strcmp(Key, "pass")) {
-            e->back().pass = Value;
-        } else if (!std::strcmp(Key, "port")) {
-            e->back().port = ini_parse_getl(Value, DEFAULT_FTP_PORT);
-        } else if (!std::strcmp(Key, "timeout")) {
-            e->back().timeout = ini_parse_getl(Value, e->back().timeout);
-        } else if (!std::strcmp(Key, "read_only")) {
-            e->back().read_only = ini_parse_getbool(Value, e->back().read_only);
-        } else if (!std::strcmp(Key, "no_stat_file")) {
-            e->back().no_stat_file = ini_parse_getbool(Value, e->back().no_stat_file);
-        } else if (!std::strcmp(Key, "no_stat_dir")) {
-            e->back().no_stat_dir = ini_parse_getbool(Value, e->back().no_stat_dir);
-        } else {
-            log_write("[FTP] INI: Unknown key %s=%s\n", Key, Value);
-        }
-
-        return 1;
-    };
-
-    FtpMountConfigs configs;
-    ini_browse(cb, &configs, "/config/sphaira/ftp.ini");
-    log_write("[FTP] Found %zu mount configs\n", configs.size());
-
-    for (const auto& config : configs) {
-        // check if we already have the http mounted.
-        bool already_mounted = false;
-        for (const auto& entry : g_entries) {
-            if (entry && entry->mount == config.name) {
-                already_mounted = true;
-                break;
-            }
-        }
-
-        if (already_mounted) {
-            log_write("[FTP] Already mounted %s, skipping\n", config.name.c_str());
-            continue;
-        }
-
-        // otherwise, find next free entry.
-        auto itr = std::ranges::find_if(g_entries, [](auto& e){
-            return !e;
-        });
-
-        if (itr == g_entries.end()) {
-            log_write("[FTP] No free entries to mount %s\n", config.name.c_str());
-            break;
-        }
-
-        auto entry = std::make_unique<Entry>();
-        entry->devoptab = DEVOPTAB;
-        entry->devoptab.name = entry->name;
-        entry->devoptab.deviceData = &entry->device;
-        entry->device.config = config;
-        std::snprintf(entry->name, sizeof(entry->name), "[FTP] %s", config.name.c_str());
-        std::snprintf(entry->mount, sizeof(entry->mount), "[FTP] %s:/", config.name.c_str());
-        common::update_devoptab_for_read_only(&entry->devoptab, config.read_only);
-
-        R_UNLESS(AddDevice(&entry->devoptab) >= 0, 0x1);
-        log_write("[FTP] DEVICE SUCCESS %s %s\n", entry->device.config.url.c_str(), entry->name);
-
-        entry->ref_count++;
-        *itr = std::move(entry);
-        log_write("[FTP] Mounted %s at /%s\n", config.url.c_str(), config.name.c_str());
-    }
-
-    R_SUCCEED();
-}
-
-void UnmountFtpAll() {
-    SCOPED_MUTEX(&g_mutex);
-
-    for (auto& entry : g_entries) {
-        if (entry) {
-            entry.reset();
-        }
-    }
-}
-
-Result GetFtpMounts(location::StdioEntries& out) {
-    SCOPED_MUTEX(&g_mutex);
-    out.clear();
-
-    for (const auto& entry : g_entries) {
-        if (entry) {
-            u32 flags = 0;
-            if (entry->device.config.read_only) {
-                flags |= location::FsEntryFlag::FsEntryFlag_ReadOnly;
-            }
-            if (entry->device.config.no_stat_file) {
-                flags |= location::FsEntryFlag::FsEntryFlag_NoStatFile;
-            }
-            if (entry->device.config.no_stat_dir) {
-                flags |= location::FsEntryFlag::FsEntryFlag_NoStatDir;
-            }
-
-            out.emplace_back(entry->mount, entry->name, flags);
-        }
-    }
-
-    R_SUCCEED();
+    return common::MountNetworkDevice([](const common::MountConfig& config) {
+            return std::make_unique<Device>(config);
+        },
+        sizeof(File), sizeof(Dir),
+        "/config/sphaira/ftp.ini",
+        "FTP"
+    );
 }
 
 } // namespace sphaira::devoptab

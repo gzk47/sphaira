@@ -19,37 +19,6 @@
 namespace sphaira::devoptab {
 namespace {
 
-constexpr long DEFAULT_HTTP_TIMEOUT = 3000; // 3 seconds.
-
-#define CURL_EASY_SETOPT_LOG(handle, opt, v) \
-    if (auto r = curl_easy_setopt(handle, opt, v); r != CURLE_OK) { \
-        log_write("curl_easy_setopt(%s, %s) msg: %s\n", #opt, #v, curl_easy_strerror(r)); \
-    } \
-
-#define CURL_EASY_GETINFO_LOG(handle, opt, v) \
-    if (auto r = curl_easy_getinfo(handle, opt, v); r != CURLE_OK) { \
-        log_write("curl_easy_getinfo(%s, %s) msg: %s\n", #opt, #v, curl_easy_strerror(r)); \
-    } \
-
-struct HttpMountConfig {
-    std::string name{};
-    std::string url{};
-    std::string user{};
-    std::string pass{};
-    std::optional<long> port{};
-    long timeout{DEFAULT_HTTP_TIMEOUT};
-    bool no_stat_file{true};
-    bool no_stat_dir{true};
-};
-using HttpMountConfigs = std::vector<HttpMountConfig>;
-
-struct Device {
-    CURL* curl{};
-    HttpMountConfig config;
-    Mutex mutex{};
-    bool mounted{};
-};
-
 struct DirEntry {
     std::string name{};
     std::string href{};
@@ -63,115 +32,51 @@ struct FileEntry {
 };
 
 struct File {
-    Device* client;
     FileEntry* entry;
+    common::PushPullThreadData* push_pull_thread_data;
     size_t off;
+    size_t last_off;
 };
 
 struct Dir {
-    Device* client;
     DirEntries* entries;
     size_t index;
 };
 
-size_t dirlist_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    auto data = static_cast<std::vector<char>*>(userdata);
+struct Device final : common::MountCurlDevice {
+    using MountCurlDevice::MountCurlDevice;
 
-    // increase by chunk size.
-    const auto realsize = size * nmemb;
-    if (data->capacity() < data->size() + realsize) {
-        const auto rsize = std::max(realsize, data->size() + 1024 * 1024);
-        data->reserve(rsize);
-    }
+private:
+    bool Mount() override;
+    int devoptab_open(void *fileStruct, const char *path, int flags, int mode) override;
+    int devoptab_close(void *fd) override;
+    ssize_t devoptab_read(void *fd, char *ptr, size_t len) override;
+    off_t devoptab_seek(void *fd, off_t pos, int dir) override;
+    int devoptab_fstat(void *fd, struct stat *st) override;
+    int devoptab_diropen(void* fd, const char *path) override;
+    int devoptab_dirreset(void* fd) override;
+    int devoptab_dirnext(void* fd, char *filename, struct stat *filestat) override;
+    int devoptab_dirclose(void* fd) override;
+    int devoptab_lstat(const char *path, struct stat *st) override;
 
-    // store the data.
-    const auto offset = data->size();
-    data->resize(offset + realsize);
-    std::memcpy(data->data() + offset, ptr, realsize);
+    bool http_dirlist(const std::string& path, DirEntries& out);
+    bool http_stat(const std::string& path, struct stat* st, bool is_dir);
 
-    return realsize;
-}
+private:
+    bool mounted{};
+};
 
-size_t write_data_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
-    auto data = static_cast<std::span<char>*>(userdata);
-    const auto rsize = std::min(size * nmemb, data->size());
-
-    std::memcpy(data->data(), ptr, rsize);
-    *data = data->subspan(rsize);
-    return rsize;
-}
-
-std::string url_encode(const std::string& str) {
-    auto escaped = curl_escape(str.c_str(), str.length());
-    if (!escaped) {
-        return str;
-    }
-
-    std::string result(escaped);
-    curl_free(escaped);
-    return result;
-}
-
-std::string build_url(const std::string& base, const std::string& path, bool is_dir) {
-    std::string url = base;
-    if (!url.ends_with('/')) {
-        url += '/';
-    }
-
-    url += url_encode(path);
-    if (is_dir && !url.ends_with('/')) {
-        url += '/'; // append trailing slash for folder.
-    }
-
-    return url;
-}
-
-void http_set_common_options(Device& client, const std::string& url) {
-    curl_easy_reset(client.curl);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_URL, url.c_str());
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_TIMEOUT, client.config.timeout);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_CONNECTTIMEOUT, client.config.timeout);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_AUTOREFERER, 1L);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_FOLLOWLOCATION, 1L);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_SSL_VERIFYPEER, 0L);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_SSL_VERIFYHOST, 0L);
-    // disabled as i want to see the http core.
-    // CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_FAILONERROR, 1L);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_NOPROGRESS, 0L);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_BUFFERSIZE, 1024L * 512L);
-
-    if (client.config.port) {
-        CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_PORT, client.config.port.value());
-    }
-
-    // enable all forms of compression supported by libcurl.
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_ACCEPT_ENCODING, "");
-
-    // in most cases, this will use CURLAUTH_BASIC.
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_HTTPAUTH, (long)CURLAUTH_BASIC);
-
-    // enable TE is server supports it.
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_TRANSFER_ENCODING, 1L);
-
-    if (!client.config.user.empty()) {
-        CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_USERNAME, client.config.user.c_str());
-    }
-    if (!client.config.pass.empty()) {
-        CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_PASSWORD, client.config.pass.c_str());
-    }
-}
-
-bool http_dirlist(Device& client, const std::string& path, DirEntries& out) {
-    const auto url = build_url(client.config.url, path, true);
+bool Device::http_dirlist(const std::string& path, DirEntries& out) {
+    const auto url = build_url(path, true);
     std::vector<char> chunk;
 
     log_write("[HTTP] Listing URL: %s path: %s\n", url.c_str(), path.c_str());
 
-    http_set_common_options(client, url);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_WRITEFUNCTION, dirlist_callback);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_WRITEDATA, (void *)&chunk);
+    curl_set_common_options(this->curl, url);
+    curl_easy_setopt(this->curl, CURLOPT_WRITEFUNCTION, write_memory_callback);
+    curl_easy_setopt(this->curl, CURLOPT_WRITEDATA, (void *)&chunk);
 
-    const auto res = curl_easy_perform(client.curl);
+    const auto res = curl_easy_perform(this->curl);
     if (res != CURLE_OK) {
         log_write("[HTTP] curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
         return false;
@@ -218,21 +123,18 @@ bool http_dirlist(Device& client, const std::string& path, DirEntries& out) {
             }
 
             pos = name_end + anchor_tag_end.length();
-            const auto href_view = table_view.substr(href_begin, href_end - href_begin);
-            const auto name_view = table_view.substr(name_begin, name_end - name_begin);
+            const auto href = url_decode(std::string{table_view.substr(href_begin, href_end - href_begin)});
+            auto name = url_decode(std::string{table_view.substr(name_begin, name_end - name_begin)});
 
             // skip empty names/links, root dir entry and links that are not actual files/dirs (e.g. sorting/filter controls).
-            if (name_view.empty() || href_view.empty() || name_view == "/" || href_view.starts_with('?') || href_view.starts_with('#')) {
+            if (name.empty() || href.empty() || name == "/" || href.starts_with('?') || href.starts_with('#')) {
                 continue;
             }
 
             // skip parent directory entry and external links.
-            if (href_view == ".." || name_view == ".." || href_view.starts_with("../") || name_view.starts_with("../") || href_view.find("://") != std::string::npos) {
+            if (href == ".." || name == ".." || href.starts_with("../") || name.starts_with("../") || href.find("://") != std::string::npos) {
                 continue;
             }
-
-            std::string name{name_view};
-            const std::string href{href_view};
 
             const auto is_dir = name.ends_with('/');
             if (is_dir) {
@@ -248,38 +150,38 @@ bool http_dirlist(Device& client, const std::string& path, DirEntries& out) {
     return true;
 }
 
-bool http_stat(Device& client, const std::string& path, struct stat* st, bool is_dir) {
+bool Device::http_stat(const std::string& path, struct stat* st, bool is_dir) {
     std::memset(st, 0, sizeof(*st));
-    const auto url = build_url(client.config.url, path, is_dir);
+    const auto url = build_url(path, is_dir);
 
-    http_set_common_options(client, url);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_NOBODY, 1L);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_FILETIME, 1L);
+    curl_set_common_options(this->curl, url);
+    curl_easy_setopt(this->curl, CURLOPT_NOBODY, 1L);
+    curl_easy_setopt(this->curl, CURLOPT_FILETIME, 1L);
 
-    const auto res = curl_easy_perform(client.curl);
+    const auto res = curl_easy_perform(this->curl);
     if (res != CURLE_OK) {
         log_write("[HTTP] curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
         return false;
     }
 
     long response_code = 0;
-    CURL_EASY_GETINFO_LOG(client.curl, CURLINFO_RESPONSE_CODE, &response_code);
+    curl_easy_getinfo(this->curl, CURLINFO_RESPONSE_CODE, &response_code);
 
     curl_off_t file_size = 0;
-    CURL_EASY_GETINFO_LOG(client.curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &file_size);
+    curl_easy_getinfo(this->curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &file_size);
 
     curl_off_t file_time = 0;
-    CURL_EASY_GETINFO_LOG(client.curl, CURLINFO_FILETIME_T, &file_time);
+    curl_easy_getinfo(this->curl, CURLINFO_FILETIME_T, &file_time);
 
     const char* content_type{};
-    CURL_EASY_GETINFO_LOG(client.curl, CURLINFO_CONTENT_TYPE, &content_type);
+    curl_easy_getinfo(this->curl, CURLINFO_CONTENT_TYPE, &content_type);
 
     const char* effective_url{};
-    CURL_EASY_GETINFO_LOG(client.curl, CURLINFO_EFFECTIVE_URL, &effective_url);
+    curl_easy_getinfo(this->curl, CURLINFO_EFFECTIVE_URL, &effective_url);
 
     // handle error codes.
     if (response_code != 200 && response_code != 206) {
-        log_write("[HTTP] Unexpected HTTP response code: %ld\n", response_code);
+        log_write("[WEBDAV] Unexpected HTTP response code: %ld\n", response_code);
         return false;
     }
 
@@ -308,113 +210,80 @@ bool http_stat(Device& client, const std::string& path, struct stat* st, bool is
     return true;
 }
 
-bool http_read_file_chunk(Device& client, const std::string& path, size_t start, std::span<char> buffer) {
-    SCOPED_TIMESTAMP("http_read_file_chunk");
-    const auto url = build_url(client.config.url, path, false);
-
-    char range[64];
-    std::snprintf(range, sizeof(range), "%zu-%zu", start, start + buffer.size() - 1);
-    log_write("[HTTP] Requesting range: %s\n", range);
-
-    http_set_common_options(client, url);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_RANGE, range);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_WRITEFUNCTION, write_data_callback);
-    CURL_EASY_SETOPT_LOG(client.curl, CURLOPT_WRITEDATA, (void *)&buffer);
-
-    const auto res = curl_easy_perform(client.curl);
-    if (res != CURLE_OK) {
-        log_write("[HTTP] curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-        return false;
-    }
-
-    return true;
-}
-
-bool mount_http(Device& client) {
-    if (client.curl) {
+bool Device::Mount() {
+    if (mounted) {
         return true;
     }
 
-    client.curl = curl_easy_init();
-    if (!client.curl) {
-        log_write("[HTTP] curl_easy_init() failed\n");
+    if (!MountCurlDevice::Mount()) {
         return false;
     }
 
-    return true;
+    // todo: query server with OPTIONS to see if it supports range requests.
+    // todo: see ftp for example.
+
+    return mounted = true;
 }
 
-int set_errno(struct _reent *r, int err) {
-    r->_errno = err;
-    return -1;
-}
-
-int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int flags, int mode) {
-    auto device = (Device*)r->deviceData;
+int Device::devoptab_open(void *fileStruct, const char *path, int flags, int mode) {
     auto file = static_cast<File*>(fileStruct);
-    std::memset(file, 0, sizeof(*file));
-    SCOPED_MUTEX(&device->mutex);
-
-    // todo: add this check to all devoptabs.
-    if ((flags & O_ACCMODE) != O_RDONLY) {
-        log_write("[HTTP] Only read-only mode is supported\n");
-        return set_errno(r, EINVAL);
-    }
-
-    char path[PATH_MAX]{};
-    if (!common::fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
-    }
-
-    if (!mount_http(*device)) {
-        return set_errno(r, EIO);
-    }
 
     struct stat st;
-    if (!http_stat(*device, path, &st, false)) {
+    if (!http_stat(path, &st, false)) {
         log_write("[HTTP] http_stat() failed for file: %s\n", path);
-        return set_errno(r, ENOENT);
+        return -ENOENT;
     }
 
     if (st.st_mode & S_IFDIR) {
         log_write("[HTTP] Attempted to open a directory as a file: %s\n", path);
-        return set_errno(r, EISDIR);
+        return -EISDIR;
     }
 
-    file->client = device;
     file->entry = new FileEntry{path, st};
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_close(struct _reent *r, void *fd) {
+int Device::devoptab_close(void *fd) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->client->mutex);
 
+    delete file->push_pull_thread_data;
     delete file->entry;
-    std::memset(file, 0, sizeof(*file));
-    return r->_errno = 0;
+    return 0;
 }
 
-ssize_t devoptab_read(struct _reent *r, void *fd, char *ptr, size_t len) {
+ssize_t Device::devoptab_read(void *fd, char *ptr, size_t len) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->client->mutex);
     len = std::min(len, file->entry->st.st_size - file->off);
 
     if (!len) {
         return 0;
     }
 
-    if (!http_read_file_chunk(*file->client, file->entry->path, file->off, {ptr, len})) {
-        return set_errno(r, EIO);
+    if (file->off != file->last_off) {
+        log_write("[HTTP] File offset changed from %zu to %zu, resetting download thread\n", file->last_off, file->off);
+        file->last_off = file->off;
+        delete file->push_pull_thread_data;
+        file->push_pull_thread_data = nullptr;
     }
 
-    file->off += len;
-    return len;
+    if (!file->push_pull_thread_data) {
+        log_write("[HTTP] Creating download thread data for file: %s\n", file->entry->path.c_str());
+        file->push_pull_thread_data = CreatePushData(this->transfer_curl, build_url(file->entry->path, false), file->off);
+        if (!file->push_pull_thread_data) {
+            log_write("[HTTP] Failed to create download thread data for file: %s\n", file->entry->path.c_str());
+            return -EIO;
+        }
+    }
+
+    const auto ret = file->push_pull_thread_data->PullData(ptr, len);
+
+    file->off += ret;
+    file->last_off = file->off;
+    return ret;
 }
 
-off_t devoptab_seek(struct _reent *r, void *fd, off_t pos, int dir) {
+off_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->client->mutex);
 
     if (dir == SEEK_CUR) {
         pos += file->off;
@@ -422,63 +291,43 @@ off_t devoptab_seek(struct _reent *r, void *fd, off_t pos, int dir) {
         pos = file->entry->st.st_size;
     }
 
-    r->_errno = 0;
     return file->off = std::clamp<u64>(pos, 0, file->entry->st.st_size);
 }
 
-int devoptab_fstat(struct _reent *r, void *fd, struct stat *st) {
+int Device::devoptab_fstat(void *fd, struct stat *st) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->client->mutex);
 
     std::memcpy(st, &file->entry->st, sizeof(*st));
-    return r->_errno = 0;
+    return 0;
 }
 
-DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_path) {
-    auto device = (Device*)r->deviceData;
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    std::memset(dir, 0, sizeof(*dir));
-    SCOPED_MUTEX(&device->mutex);
+int Device::devoptab_diropen(void* fd, const char *path) {
+    auto dir = static_cast<Dir*>(fd);
 
-    char path[PATH_MAX];
-    if (!common::fix_path(_path, path)) {
-        set_errno(r, ENOENT);
-        return NULL;
-    }
-
-    if (!mount_http(*device)) {
-        set_errno(r, EIO);
-        return NULL;
-    }
-
+    log_write("[HTTP] Opening directory: %s\n", path);
     auto entries = new DirEntries();
-    if (!http_dirlist(*device, path, *entries)) {
+    if (!http_dirlist(path, *entries)) {
         delete entries;
-        set_errno(r, ENOENT);
-        return NULL;
+        return -ENOENT;
     }
 
-    dir->client = device;
+    log_write("[HTTP] Opened directory: %s with %zu entries\n", path, entries->size());
     dir->entries = entries;
-    r->_errno = 0;
-    return dirState;
+    return 0;
 }
 
-int devoptab_dirreset(struct _reent *r, DIR_ITER *dirState) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    SCOPED_MUTEX(&dir->client->mutex);
+int Device::devoptab_dirreset(void* fd) {
+    auto dir = static_cast<Dir*>(fd);
 
     dir->index = 0;
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struct stat *filestat) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    std::memset(filestat, 0, sizeof(*filestat));
-    SCOPED_MUTEX(&dir->client->mutex);
+int Device::devoptab_dirnext(void* fd, char *filename, struct stat *filestat) {
+    auto dir = static_cast<Dir*>(fd);
 
     if (dir->index >= dir->entries->size()) {
-        return set_errno(r, ENOENT);
+        return -ENOENT;
     }
 
     auto& entry = (*dir->entries)[dir->index];
@@ -492,188 +341,34 @@ int devoptab_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struc
     std::strcpy(filename, entry.name.c_str());
 
     dir->index++;
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_dirclose(struct _reent *r, DIR_ITER *dirState) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    SCOPED_MUTEX(&dir->client->mutex);
+int Device::devoptab_dirclose(void* fd) {
+    auto dir = static_cast<Dir*>(fd);
 
     delete dir->entries;
-    std::memset(dir, 0, sizeof(*dir));
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
-    auto device = (Device*)r->deviceData;
-    SCOPED_MUTEX(&device->mutex);
-
-    char path[PATH_MAX];
-    if (!common::fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
+int Device::devoptab_lstat(const char *path, struct stat *st) {
+    if (!http_stat(path, st, false) && !http_stat(path, st, true)) {
+        return -ENOENT;
     }
 
-    if (!mount_http(*device)) {
-        return set_errno(r, EIO);
-    }
-
-    if (!http_stat(*device, path, st, false) && !http_stat(*device, path, st, true)) {
-        return set_errno(r, ENOENT);
-    }
-
-    return r->_errno = 0;
+    return 0;
 }
-
-constexpr devoptab_t DEVOPTAB = {
-    .structSize   = sizeof(File),
-    .open_r       = devoptab_open,
-    .close_r      = devoptab_close,
-    .read_r       = devoptab_read,
-    .seek_r       = devoptab_seek,
-    .fstat_r      = devoptab_fstat,
-    .stat_r       = devoptab_lstat,
-    .dirStateSize = sizeof(Dir),
-    .diropen_r    = devoptab_diropen,
-    .dirreset_r   = devoptab_dirreset,
-    .dirnext_r    = devoptab_dirnext,
-    .dirclose_r   = devoptab_dirclose,
-    .lstat_r      = devoptab_lstat,
-};
-
-struct Entry {
-    Device device{};
-    devoptab_t devoptab{};
-    fs::FsPath mount{};
-    char name[32]{};
-    s32 ref_count{};
-
-    ~Entry() {
-        if (device.curl) {
-            curl_easy_cleanup(device.curl);
-        }
-        RemoveDevice(mount);
-    }
-};
-
-Mutex g_mutex;
-std::array<std::unique_ptr<Entry>, common::MAX_ENTRIES> g_entries;
 
 } // namespace
 
 Result MountHttpAll() {
-    SCOPED_MUTEX(&g_mutex);
-
-    static const auto cb = [](const mTCHAR *Section, const mTCHAR *Key, const mTCHAR *Value, void *UserData) -> int {
-        auto e = static_cast<HttpMountConfigs*>(UserData);
-        if (!Section || !Key || !Value) {
-            return 1;
-        }
-
-        // add new entry if use section changed.
-        if (e->empty() || std::strcmp(Section, e->back().name.c_str())) {
-            e->emplace_back(Section);
-        }
-
-        if (!std::strcmp(Key, "url")) {
-            e->back().url = Value;
-        } else if (!std::strcmp(Key, "user")) {
-            e->back().user = Value;
-        } else if (!std::strcmp(Key, "pass")) {
-            e->back().pass = Value;
-        } else if (!std::strcmp(Key, "port")) {
-            // todo: idk what the default should be.
-            e->back().port = ini_parse_getl(Value, 8000);
-        } else if (!std::strcmp(Key, "timeout")) {
-            e->back().timeout = ini_parse_getl(Value, e->back().timeout);
-        } else if (!std::strcmp(Key, "no_stat_file")) {
-            e->back().no_stat_file = ini_parse_getbool(Value, e->back().no_stat_file);
-        } else if (!std::strcmp(Key, "no_stat_dir")) {
-            e->back().no_stat_dir = ini_parse_getbool(Value, e->back().no_stat_dir);
-        } else {
-            log_write("[HTTP] INI: Unknown key %s=%s\n", Key, Value);
-        }
-
-        return 1;
-    };
-
-    HttpMountConfigs configs;
-    ini_browse(cb, &configs, "/config/sphaira/http.ini");
-    log_write("[HTTP] Found %zu mount configs\n", configs.size());
-
-    for (const auto& config : configs) {
-        // check if we already have the http mounted.
-        bool already_mounted = false;
-        for (const auto& entry : g_entries) {
-            if (entry && entry->mount == config.name) {
-                already_mounted = true;
-                break;
-            }
-        }
-
-        if (already_mounted) {
-            log_write("[HTTP] Already mounted %s, skipping\n", config.name.c_str());
-            continue;
-        }
-
-        // otherwise, find next free entry.
-        auto itr = std::ranges::find_if(g_entries, [](auto& e){
-            return !e;
-        });
-
-        if (itr == g_entries.end()) {
-            log_write("[HTTP] No free entries to mount %s\n", config.name.c_str());
-            break;
-        }
-
-        auto entry = std::make_unique<Entry>();
-        entry->devoptab = DEVOPTAB;
-        entry->devoptab.name = entry->name;
-        entry->devoptab.deviceData = &entry->device;
-        entry->device.config = config;
-        std::snprintf(entry->name, sizeof(entry->name), "[HTTP] %s", config.name.c_str());
-        std::snprintf(entry->mount, sizeof(entry->mount), "[HTTP] %s:/", config.name.c_str());
-
-        R_UNLESS(AddDevice(&entry->devoptab) >= 0, 0x1);
-        log_write("[HTTP] DEVICE SUCCESS %s %s\n", entry->device.config.url.c_str(), entry->name);
-
-        entry->ref_count++;
-        *itr = std::move(entry);
-        log_write("[HTTP] Mounted %s at /%s\n", config.url.c_str(), config.name.c_str());
-    }
-
-    R_SUCCEED();
-}
-
-void UnmountHttpAll() {
-    SCOPED_MUTEX(&g_mutex);
-
-    for (auto& entry : g_entries) {
-        if (entry) {
-            entry.reset();
-        }
-    }
-}
-
-Result GetHttpMounts(location::StdioEntries& out) {
-    SCOPED_MUTEX(&g_mutex);
-    out.clear();
-
-    for (const auto& entry : g_entries) {
-        if (entry) {
-            u32 flags = 0;
-            flags |= location::FsEntryFlag::FsEntryFlag_ReadOnly;
-            if (entry->device.config.no_stat_file) {
-                flags |= location::FsEntryFlag::FsEntryFlag_NoStatFile;
-            }
-            if (entry->device.config.no_stat_dir) {
-                flags |= location::FsEntryFlag::FsEntryFlag_NoStatDir;
-            }
-
-            out.emplace_back(entry->mount, entry->name, flags);
-        }
-    }
-
-    R_SUCCEED();
+    return common::MountNetworkDevice([](const common::MountConfig& config) {
+            return std::make_unique<Device>(config);
+        },
+        sizeof(File), sizeof(Dir),
+        "/config/sphaira/http.ini",
+        "HTTP"
+    );
 }
 
 } // namespace sphaira::devoptab

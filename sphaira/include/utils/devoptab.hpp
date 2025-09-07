@@ -33,20 +33,13 @@ void UmountBfsar(const fs::FsPath& mount);
 Result MountNro(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path);
 void UmountNro(const fs::FsPath& mount);
 
+Result MountWebdavAll();
 Result MountHttpAll();
-Result GetHttpMounts(location::StdioEntries& out);
-void UnmountHttpAll();
-
 Result MountFtpAll();
-Result GetFtpMounts(location::StdioEntries& out);
-void UnmountFtpAll();
-
 Result MountNfsAll();
-Result GetNfsMounts(location::StdioEntries& out);
-void UnmountNfsAll();
-
 Result MountSmb2All();
-Result GetSmb2Mounts(location::StdioEntries& out);
-void UnmountSmb2All();
+
+Result GetNetworkDevices(location::StdioEntries& out);
+void UmountAllNeworkDevices();
 
 } // namespace sphaira::devoptab

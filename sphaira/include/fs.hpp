@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <cstring>
 #include <vector>
+#include <span>
 #include <string>
 #include <string_view>
 #include <sys/syslimits.h>
@@ -307,7 +308,7 @@ Result IsDirEmpty(fs::Fs* m_fs, const fs::FsPath& path, bool* out);
 
 // helpers.
 Result read_entire_file(Fs* fs, const FsPath& path, std::vector<u8>& out);
-Result write_entire_file(Fs* fs, const FsPath& path, const std::vector<u8>& in, bool ignore_read_only = true);
+Result write_entire_file(Fs* fs, const FsPath& path, std::span<const u8> in, bool ignore_read_only = true);
 Result copy_entire_file(Fs* fs, const FsPath& dst, const FsPath& src, bool ignore_read_only = true);
 
 struct Fs {
@@ -354,7 +355,7 @@ struct Fs {
     Result read_entire_file(const FsPath& path, std::vector<u8>& out) {
         return fs::read_entire_file(this, path, out);
     }
-    Result write_entire_file(const FsPath& path, const std::vector<u8>& in) {
+    Result write_entire_file(const FsPath& path, std::span<const u8> in) {
         return fs::write_entire_file(this, path, in, m_ignore_read_only);
     }
     Result copy_entire_file(const FsPath& dst, const FsPath& src) {

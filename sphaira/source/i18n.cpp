@@ -8,12 +8,15 @@
 namespace sphaira::i18n {
 namespace {
 
-std::vector<u8> g_i18n_data;
-yyjson_doc* json;
-yyjson_val* root;
-std::unordered_map<std::string, std::string> g_tr_cache;
+std::vector<u8> g_i18n_data{};
+yyjson_doc* json{};
+yyjson_val* root{};
+std::unordered_map<std::string, std::string> g_tr_cache{};
+Mutex g_mutex{};
 
 std::string get_internal(std::string_view str) {
+    SCOPED_MUTEX(&g_mutex);
+
     const std::string kkey = {str.data(), str.length()};
 
     if (auto it = g_tr_cache.find(kkey); it != g_tr_cache.end()) {
@@ -50,6 +53,8 @@ std::string get_internal(std::string_view str) {
 } // namespace
 
 bool init(long index) {
+    SCOPED_MUTEX(&g_mutex);
+
     g_tr_cache.clear();
     R_TRY_RESULT(romfsInit(), false);
     ON_SCOPE_EXIT( romfsExit() );
@@ -87,7 +92,7 @@ bool init(long index) {
         case SetLanguage_DE: lang_name = "de"; break;
         case SetLanguage_IT: lang_name = "it"; break;
         case SetLanguage_ES: lang_name = "es"; break;
-        case SetLanguage_ZHCN: lang_name = "zh"; break; 
+        case SetLanguage_ZHCN: lang_name = "zh"; break;
         case SetLanguage_KO: lang_name = "ko"; break;
         case SetLanguage_NL: lang_name = "nl"; break;
         case SetLanguage_PT: lang_name = "pt"; break;
@@ -128,6 +133,8 @@ bool init(long index) {
 }
 
 void exit() {
+    SCOPED_MUTEX(&g_mutex);
+
     if (json) {
         yyjson_doc_free(json);
         json = nullptr;

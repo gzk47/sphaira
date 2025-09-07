@@ -1,9 +1,7 @@
 #include "utils/devoptab_common.hpp"
 #include "defines.hpp"
 #include "log.hpp"
-#include "location.hpp"
 
-#include <sys/iosupport.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <cstring>
@@ -16,90 +14,47 @@
 namespace sphaira::devoptab {
 namespace {
 
-constexpr int DEFAULT_SMB2_TIMEOUT = 3000; // 3 seconds.
+struct Device final : common::MountDevice {
+    Device(const common::MountConfig& cfg) : MountDevice{cfg} {}
+    ~Device();
 
-struct Smb2MountConfig {
-    std::string name{};
-    std::string url{};
-    std::string user{};
-    std::string pass{};
-    std::string domain{};
-    std::string workstation{};
-    int timeout{DEFAULT_SMB2_TIMEOUT};
-    bool read_only{};
-    bool no_stat_file{false};
-    bool no_stat_dir{true};
-};
-using Smb2MountConfigs = std::vector<Smb2MountConfig>;
+private:
+    bool fix_path(const char* str, char* out, bool strip_leading_slash = false) override {
+        return common::fix_path(str, out, true);
+    }
 
-struct Device {
+    bool Mount() override;
+    int devoptab_open(void *fileStruct, const char *path, int flags, int mode) override;
+    int devoptab_close(void *fd) override;
+    ssize_t devoptab_read(void *fd, char *ptr, size_t len) override;
+    ssize_t devoptab_write(void *fd, const char *ptr, size_t len) override;
+    off_t devoptab_seek(void *fd, off_t pos, int dir) override;
+    int devoptab_fstat(void *fd, struct stat *st) override;
+    int devoptab_unlink(const char *path) override;
+    int devoptab_rename(const char *oldName, const char *newName) override;
+    int devoptab_mkdir(const char *path, int mode) override;
+    int devoptab_rmdir(const char *path) override;
+    int devoptab_diropen(void* fd, const char *path) override;
+    int devoptab_dirreset(void* fd) override;
+    int devoptab_dirnext(void* fd, char *filename, struct stat *filestat) override;
+    int devoptab_dirclose(void* fd) override;
+    int devoptab_lstat(const char *path, struct stat *st) override;
+    int devoptab_ftruncate(void *fd, off_t len) override;
+    int devoptab_statvfs(const char *path, struct statvfs *buf) override;
+    int devoptab_fsync(void *fd) override;
+
+private:
     smb2_context* smb2{};
-    smb2_url* url{};
-    Smb2MountConfig config;
     bool mounted{};
-    Mutex mutex{};
 };
 
 struct File {
-    Device* device;
     smb2fh* fd;
 };
 
 struct Dir {
-    Device* device;
     smb2dir* dir;
 };
-
-bool mount_smb2(Device& device) {
-    if (device.mounted) {
-        return true;
-    }
-
-    if (!device.smb2) {
-        device.smb2 = smb2_init_context();
-        if (!device.smb2) {
-            log_write("[SMB2] smb2_init_context() failed\n");
-            return false;
-        }
-
-        smb2_set_security_mode(device.smb2, SMB2_NEGOTIATE_SIGNING_ENABLED);
-
-        if (!device.config.user.empty()) {
-            smb2_set_user(device.smb2, device.config.user.c_str());
-        }
-
-        if (!device.config.pass.empty()) {
-            smb2_set_password(device.smb2, device.config.pass.c_str());
-        }
-
-        if (!device.config.domain.empty()) {
-            smb2_set_domain(device.smb2, device.config.domain.c_str());
-        }
-
-        if (!device.config.workstation.empty()) {
-            smb2_set_workstation(device.smb2, device.config.workstation.c_str());
-        }
-
-        smb2_set_timeout(device.smb2, device.config.timeout);
-    }
-
-    if (!device.url) {
-        device.url = smb2_parse_url(device.smb2, device.config.url.c_str());
-        if (!device.url) {
-            log_write("[SMB2] smb2_parse_url() failed: %s\n", smb2_get_error(device.smb2));
-            return false;
-        }
-    }
-
-    const auto ret = smb2_connect_share(device.smb2, device.url->server, device.url->share, device.url->user);
-    if (ret) {
-        log_write("[SMB2] smb2_connect_share() failed: %s errno: %s\n", smb2_get_error(device.smb2), std::strerror(-ret));
-        return false;
-    }
-
-    device.mounted = true;
-    return true;
-}
 
 void fill_stat(struct stat* st, const smb2_stat_64* smb2_st) {
     if (smb2_st->smb2_type == SMB2_TYPE_FILE) {
@@ -121,325 +76,256 @@ void fill_stat(struct stat* st, const smb2_stat_64* smb2_st) {
     st->st_ctime = smb2_st->smb2_ctime;
 }
 
-bool fix_path(const char* str, char* out) {
-    return common::fix_path(str, out, true);
+Device::~Device() {
+    if (this->smb2) {
+        if (this->mounted) {
+            smb2_disconnect_share(this->smb2);
+        }
+
+        smb2_destroy_context(this->smb2);
+    }
 }
 
-int set_errno(struct _reent *r, int err) {
-    r->_errno = err;
-    return -1;
+bool Device::Mount() {
+    if (mounted) {
+        return true;
+    }
+
+    if (!this->smb2) {
+        this->smb2 = smb2_init_context();
+        if (!this->smb2) {
+            log_write("[SMB2] smb2_init_context() failed\n");
+            return false;
+        }
+
+        smb2_set_security_mode(this->smb2, SMB2_NEGOTIATE_SIGNING_ENABLED);
+
+        if (!this->config.user.empty()) {
+            smb2_set_user(this->smb2, this->config.user.c_str());
+        }
+
+        if (!this->config.pass.empty()) {
+            smb2_set_password(this->smb2, this->config.pass.c_str());
+        }
+
+        const auto domain = this->config.extra.find("domain");
+        if (domain != this->config.extra.end()) {
+            smb2_set_domain(this->smb2, domain->second.c_str());
+        }
+
+        const auto workstation = this->config.extra.find("workstation");
+        if (workstation != this->config.extra.end()) {
+            smb2_set_workstation(this->smb2, workstation->second.c_str());
+        }
+
+        smb2_set_timeout(this->smb2, this->config.timeout);
+    }
+
+    auto smb2_url = smb2_parse_url(this->smb2, this->config.url.c_str());
+    if (!smb2_url) {
+        log_write("[SMB2] smb2_parse_url() failed: %s\n", smb2_get_error(this->smb2));
+        return false;
+    }
+    ON_SCOPE_EXIT(smb2_destroy_url(smb2_url));
+
+    const auto ret = smb2_connect_share(this->smb2, smb2_url->server, smb2_url->share, smb2_url->user);
+    if (ret) {
+        log_write("[SMB2] smb2_connect_share() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+        return false;
+    }
+
+    this->mounted = true;
+    return true;
 }
 
-int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int flags, int mode) {
-    auto device = static_cast<Device*>(r->deviceData);
+int Device::devoptab_open(void *fileStruct, const char *path, int flags, int mode) {
     auto file = static_cast<File*>(fileStruct);
-    std::memset(file, 0, sizeof(*file));
-    SCOPED_MUTEX(&device->mutex);
 
-    if (device->config.read_only && (flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC | O_APPEND))) {
-        return set_errno(r, EROFS);
-    }
-
-    char path[PATH_MAX]{};
-    if (!fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
-    }
-
-    if (!mount_smb2(*device)) {
-        return set_errno(r, EIO);
-    }
-
-    file->fd = smb2_open(device->smb2, path, flags);
+    file->fd = smb2_open(this->smb2, path, flags);
     if (!file->fd) {
-        log_write("[SMB2] smb2_open() failed: %s\n", smb2_get_error(device->smb2));
-        return set_errno(r, EIO);
+        log_write("[SMB2] smb2_open() failed: %s\n", smb2_get_error(this->smb2));
+        return -EIO;
     }
 
-    file->device = device;
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_close(struct _reent *r, void *fd) {
+int Device::devoptab_close(void *fd) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->device->mutex);
 
-    if (file->fd) {
-        smb2_close(file->device->smb2, file->fd);
-    }
-
-    std::memset(file, 0, sizeof(*file));
-    return r->_errno = 0;
+    smb2_close(this->smb2, file->fd);
+    return 0;
 }
 
-ssize_t devoptab_read(struct _reent *r, void *fd, char *ptr, size_t len) {
+ssize_t Device::devoptab_read(void *fd, char *ptr, size_t len) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->device->mutex);
 
-    const auto ret = smb2_read(file->device->smb2, file->fd, reinterpret_cast<uint8_t*>(ptr), len);
+    const auto ret = smb2_read(this->smb2, file->fd, reinterpret_cast<uint8_t*>(ptr), len);
     if (ret < 0) {
-        log_write("[SMB2] smb2_read() failed: %s errno: %s\n", smb2_get_error(file->device->smb2), std::strerror(-ret));
-        return set_errno(r, -ret);
+        log_write("[SMB2] smb2_read() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+        return ret;
     }
 
     return ret;
 }
 
-ssize_t devoptab_write(struct _reent *r, void *fd, const char *ptr, size_t len) {
+ssize_t Device::devoptab_write(void *fd, const char *ptr, size_t len) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->device->mutex);
 
-    const auto ret = smb2_write(file->device->smb2, file->fd, reinterpret_cast<const uint8_t*>(ptr), len);
+    const auto ret = smb2_write(this->smb2, file->fd, reinterpret_cast<const uint8_t*>(ptr), len);
     if (ret < 0) {
-        log_write("[SMB2] smb2_write() failed: %s errno: %s\n", smb2_get_error(file->device->smb2), std::strerror(-ret));
-        return set_errno(r, -ret);
+        log_write("[SMB2] smb2_write() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+        return ret;
     }
 
     return ret;
 }
 
-off_t devoptab_seek(struct _reent *r, void *fd, off_t pos, int dir) {
+off_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->device->mutex);
 
-    const auto ret = smb2_lseek(file->device->smb2, file->fd, pos, dir, nullptr);
+    u64 current_offset = 0;
+    const auto ret = smb2_lseek(this->smb2, file->fd, pos, dir, &current_offset);
     if (ret < 0) {
-        log_write("[SMB2] smb2_lseek() failed: %s errno: %s\n", smb2_get_error(file->device->smb2), std::strerror(-ret));
-        return set_errno(r, -ret);
+        log_write("[SMB2] smb2_lseek() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+        return ret;
     }
 
-    r->_errno = 0;
-    return ret;
+    return current_offset;
 }
 
-int devoptab_fstat(struct _reent *r, void *fd, struct stat *st) {
+int Device::devoptab_fstat(void *fd, struct stat *st) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->device->mutex);
 
     smb2_stat_64 smb2_st{};
-    const auto ret = smb2_fstat(file->device->smb2, file->fd, &smb2_st);
+    const auto ret = smb2_fstat(this->smb2, file->fd, &smb2_st);
     if (ret < 0) {
-        log_write("[SMB2] smb2_fstat() failed: %s errno: %s\n", smb2_get_error(file->device->smb2), std::strerror(-ret));
-        return set_errno(r, -ret);
+        log_write("[SMB2] smb2_fstat() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+        return ret;
     }
 
     fill_stat(st, &smb2_st);
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_unlink(struct _reent *r, const char *_path) {
-    auto device = static_cast<Device*>(r->deviceData);
-    SCOPED_MUTEX(&device->mutex);
-
-    char path[PATH_MAX]{};
-    if (!fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
-    }
-
-    if (!mount_smb2(*device)) {
-        return set_errno(r, EIO);
-    }
-
-    const auto ret = smb2_unlink(device->smb2, path);
-    if (ret < 0) {
-        log_write("[SMB2] smb2_unlink() failed: %s errno: %s\n", smb2_get_error(device->smb2), std::strerror(-ret));
-        return set_errno(r, -ret);
-    }
-
-    return r->_errno = 0;
-}
-
-int devoptab_rename(struct _reent *r, const char *_oldName, const char *_newName) {
-    auto device = static_cast<Device*>(r->deviceData);
-    SCOPED_MUTEX(&device->mutex);
-
-    char oldName[PATH_MAX]{};
-    if (!fix_path(_oldName, oldName)) {
-        return set_errno(r, ENOENT);
-    }
-
-    char newName[PATH_MAX]{};
-    if (!fix_path(_newName, newName)) {
-        return set_errno(r, ENOENT);
-    }
-
-    if (!mount_smb2(*device)) {
-        return set_errno(r, EIO);
-    }
-
-    const auto ret = smb2_rename(device->smb2, oldName, newName);
-    if (ret < 0) {
-        log_write("[SMB2] smb2_rename() failed: %s errno: %s\n", smb2_get_error(device->smb2), std::strerror(-ret));
-        return set_errno(r, -ret);
-    }
-
-    return r->_errno = 0;
-}
-
-int devoptab_mkdir(struct _reent *r, const char *_path, int mode) {
-    auto device = static_cast<Device*>(r->deviceData);
-    SCOPED_MUTEX(&device->mutex);
-
-    char path[PATH_MAX]{};
-    if (!fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
-    }
-
-    if (!mount_smb2(*device)) {
-        return set_errno(r, EIO);
-    }
-
-    const auto ret = smb2_mkdir(device->smb2, path);
+int Device::devoptab_unlink(const char *path) {
+    const auto ret = smb2_unlink(this->smb2, path);
     if (ret) {
-        log_write("[SMB2] smb2_mkdir() failed: %s errno: %s\n", smb2_get_error(device->smb2), std::strerror(-ret));
-        return set_errno(r, -ret);
+        log_write("[SMB2] smb2_unlink() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+        return ret;
     }
 
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_rmdir(struct _reent *r, const char *_path) {
-    auto device = static_cast<Device*>(r->deviceData);
-    SCOPED_MUTEX(&device->mutex);
-
-    char path[PATH_MAX]{};
-    if (!fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
-    }
-
-    if (!mount_smb2(*device)) {
-        return set_errno(r, EIO);
-    }
-
-    const auto ret = smb2_rmdir(device->smb2, path);
+int Device::devoptab_rename(const char *oldName, const char *newName) {
+    const auto ret = smb2_rename(this->smb2, oldName, newName);
     if (ret) {
-        log_write("[SMB2] smb2_rmdir() failed: %s errno: %s\n", smb2_get_error(device->smb2), std::strerror(-ret));
-        return set_errno(r, -ret);
+        log_write("[SMB2] smb2_rename() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+        return ret;
     }
 
-    return r->_errno = 0;
+    return 0;
 }
 
-DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_path) {
-    auto device = static_cast<Device*>(r->deviceData);
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    std::memset(dir, 0, sizeof(*dir));
-    SCOPED_MUTEX(&device->mutex);
-
-    char path[PATH_MAX]{};
-    if (!fix_path(_path, path)) {
-        set_errno(r, ENOENT);
-        return nullptr;
+int Device::devoptab_mkdir(const char *path, int mode) {
+    const auto ret = smb2_mkdir(this->smb2, path);
+    if (ret) {
+        log_write("[SMB2] smb2_mkdir() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+        return ret;
     }
 
-    if (!mount_smb2(*device)) {
-        set_errno(r, EIO);
-        return nullptr;
+    return 0;
+}
+
+int Device::devoptab_rmdir(const char *path) {
+    const auto ret = smb2_rmdir(this->smb2, path);
+    if (ret) {
+        log_write("[SMB2] smb2_rmdir() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+        return ret;
     }
 
-    dir->dir = smb2_opendir(device->smb2, path);
+    return 0;
+}
+
+int Device::devoptab_diropen(void* fd, const char *path) {
+    auto dir = static_cast<Dir*>(fd);
+
+    dir->dir = smb2_opendir(this->smb2, path);
     if (!dir->dir) {
-        log_write("[SMB2] smb2_opendir() failed: %s\n", smb2_get_error(device->smb2));
-        set_errno(r, EIO);
-        return nullptr;
+        log_write("[SMB2] smb2_opendir() failed: %s\n", smb2_get_error(this->smb2));
+        return -EIO;
     }
 
-    dir->device = device;
-    return dirState;
+    return 0;
 }
 
-int devoptab_dirreset(struct _reent *r, DIR_ITER *dirState) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    SCOPED_MUTEX(&dir->device->mutex);
+int Device::devoptab_dirreset(void* fd) {
+    auto dir = static_cast<Dir*>(fd);
+    if (!dir->dir) {
+        return -EINVAL;
+    }
 
-    smb2_rewinddir(dir->device->smb2, dir->dir);
-    return r->_errno = 0;
+    smb2_rewinddir(this->smb2, dir->dir);
+    return 0;
 }
 
-int devoptab_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struct stat *filestat) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    std::memset(filestat, 0, sizeof(*filestat));
-    SCOPED_MUTEX(&dir->device->mutex);
+int Device::devoptab_dirnext(void* fd, char *filename, struct stat *filestat) {
+    auto dir = static_cast<Dir*>(fd);
 
-    const auto entry = smb2_readdir(dir->device->smb2, dir->dir);
+    if (!dir->dir) {
+        return EINVAL;
+    }
+
+    const auto entry = smb2_readdir(this->smb2, dir->dir);
     if (!entry) {
-        return set_errno(r, ENOENT);
+        return -ENOENT;
     }
 
     std::strncpy(filename, entry->name, NAME_MAX);
     filename[NAME_MAX - 1] = '\0';
     fill_stat(filestat, &entry->st);
 
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_dirclose(struct _reent *r, DIR_ITER *dirState) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    SCOPED_MUTEX(&dir->device->mutex);
+int Device::devoptab_dirclose(void* fd) {
+    auto dir = static_cast<Dir*>(fd);
 
-    if (dir->dir) {
-        smb2_closedir(dir->device->smb2, dir->dir);
-    }
-
-    std::memset(dir, 0, sizeof(*dir));
-    return r->_errno = 0;
+    smb2_closedir(this->smb2, dir->dir);
+    return 0;
 }
 
-int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
-    auto device = static_cast<Device*>(r->deviceData);
-    std::memset(st, 0, sizeof(*st));
-    SCOPED_MUTEX(&device->mutex);
-
-    char path[PATH_MAX]{};
-    if (!fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
-    }
-
-    if (!mount_smb2(*device)) {
-        return set_errno(r, EIO);
-    }
-
+int Device::devoptab_lstat(const char *path, struct stat *st) {
     smb2_stat_64 smb2_st{};
-    const auto ret = smb2_stat(device->smb2, path, &smb2_st);
+    const auto ret = smb2_stat(this->smb2, path, &smb2_st);
     if (ret) {
-        log_write("[SMB2] smb2_lstat() failed: %s errno: %s\n", smb2_get_error(device->smb2), std::strerror(-ret));
-        return set_errno(r, -ret);
+        log_write("[SMB2] smb2_stat() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+        return ret;
     }
 
     fill_stat(st, &smb2_st);
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_ftruncate(struct _reent *r, void *fd, off_t len) {
+int Device::devoptab_ftruncate(void *fd, off_t len) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->device->mutex);
 
-    const auto ret = smb2_ftruncate(file->device->smb2, file->fd, len);
+    const auto ret = smb2_ftruncate(this->smb2, file->fd, len);
     if (ret) {
-        log_write("[SMB2] smb2_ftruncate() failed: %s errno: %s\n", smb2_get_error(file->device->smb2), std::strerror(-ret));
-        return set_errno(r, -ret);
+        log_write("[SMB2] smb2_ftruncate() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+        return ret;
     }
 
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_statvfs(struct _reent *r, const char *_path, struct statvfs *buf) {
-    auto device = static_cast<Device*>(r->deviceData);
-    SCOPED_MUTEX(&device->mutex);
-
-    char path[PATH_MAX]{};
-    if (!fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
-    }
-
-    if (!mount_smb2(*device)) {
-        return set_errno(r, EIO);
-    }
-
+int Device::devoptab_statvfs(const char *path, struct statvfs *buf) {
     struct smb2_statvfs smb2_st{};
-    const auto ret = smb2_statvfs(device->smb2, path, &smb2_st);
+    const auto ret = smb2_statvfs(this->smb2, path, &smb2_st);
     if (ret) {
-        log_write("[SMB2] smb2_statvfs() failed: %s errno: %s\n", smb2_get_error(device->smb2), std::strerror(-ret));
-        return set_errno(r, -ret);
+        log_write("[SMB2] smb2_statvfs() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+        return ret;
     }
 
     buf->f_bsize   = smb2_st.f_bsize;
@@ -454,198 +340,31 @@ int devoptab_statvfs(struct _reent *r, const char *_path, struct statvfs *buf) {
     buf->f_flag    = smb2_st.f_flag;
     buf->f_namemax = smb2_st.f_namemax;
 
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_fsync(struct _reent *r, void *fd) {
+int Device::devoptab_fsync(void *fd) {
     auto file = static_cast<File*>(fd);
-    SCOPED_MUTEX(&file->device->mutex);
 
-    const auto ret = smb2_fsync(file->device->smb2, file->fd);
+    const auto ret = smb2_fsync(this->smb2, file->fd);
     if (ret) {
-        log_write("[SMB2] smb2_fsync() failed: %s errno: %s\n", smb2_get_error(file->device->smb2), std::strerror(-ret));
-        return set_errno(r, -ret);
+        log_write("[SMB2] smb2_fsync() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+        return ret;
     }
 
-    return r->_errno = 0;
+    return 0;
 }
-
-constexpr devoptab_t DEVOPTAB = {
-    .structSize   = sizeof(File),
-    .open_r       = devoptab_open,
-    .close_r      = devoptab_close,
-    .write_r      = devoptab_write,
-    .read_r       = devoptab_read,
-    .seek_r       = devoptab_seek,
-    .fstat_r      = devoptab_fstat,
-    .stat_r       = devoptab_lstat,
-    .unlink_r     = devoptab_unlink,
-    .rename_r     = devoptab_rename,
-    .mkdir_r      = devoptab_mkdir,
-    .dirStateSize = sizeof(Dir),
-    .diropen_r    = devoptab_diropen,
-    .dirreset_r   = devoptab_dirreset,
-    .dirnext_r    = devoptab_dirnext,
-    .dirclose_r   = devoptab_dirclose,
-    .statvfs_r    = devoptab_statvfs,
-    .ftruncate_r  = devoptab_ftruncate,
-    .fsync_r      = devoptab_fsync,
-    .rmdir_r      = devoptab_rmdir,
-    .lstat_r      = devoptab_lstat,
-};
-
-struct Entry {
-    Device device{};
-    devoptab_t devoptab{};
-    fs::FsPath mount{};
-    char name[32]{};
-    s32 ref_count{};
-
-    ~Entry() {
-        if (device.smb2) {
-            if (device.mounted) {
-                smb2_disconnect_share(device.smb2);
-            }
-
-            if (device.url) {
-                smb2_destroy_url(device.url);
-            }
-
-            smb2_destroy_context(device.smb2);
-        }
-
-        RemoveDevice(mount);
-    }
-};
-
-Mutex g_mutex;
-std::array<std::unique_ptr<Entry>, common::MAX_ENTRIES> g_entries;
 
 } // namespace
 
 Result MountSmb2All() {
-    SCOPED_MUTEX(&g_mutex);
-
-    static const auto cb = [](const mTCHAR *Section, const mTCHAR *Key, const mTCHAR *Value, void *UserData) -> int {
-        auto e = static_cast<Smb2MountConfigs*>(UserData);
-        if (!Section || !Key || !Value) {
-            return 1;
-        }
-
-        // add new entry if use section changed.
-        if (e->empty() || std::strcmp(Section, e->back().name.c_str())) {
-            e->emplace_back(Section);
-        }
-
-        if (!std::strcmp(Key, "url")) {
-            e->back().url = Value;
-        } else if (!std::strcmp(Key, "name")) {
-            e->back().name = Value;
-        } else if (!std::strcmp(Key, "user")) {
-            e->back().user = Value;
-        } else if (!std::strcmp(Key, "pass")) {
-            e->back().pass = Value;
-        } else if (!std::strcmp(Key, "domain")) {
-            e->back().domain = Value;
-        } else if (!std::strcmp(Key, "workstation")) {
-            e->back().workstation = Value;
-        } else if (!std::strcmp(Key, "timeout")) {
-            e->back().timeout = ini_parse_getl(Value, e->back().timeout);
-        } else if (!std::strcmp(Key, "read_only")) {
-            e->back().read_only = ini_parse_getbool(Value, e->back().read_only);
-        } else if (!std::strcmp(Key, "no_stat_file")) {
-            e->back().no_stat_file = ini_parse_getbool(Value, e->back().no_stat_file);
-        } else if (!std::strcmp(Key, "no_stat_dir")) {
-            e->back().no_stat_dir = ini_parse_getbool(Value, e->back().no_stat_dir);
-        } else {
-            log_write("[SMB2] INI: Unknown key %s=%s\n", Key, Value);
-        }
-
-        return 1;
-    };
-
-    Smb2MountConfigs configs{};
-    ini_browse(cb, &configs, "/config/sphaira/smb.ini");
-    log_write("[SMB2] Found %zu mount configs\n", configs.size());
-
-    for (const auto& config : configs) {
-        // check if we already have the http mounted.
-        bool already_mounted = false;
-        for (const auto& entry : g_entries) {
-            if (entry && entry->mount == config.name) {
-                already_mounted = true;
-                break;
-            }
-        }
-
-        if (already_mounted) {
-            log_write("[SMB2] Already mounted %s, skipping\n", config.name.c_str());
-            continue;
-        }
-
-        // otherwise, find next free entry.
-        auto itr = std::ranges::find_if(g_entries, [](auto& e){
-            return !e;
-        });
-
-        if (itr == g_entries.end()) {
-            log_write("[SMB2] No free entries to mount %s\n", config.name.c_str());
-            break;
-        }
-
-        auto entry = std::make_unique<Entry>();
-
-        entry->devoptab = DEVOPTAB;
-        entry->devoptab.name = entry->name;
-        entry->devoptab.deviceData = &entry->device;
-        entry->device.config = config;
-        std::snprintf(entry->name, sizeof(entry->name), "[SMB] %s", config.name.c_str());
-        std::snprintf(entry->mount, sizeof(entry->mount), "[SMB] %s:/", config.name.c_str());
-        common::update_devoptab_for_read_only(&entry->devoptab, config.read_only);
-
-        R_UNLESS(AddDevice(&entry->devoptab) >= 0, 0x1);
-        log_write("[SMB2] DEVICE SUCCESS %s %s\n", entry->device.config.url.c_str(), entry->name);
-
-        entry->ref_count++;
-        *itr = std::move(entry);
-        log_write("[SMB2] Mounted %s at /%s\n", config.user.c_str(), config.name.c_str());
-    }
-
-    R_SUCCEED();
-}
-
-void UnmountSmb2All() {
-    SCOPED_MUTEX(&g_mutex);
-
-    for (auto& entry : g_entries) {
-        if (entry) {
-            entry.reset();
-        }
-    }
-}
-
-Result GetSmb2Mounts(location::StdioEntries& out) {
-    SCOPED_MUTEX(&g_mutex);
-    out.clear();
-
-    for (const auto& entry : g_entries) {
-        if (entry) {
-            u32 flags = 0;
-            if (entry->device.config.read_only) {
-                flags |= location::FsEntryFlag::FsEntryFlag_ReadOnly;
-            }
-            if (entry->device.config.no_stat_file) {
-                flags |= location::FsEntryFlag::FsEntryFlag_NoStatFile;
-            }
-            if (entry->device.config.no_stat_dir) {
-                flags |= location::FsEntryFlag::FsEntryFlag_NoStatDir;
-            }
-
-            out.emplace_back(entry->mount, entry->name, flags);
-        }
-    }
-
-    R_SUCCEED();
+    return common::MountNetworkDevice([](const common::MountConfig& cfg) {
+            return std::make_unique<Device>(cfg);
+        },
+        sizeof(File), sizeof(Dir),
+        "/config/sphaira/smb.ini",
+        "SMB"
+    );
 }
 
 } // namespace sphaira::devoptab

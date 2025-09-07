@@ -543,7 +543,14 @@ void App::Loop() {
 }
 
 auto App::Push(std::unique_ptr<ui::Widget>&& widget) -> void {
-    log_write("[Mui] pushing widget\n");
+    log_write("[APP] pushing widget\n");
+
+    // when freeing widges, this may cancel a transfer which causes it to push
+    // an error box, so check if we are quitting first before adding.
+    if (g_app->m_quit) {
+        log_write("[APP] is quitting, not pushing widget\n");
+        return;
+    }
 
     // check if the widget wants to pop before adding.
     // this can happen if something failed in the constructor and the widget wants to exit.
@@ -1598,6 +1605,11 @@ App::App(const char* argv0) {
         }
 
         {
+            SCOPED_TIMESTAMP("webdav init");
+            devoptab::MountWebdavAll();
+        }
+
+        {
             SCOPED_TIMESTAMP("ftp init");
             devoptab::MountFtpAll();
         }
@@ -2178,6 +2190,16 @@ App::~App() {
             curl::ExitSignal();
         }
 
+        // this has to be called before any cleanup to ensure the lifetime of
+        // nvg is still active as some widgets may need to free images.
+        // clear in reverse order as the widgets are a stack.
+        {
+            SCOPED_TIMESTAMP("widget exit");
+            while (!m_widgets.empty()) {
+                m_widgets.pop_back();
+            }
+        }
+
         utils::Async async_exit([this](){
             {
                 SCOPED_TIMESTAMP("usbdvd_exit");
@@ -2206,23 +2228,8 @@ App::~App() {
 
             // this has to come before curl exit as it uses curl global.
             {
-                SCOPED_TIMESTAMP("http exit");
-                devoptab::UnmountHttpAll();
-            }
-
-            {
-                SCOPED_TIMESTAMP("ftp exit");
-                devoptab::UnmountFtpAll();
-            }
-
-            {
-                SCOPED_TIMESTAMP("nfs exit");
-                devoptab::UnmountNfsAll();
-            }
-
-            {
-                SCOPED_TIMESTAMP("smb exit");
-                devoptab::UnmountSmb2All();
+                SCOPED_TIMESTAMP("devoptab exit");
+                devoptab::UmountAllNeworkDevices();
             }
 
             // do these last as they were signalled to exit.
@@ -2248,30 +2255,16 @@ App::~App() {
             }
         });
 
-        // destroy this first as it seems to prevent a crash when exiting the appstore
-        // when an image that was being drawn is displayed
-        // replicate: saves -> homebrew -> misc -> appstore -> sphaira -> changelog -> exit
-        // it will crash when deleting image 43.
-        {
-            SCOPED_TIMESTAMP("destroy frame buffer resources");
-            this->destroyFramebufferResources();
-        }
-
-        // this has to be called before any cleanup to ensure the lifetime of
-        // nvg is still active as some widgets may need to free images.
-        // clear in reverse order as the widgets are a stack (todo: just use a stack?)
-        {
-            SCOPED_TIMESTAMP("widget exit");
-            while (!m_widgets.empty()) {
-                m_widgets.pop_back();
-            }
-        }
-
         // do not async close theme as it frees textures.
         {
             SCOPED_TIMESTAMP("theme exit");
             ini_puts("config", "theme", m_theme.meta.ini_path, CONFIG_PATH);
             CloseTheme();
+        }
+
+        {
+            SCOPED_TIMESTAMP("destroy frame buffer resources");
+            this->destroyFramebufferResources();
         }
 
         {

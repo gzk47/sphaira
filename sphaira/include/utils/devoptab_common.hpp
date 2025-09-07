@@ -2,8 +2,13 @@
 
 #include "yati/source/file.hpp"
 #include "utils/lru.hpp"
+#include "location.hpp"
 #include <memory>
+#include <optional>
 #include <span>
+#include <functional>
+#include <unordered_map>
+#include <curl/curl.h>
 
 namespace sphaira::devoptab::common {
 
@@ -84,5 +89,128 @@ private:
 bool fix_path(const char* str, char* out, bool strip_leading_slash = false);
 
 void update_devoptab_for_read_only(devoptab_t* devoptab, bool read_only);
+
+struct PushPullThreadData {
+    PushPullThreadData(CURL* _curl);
+    virtual ~PushPullThreadData();
+    Result CreateAndStart();
+
+    void Cancel();
+    bool IsRunning();
+
+    size_t PullData(char* data, size_t total_size);
+    size_t PushData(const char* data, size_t total_size);
+
+    static size_t push_thread_callback(const char *ptr, size_t size, size_t nmemb, void *userdata);
+    static size_t pull_thread_callback(char *ptr, size_t size, size_t nmemb, void *userdata);
+
+private:
+    static void thread_func(void* arg);
+
+public:
+    CURL* const curl{};
+    std::vector<char> buffer{};
+    Mutex mutex{};
+    CondVar can_push{};
+    CondVar can_pull{};
+
+    long code{};
+    bool error{};
+    bool finished{};
+    bool started{};
+
+private:
+    Thread thread{};
+};
+
+struct MountConfig {
+    std::string name{};
+    std::string url{};
+    std::string user{};
+    std::string pass{};
+    std::optional<long> port{};
+    int timeout{3000}; // 3 seconds.
+    bool read_only{};
+    bool no_stat_file{true};
+    bool no_stat_dir{true};
+
+    std::unordered_map<std::string, std::string> extra{};
+};
+
+struct PullThreadData final : PushPullThreadData {
+    using PushPullThreadData::PushPullThreadData;
+    ~PullThreadData();
+};
+
+
+struct PushThreadData final : PushPullThreadData {
+    using PushPullThreadData::PushPullThreadData;
+    ~PushThreadData();
+};
+
+struct MountDevice {
+    MountDevice(const MountConfig& _config) : config{_config} {}
+    virtual ~MountDevice() = default;
+
+    virtual bool fix_path(const char* str, char* out, bool strip_leading_slash = false) {
+        return common::fix_path(str, out, strip_leading_slash);
+    }
+
+    virtual bool Mount() = 0;
+    virtual int devoptab_open(void *fileStruct, const char *path, int flags, int mode) { return -EIO; }
+    virtual int devoptab_close(void *fd) { return -EIO; }
+    virtual ssize_t devoptab_read(void *fd, char *ptr, size_t len) { return -EIO; }
+    virtual ssize_t devoptab_write(void *fd, const char *ptr, size_t len) { return -EIO; }
+    virtual off_t devoptab_seek(void *fd, off_t pos, int dir) { return 0; }
+    virtual int devoptab_fstat(void *fd, struct stat *st) { return -EIO; }
+    virtual int devoptab_unlink(const char *path) { return -EIO; }
+    virtual int devoptab_rename(const char *oldName, const char *newName) { return -EIO; }
+    virtual int devoptab_mkdir(const char *path, int mode) { return -EIO; }
+    virtual int devoptab_rmdir(const char *path) { return -EIO; }
+    virtual int devoptab_diropen(void* fd, const char *path) { return -EIO; }
+    virtual int devoptab_dirreset(void* fd) { return -EIO; }
+    virtual int devoptab_dirnext(void* fd, char *filename, struct stat *filestat) { return -EIO; }
+    virtual int devoptab_dirclose(void* fd) { return -EIO; }
+    virtual int devoptab_lstat(const char *path, struct stat *st) { return -EIO; }
+    virtual int devoptab_ftruncate(void *fd, off_t len) { return -EIO; }
+    virtual int devoptab_statvfs(const char *_path, struct statvfs *buf) { return -EIO; }
+    virtual int devoptab_fsync(void *fd) { return -EIO; }
+    virtual int devoptab_utimes(const char *_path, const struct timeval times[2]) { return -EIO; }
+
+    const MountConfig config;
+};
+
+struct MountCurlDevice : MountDevice {
+    using MountDevice::MountDevice;
+    // MountCurlDevice(const MountConfig& _config);
+    virtual ~MountCurlDevice();
+
+    PushThreadData* CreatePushData(CURL* curl, const std::string& url, size_t offset);
+    PullThreadData* CreatePullData(CURL* curl, const std::string& url, bool append = false);
+
+    virtual bool Mount();
+    virtual void curl_set_common_options(CURL* curl,  const std::string& url);
+    static size_t write_memory_callback(char *ptr, size_t size, size_t nmemb, void *userdata);
+    static size_t write_data_callback(char *ptr, size_t size, size_t nmemb, void *userdata);
+    static size_t read_data_callback(char *ptr, size_t size, size_t nmemb, void *userdata);
+    static std::string html_decode(const std::string_view& str);
+    static std::string url_decode(const std::string& str);
+    std::string build_url(const std::string& path, bool is_dir);
+
+protected:
+    CURL* curl{};
+    CURL* transfer_curl{};
+
+private:
+    // path extracted from the url.
+    std::string m_url_path{};
+    CURLU* curlu{};
+    CURLSH* m_curl_share{};
+    RwLock m_rwlocks[CURL_LOCK_DATA_LAST]{};
+    bool m_mounted{};
+};
+
+using CreateDeviceCallback = std::function<std::unique_ptr<MountDevice>(const MountConfig& config)>;
+Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* config_path, const char* name);
 
 } // namespace sphaira::devoptab::common

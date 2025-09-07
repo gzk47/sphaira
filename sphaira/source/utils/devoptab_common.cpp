@@ -1,11 +1,554 @@
 #include "utils/devoptab_common.hpp"
+#include "utils/thread.hpp"
+
 #include "defines.hpp"
 #include "log.hpp"
+#include "download.hpp"
 
 #include <cstring>
 #include <algorithm>
+#include <fcntl.h>
+#include <minIni.h>
+#include <curl/curl.h>
 
 namespace sphaira::devoptab::common {
+namespace {
+
+RwLock g_rwlock{};
+
+// curl_url_strerror doesn't exist in the switch version of libcurl as its so old.
+// todo: update libcurl and send patches to dkp.
+const char* curl_url_strerror_wrap(CURLUcode code) {
+    switch (code) {
+        case CURLUE_OK: return "No error";
+        case CURLUE_BAD_HANDLE: return "Invalid handle";
+        case CURLUE_BAD_PARTPOINTER: return "Invalid pointer to a part of the URL";
+        case CURLUE_MALFORMED_INPUT: return "Malformed input";
+        case CURLUE_BAD_PORT_NUMBER: return "Invalid port number";
+        case CURLUE_UNSUPPORTED_SCHEME: return "Unsupported scheme";
+        case CURLUE_URLDECODE: return "Failed to decode URL component";
+        case CURLUE_OUT_OF_MEMORY: return "Out of memory";
+        case CURLUE_USER_NOT_ALLOWED: return "User not allowed in URL";
+        case CURLUE_UNKNOWN_PART: return "Unknown URL part";
+        case CURLUE_NO_SCHEME: return "No scheme found in URL";
+        case CURLUE_NO_USER: return "No user found in URL";
+        case CURLUE_NO_PASSWORD: return "No password found in URL";
+        case CURLUE_NO_OPTIONS: return "No options found in URL";
+        case CURLUE_NO_HOST: return "No host found in URL";
+        case CURLUE_NO_PORT: return "No port number found in URL";
+        case CURLUE_NO_QUERY: return "No query found in URL";
+        case CURLUE_NO_FRAGMENT: return "No fragment found in URL";
+        default: return "Unknown error code";
+    }
+}
+
+struct ScopedRwLock {
+    ScopedRwLock(RwLock* _lock, bool _write) : lock{_lock}, write{_write} {
+        if (write) {
+            rwlockWriteLock(lock);
+        } else {
+            rwlockReadLock(lock);
+        }
+    }
+
+    ~ScopedRwLock() {
+        if (write) {
+            rwlockWriteUnlock(lock);
+        } else {
+            rwlockReadUnlock(lock);
+        }
+    }
+
+private:
+    RwLock* const lock;
+    bool const write;
+};
+
+#define SCOPED_RWLOCK(_m, _write) ScopedRwLock ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){_m, _write}
+
+struct Device {
+    std::unique_ptr<MountDevice> mount_device;
+    size_t file_size;
+    size_t dir_size;
+
+    MountConfig config{};
+    Mutex mutex{};
+};
+
+struct File {
+    Device* device;
+    void* fd;
+};
+
+struct Dir {
+    Device* device;
+    void* fd;
+};
+
+int set_errno(struct _reent *r, int err) {
+    r->_errno = err;
+    return -1;
+}
+
+int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int flags, int mode) {
+    auto device = static_cast<Device*>(r->deviceData);
+    auto file = static_cast<File*>(fileStruct);
+    std::memset(file, 0, sizeof(*file));
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&device->mutex);
+
+    if (device->config.read_only && (flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC | O_APPEND))) {
+        return set_errno(r, EROFS);
+    }
+
+    char path[PATH_MAX]{};
+    if (!device->mount_device->fix_path(_path, path)) {
+        return set_errno(r, ENOENT);
+    }
+
+    if (!device->mount_device->Mount()) {
+        return set_errno(r, EIO);
+    }
+
+    file->fd = calloc(1, device->file_size);
+    if (!file->fd) {
+        return set_errno(r, ENOMEM);
+    }
+
+    const auto ret = device->mount_device->devoptab_open(file->fd, path, flags, mode);
+    if (ret) {
+        free(file->fd);
+        file->fd = nullptr;
+        return set_errno(r, -ret);
+    }
+
+    file->device = device;
+    return r->_errno = 0;
+}
+
+int devoptab_close(struct _reent *r, void *fd) {
+    auto file = static_cast<File*>(fd);
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&file->device->mutex);
+
+    if (file->fd) {
+        file->device->mount_device->devoptab_close(file->fd);
+        free(file->fd);
+    }
+
+    std::memset(file, 0, sizeof(*file));
+    return r->_errno = 0;
+}
+
+ssize_t devoptab_read(struct _reent *r, void *fd, char *ptr, size_t len) {
+    auto file = static_cast<File*>(fd);
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&file->device->mutex);
+
+    const auto ret = file->device->mount_device->devoptab_read(file->fd, ptr, len);
+    if (ret < 0) {
+        return set_errno(r, -ret);
+    }
+
+    return ret;
+}
+
+ssize_t devoptab_write(struct _reent *r, void *fd, const char *ptr, size_t len) {
+    auto file = static_cast<File*>(fd);
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&file->device->mutex);
+
+    const auto ret = file->device->mount_device->devoptab_write(file->fd, ptr, len);
+    if (ret < 0) {
+        return set_errno(r, -ret);
+    }
+
+    return ret;
+}
+
+off_t devoptab_seek(struct _reent *r, void *fd, off_t pos, int dir) {
+    auto file = static_cast<File*>(fd);
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&file->device->mutex);
+
+    const auto off = file->device->mount_device->devoptab_seek(file->fd, pos, dir);
+    r->_errno = 0;
+    return off;
+}
+
+int devoptab_fstat(struct _reent *r, void *fd, struct stat *st) {
+    auto file = static_cast<File*>(fd);
+    std::memset(st, 0, sizeof(*st));
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&file->device->mutex);
+
+    const auto ret = file->device->mount_device->devoptab_fstat(file->fd, st);
+    if (ret) {
+        return set_errno(r, -ret);
+    }
+
+    return r->_errno = 0;
+}
+
+int devoptab_unlink(struct _reent *r, const char *_path) {
+    auto device = static_cast<Device*>(r->deviceData);
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&device->mutex);
+
+    if (device->config.read_only) {
+        return set_errno(r, EROFS);
+    }
+
+    char path[PATH_MAX]{};
+    if (!device->mount_device->fix_path(_path, path)) {
+        return set_errno(r, ENOENT);
+    }
+
+    if (!device->mount_device->Mount()) {
+        return set_errno(r, EIO);
+    }
+
+    const auto ret = device->mount_device->devoptab_unlink(path);
+    if (ret) {
+        return set_errno(r, -ret);
+    }
+
+    return r->_errno = 0;
+}
+
+int devoptab_rename(struct _reent *r, const char *_oldName, const char *_newName) {
+    auto device = static_cast<Device*>(r->deviceData);
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&device->mutex);
+
+    if (device->config.read_only) {
+        return set_errno(r, EROFS);
+    }
+
+    char oldName[PATH_MAX]{};
+    if (!device->mount_device->fix_path(_oldName, oldName)) {
+        return set_errno(r, ENOENT);
+    }
+
+    char newName[PATH_MAX]{};
+    if (!device->mount_device->fix_path(_newName, newName)) {
+        return set_errno(r, ENOENT);
+    }
+
+    if (!device->mount_device->Mount()) {
+        return set_errno(r, EIO);
+    }
+
+    const auto ret = device->mount_device->devoptab_rename(oldName, newName);
+    if (ret) {
+        return set_errno(r, -ret);
+    }
+
+    return r->_errno = 0;
+}
+
+int devoptab_mkdir(struct _reent *r, const char *_path, int mode) {
+    auto device = static_cast<Device*>(r->deviceData);
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&device->mutex);
+
+    if (device->config.read_only) {
+        return set_errno(r, EROFS);
+    }
+
+    char path[PATH_MAX]{};
+    if (!device->mount_device->fix_path(_path, path)) {
+        return set_errno(r, ENOENT);
+    }
+
+    if (!device->mount_device->Mount()) {
+        return set_errno(r, EIO);
+    }
+
+    const auto ret = device->mount_device->devoptab_mkdir(path, mode);
+    if (ret) {
+        return set_errno(r, -ret);
+    }
+
+    return r->_errno = 0;
+}
+
+int devoptab_rmdir(struct _reent *r, const char *_path) {
+    auto device = static_cast<Device*>(r->deviceData);
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&device->mutex);
+
+    if (device->config.read_only) {
+        return set_errno(r, EROFS);
+    }
+
+    char path[PATH_MAX]{};
+    if (!device->mount_device->fix_path(_path, path)) {
+        return set_errno(r, ENOENT);
+    }
+
+    if (!device->mount_device->Mount()) {
+        return set_errno(r, EIO);
+    }
+
+    const auto ret = device->mount_device->devoptab_rmdir(path);
+    if (ret) {
+        return set_errno(r, -ret);
+    }
+
+    return r->_errno = 0;
+}
+
+DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_path) {
+    auto device = static_cast<Device*>(r->deviceData);
+    auto dir = static_cast<Dir*>(dirState->dirStruct);
+    std::memset(dir, 0, sizeof(*dir));
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&device->mutex);
+
+    log_write("[DEVOPTAB] diropen %s\n", _path);
+
+    if (!device->mount_device) {
+        log_write("[DEVOPTAB] diropen no mount device\n");
+        set_errno(r, ENOENT);
+        return nullptr;
+    }
+
+    char path[PATH_MAX]{};
+    if (!device->mount_device->fix_path(_path, path)) {
+        set_errno(r, ENOENT);
+        return nullptr;
+    }
+
+    log_write("[DEVOPTAB] diropen fixed path %s\n", path);
+
+    if (!device->mount_device->Mount()) {
+        set_errno(r, EIO);
+        return nullptr;
+    }
+
+    log_write("[DEVOPTAB] diropen mounted\n");
+
+    dir->fd = calloc(1, device->dir_size);
+    if (!dir->fd) {
+        set_errno(r, ENOMEM);
+        return nullptr;
+    }
+
+    log_write("[DEVOPTAB] diropen allocated dir\n");
+
+    const auto ret = device->mount_device->devoptab_diropen(dir->fd, path);
+    if (ret) {
+        free(dir->fd);
+        dir->fd = nullptr;
+        set_errno(r, -ret);
+        return nullptr;
+    }
+
+    log_write("[DEVOPTAB] diropen opened dir\n");
+
+    dir->device = device;
+    return dirState;
+}
+
+int devoptab_dirreset(struct _reent *r, DIR_ITER *dirState) {
+    auto dir = static_cast<Dir*>(dirState->dirStruct);
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&dir->device->mutex);
+
+    const auto ret = dir->device->mount_device->devoptab_dirreset(dir->fd);
+    if (ret) {
+        return set_errno(r, -ret);
+    }
+
+    return r->_errno = 0;
+}
+
+int devoptab_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struct stat *filestat) {
+    auto dir = static_cast<Dir*>(dirState->dirStruct);
+    std::memset(filestat, 0, sizeof(*filestat));
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&dir->device->mutex);
+
+    const auto ret = dir->device->mount_device->devoptab_dirnext(dir->fd, filename, filestat);
+    if (ret) {
+        return set_errno(r, -ret);
+    }
+
+    return r->_errno = 0;
+}
+
+int devoptab_dirclose(struct _reent *r, DIR_ITER *dirState) {
+    auto dir = static_cast<Dir*>(dirState->dirStruct);
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&dir->device->mutex);
+
+    if (dir->fd) {
+        dir->device->mount_device->devoptab_dirclose(dir->fd);
+        free(dir->fd);
+    }
+
+    std::memset(dir, 0, sizeof(*dir));
+    return r->_errno = 0;
+}
+
+int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
+    auto device = static_cast<Device*>(r->deviceData);
+    std::memset(st, 0, sizeof(*st));
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&device->mutex);
+
+    char path[PATH_MAX]{};
+    if (!device->mount_device->fix_path(_path, path)) {
+        return set_errno(r, ENOENT);
+    }
+
+    if (!device->mount_device->Mount()) {
+        return set_errno(r, EIO);
+    }
+
+    const auto ret = device->mount_device->devoptab_lstat(path, st);
+    if (ret) {
+        return set_errno(r, -ret);
+    }
+
+    return r->_errno = 0;
+}
+
+int devoptab_ftruncate(struct _reent *r, void *fd, off_t len) {
+    auto file = static_cast<File*>(fd);
+    SCOPED_MUTEX(&file->device->mutex);
+
+    if (!file || !file->fd) {
+        return set_errno(r, EBADF);
+    }
+
+    if (file->device->config.read_only) {
+        return set_errno(r, EROFS);
+    }
+
+    const auto ret = file->device->mount_device->devoptab_ftruncate(file->fd, len);
+    if (ret) {
+        return set_errno(r, -ret);
+    }
+
+    return r->_errno = 0;
+}
+
+int devoptab_statvfs(struct _reent *r, const char *_path, struct statvfs *buf) {
+    auto device = static_cast<Device*>(r->deviceData);
+    std::memset(buf, 0, sizeof(*buf));
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&device->mutex);
+
+    char path[PATH_MAX]{};
+    if (!device->mount_device->fix_path(_path, path)) {
+        return set_errno(r, ENOENT);
+    }
+
+    if (!device->mount_device->Mount()) {
+        return set_errno(r, EIO);
+    }
+
+    const auto ret = device->mount_device->devoptab_statvfs(path, buf);
+    if (ret) {
+        return set_errno(r, -ret);
+    }
+
+    return r->_errno = 0;
+}
+
+int devoptab_fsync(struct _reent *r, void *fd) {
+    auto file = static_cast<File*>(fd);
+    SCOPED_MUTEX(&file->device->mutex);
+
+    if (!file || !file->fd) {
+        return set_errno(r, EBADF);
+    }
+
+    if (file->device->config.read_only) {
+        return set_errno(r, EROFS);
+    }
+
+    const auto ret = file->device->mount_device->devoptab_fsync(file->fd);
+    if (ret) {
+        return set_errno(r, -ret);
+    }
+
+    return r->_errno = 0;
+}
+
+int devoptab_utimes(struct _reent *r, const char *_path, const struct timeval times[2]) {
+    auto device = static_cast<Device*>(r->deviceData);
+    SCOPED_RWLOCK(&g_rwlock, false);
+    SCOPED_MUTEX(&device->mutex);
+
+    if (!times) {
+        log_write("[NFS] devoptab_utimes() times is null\n");
+        return set_errno(r, EINVAL);
+    }
+
+    if (device->config.read_only) {
+        return set_errno(r, EROFS);
+    }
+
+    char path[PATH_MAX]{};
+    if (!device->mount_device->fix_path(_path, path)) {
+        return set_errno(r, ENOENT);
+    }
+
+    if (!device->mount_device->Mount()) {
+        return set_errno(r, EIO);
+    }
+
+    const auto ret = device->mount_device->devoptab_utimes(path, times);
+    if (ret) {
+        return set_errno(r, -ret);
+    }
+
+    return r->_errno = 0;
+}
+
+constexpr devoptab_t DEVOPTAB = {
+    .structSize   = sizeof(File),
+    .open_r       = devoptab_open,
+    .close_r      = devoptab_close,
+    .write_r      = devoptab_write,
+    .read_r       = devoptab_read,
+    .seek_r       = devoptab_seek,
+    .fstat_r      = devoptab_fstat,
+    .stat_r       = devoptab_lstat,
+    .unlink_r     = devoptab_unlink,
+    .rename_r     = devoptab_rename,
+    .mkdir_r      = devoptab_mkdir,
+    .dirStateSize = sizeof(Dir),
+    .diropen_r    = devoptab_diropen,
+    .dirreset_r   = devoptab_dirreset,
+    .dirnext_r    = devoptab_dirnext,
+    .dirclose_r   = devoptab_dirclose,
+    .statvfs_r    = devoptab_statvfs,
+    .ftruncate_r  = devoptab_ftruncate,
+    .fsync_r      = devoptab_fsync,
+    .rmdir_r      = devoptab_rmdir,
+    .lstat_r      = devoptab_lstat,
+    .utimes_r     = devoptab_utimes,
+};
+
+struct Entry {
+    Device device{};
+    devoptab_t devoptab{};
+    fs::FsPath mount{};
+    char name[32]{};
+    s32 ref_count{};
+
+    ~Entry() {
+        RemoveDevice(mount);
+    }
+};
+
+std::array<std::unique_ptr<Entry>, 16> g_entries;
+
+} // namespace
 
 // todo: change above function to handle bytes read instead.
 Result BufferedData::Read(void *_buffer, s64 file_off, s64 read_size, u64* bytes_read) {
@@ -157,8 +700,6 @@ Result LruBufferedData::Read(void *_buffer, s64 file_off, s64 read_size, u64* by
 }
 
 bool fix_path(const char* str, char* out, bool strip_leading_slash) {
-    // log_write("[SAVE] got path: %s\n", str);
-
     str = std::strrchr(str, ':');
     if (!str) {
         return false;
@@ -199,25 +740,663 @@ bool fix_path(const char* str, char* out, bool strip_leading_slash) {
     // null the end.
     out[len] = '\0';
 
-    // log_write("[SAVE] end path: %s\n", out);
-
     return true;
 }
 
 void update_devoptab_for_read_only(devoptab_t* devoptab, bool read_only) {
     // remove write functions if read_only is set.
     if (read_only) {
-        devoptab->write_r     = nullptr;
-        devoptab->link_r      = nullptr;
-        devoptab->unlink_r    = nullptr;
-        devoptab->rename_r    = nullptr;
-        devoptab->mkdir_r     = nullptr;
+        devoptab->write_r = nullptr;
+        devoptab->link_r = nullptr;
+        devoptab->unlink_r = nullptr;
+        devoptab->rename_r = nullptr;
+        devoptab->mkdir_r = nullptr;
         devoptab->ftruncate_r = nullptr;
-        devoptab->fsync_r     = nullptr;
-        devoptab->rmdir_r     = nullptr;
-        devoptab->utimes_r    = nullptr;
-        devoptab->symlink_r   = nullptr;
+        devoptab->fsync_r = nullptr;
+        devoptab->rmdir_r = nullptr;
+        devoptab->utimes_r = nullptr;
+        devoptab->symlink_r = nullptr;
     }
 }
 
+Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* config_path, const char* name) {
+    {
+        static Mutex rw_lock_init_mutex{};
+        SCOPED_MUTEX(&rw_lock_init_mutex);
+
+        static bool rwlock_init{};
+        if (!rwlock_init) {
+            rwlockInit(&g_rwlock);
+            rwlock_init = true;
+        }
+    }
+
+    SCOPED_RWLOCK(&g_rwlock, true);
+
+    using MountConfigs = std::vector<MountConfig>;
+
+    static const auto cb = [](const mTCHAR *Section, const mTCHAR *Key, const mTCHAR *Value, void *UserData) -> int {
+        auto e = static_cast<MountConfigs*>(UserData);
+        if (!Section || !Key || !Value) {
+            return 1;
+        }
+
+        // add new entry if use section changed.
+        if (e->empty() || std::strcmp(Section, e->back().name.c_str())) {
+            e->emplace_back(Section);
+        }
+
+        if (!std::strcmp(Key, "url")) {
+            e->back().url = Value;
+        } else if (!std::strcmp(Key, "user")) {
+            e->back().user = Value;
+        } else if (!std::strcmp(Key, "pass")) {
+            e->back().pass = Value;
+        } else if (!std::strcmp(Key, "port")) {
+            const auto port = ini_parse_getl(Value, -1);
+            if (port < 0 || port > 65535) {
+                log_write("[DEVOPTAB] INI: invalid port %s\n", Value);
+            } else {
+                e->back().port = port;
+            }
+        } else if (!std::strcmp(Key, "timeout")) {
+            e->back().timeout = ini_parse_getl(Value, e->back().timeout);
+        } else if (!std::strcmp(Key, "read_only")) {
+            e->back().read_only = ini_parse_getbool(Value, e->back().read_only);
+        } else if (!std::strcmp(Key, "no_stat_file")) {
+            e->back().no_stat_file = ini_parse_getbool(Value, e->back().no_stat_file);
+        } else if (!std::strcmp(Key, "no_stat_dir")) {
+            e->back().no_stat_dir = ini_parse_getbool(Value, e->back().no_stat_dir);
+        } else {
+            log_write("[DEVOPTAB] INI: extra key %s=%s\n", Key, Value);
+            e->back().extra.emplace(Key, Value);
+        }
+
+        return 1;
+    };
+
+    MountConfigs configs;
+    ini_browse(cb, &configs, config_path);
+    log_write("[DEVOPTAB] Found %zu mount configs\n", configs.size());
+
+    for (const auto& config : configs) {
+        // check if we already have the http mounted.
+        bool already_mounted = false;
+        for (const auto& entry : g_entries) {
+            if (entry && entry->mount == config.name) {
+                already_mounted = true;
+                break;
+            }
+        }
+
+        if (already_mounted) {
+            log_write("[DEVOPTAB] Already mounted %s, skipping\n", config.name.c_str());
+            continue;
+        }
+
+        // otherwise, find next free entry.
+        auto itr = std::ranges::find_if(g_entries, [](auto& e){
+            return !e;
+        });
+
+        if (itr == g_entries.end()) {
+            log_write("[DEVOPTAB] No free entries to mount %s\n", config.name.c_str());
+            break;
+        }
+
+        auto entry = std::make_unique<Entry>();
+        entry->device.mount_device = create_device(config);
+        entry->device.file_size = file_size;
+        entry->device.dir_size = dir_size;
+        entry->device.config = config;
+
+        if (!entry->device.mount_device) {
+            log_write("[DEVOPTAB] Failed to create device for %s\n", config.url.c_str());
+            continue;
+        }
+
+        entry->devoptab = DEVOPTAB;
+        entry->devoptab.name = entry->name;
+        entry->devoptab.deviceData = &entry->device;
+        std::snprintf(entry->name, sizeof(entry->name), "[%s] %s", name, config.name.c_str());
+        std::snprintf(entry->mount, sizeof(entry->mount), "[%s] %s:/", name, config.name.c_str());
+        common::update_devoptab_for_read_only(&entry->devoptab, config.read_only);
+
+        R_UNLESS(AddDevice(&entry->devoptab) >= 0, 0x1);
+        log_write("[DEVOPTAB] DEVICE SUCCESS %s %s\n", entry->device.config.url.c_str(), entry->name);
+
+        entry->ref_count++;
+        *itr = std::move(entry);
+        log_write("[DEVOPTAB] Mounted %s at /%s\n", config.url.c_str(), config.name.c_str());
+    }
+
+    R_SUCCEED();
+}
+
+PushPullThreadData::PushPullThreadData(CURL* _curl) : curl{_curl} {
+    mutexInit(&mutex);
+    condvarInit(&can_push);
+    condvarInit(&can_pull);
+}
+
+PushPullThreadData::~PushPullThreadData() {
+    Cancel();
+    threadWaitForExit(&thread);
+    threadClose(&thread);
+}
+
+Result PushPullThreadData::CreateAndStart() {
+    if (started) {
+        R_SUCCEED();
+    }
+
+    R_TRY(utils::CreateThread(&thread, thread_func, this));
+    R_TRY(threadStart(&thread));
+
+    started = true;
+    R_SUCCEED();
+}
+
+void PushPullThreadData::Cancel() {
+    SCOPED_MUTEX(&mutex);
+    finished = true;
+    condvarWakeOne(&can_pull);
+    condvarWakeOne(&can_push);
+}
+
+bool PushPullThreadData::IsRunning() {
+    SCOPED_MUTEX(&mutex);
+    return !finished && !error;
+}
+
+size_t PushPullThreadData::PullData(char* data, size_t total_size) {
+    SCOPED_MUTEX(&mutex);
+    ON_SCOPE_EXIT(condvarWakeOne(&can_push));
+
+    size_t bytes_read = 0;
+    while (bytes_read < total_size && !error) {
+        if (buffer.empty()) {
+            if (finished) {
+                break;
+            }
+
+            condvarWakeOne(&can_push);
+            condvarWait(&can_pull, &mutex);
+            continue;
+        }
+
+        const auto rsize = std::min(total_size - bytes_read, buffer.size());
+        std::memcpy(data + bytes_read, buffer.data(), rsize);
+        buffer.erase(buffer.begin(), buffer.begin() + rsize);
+        bytes_read += rsize;
+    }
+
+    return bytes_read;
+}
+
+size_t PushPullThreadData::PushData(const char* data, size_t total_size) {
+    SCOPED_MUTEX(&mutex);
+    ON_SCOPE_EXIT(condvarWakeOne(&can_pull));
+
+    size_t bytes_written = 0;
+    while (bytes_written < total_size && !error && !finished) {
+        const size_t space_left = (1024 * 64) - buffer.size(); // 64K max buffer
+        if (space_left == 0) {
+            condvarWakeOne(&can_pull);
+            condvarWait(&can_push, &mutex);
+            continue;
+        }
+
+        const auto wsize = std::min(total_size - bytes_written, space_left);
+        buffer.insert(buffer.end(), data + bytes_written, data + bytes_written + wsize);
+        bytes_written += wsize;
+    }
+
+    return bytes_written;
+}
+
+size_t PushPullThreadData::push_thread_callback(const char *ptr, size_t size, size_t nmemb, void *userdata) {
+    auto* data = static_cast<PushPullThreadData*>(userdata);
+    return data->PushData(ptr, size * nmemb);
+}
+
+size_t PushPullThreadData::pull_thread_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
+    auto* data = static_cast<PushPullThreadData*>(userdata);
+    return data->PullData(ptr, size * nmemb);
+}
+
+void PushPullThreadData::thread_func(void* arg) {
+    log_write("[PUSH:PULL] Read thread started\n");
+    auto data = static_cast<PushPullThreadData*>(arg);
+    const auto res = curl_easy_perform(data->curl);
+
+    // when finished, lock mutex and signal for anything waiting.
+    SCOPED_MUTEX(&data->mutex);
+    condvarWakeOne(&data->can_push);
+    condvarWakeOne(&data->can_pull);
+
+    log_write("[PUSH:PULL] curl_easy_perform() finished for read thread: %s\n", curl_easy_strerror(res));
+
+    data->finished = true;
+    data->error = res != CURLE_OK;
+    curl_easy_getinfo(data->curl, CURLINFO_RESPONSE_CODE, &data->code);
+
+    log_write("[PUSH:PULL] Read thread finished, code: %ld, error: %d\n", data->code, data->error);
+}
+
+PullThreadData::~PullThreadData() {
+    if (started) {
+        SCOPED_MUTEX(&mutex);
+
+        while (!finished && !error && !buffer.empty()) {
+            condvarWakeOne(&can_pull);
+            condvarWaitTimeout(&can_push, &mutex, 5e+9);
+        }
+    }
+}
+
+PushThreadData::~PushThreadData() {
+
+}
+
+MountCurlDevice::~MountCurlDevice() {
+    log_write("[CURL] Cleaning up mount device\n");
+    if (curlu) {
+        curl_url_cleanup(curlu);
+    }
+
+    if (curl) {
+        curl_easy_cleanup(curl);
+    }
+
+    if (transfer_curl) {
+        curl_easy_cleanup(transfer_curl);
+    }
+
+    if (m_curl_share) {
+        curl_share_cleanup(m_curl_share);
+    }
+    log_write("[CURL] Cleaned up mount device\n");
+}
+
+bool MountCurlDevice::Mount() {
+    if (m_mounted) {
+        return true;
+    }
+
+    if (!curl) {
+        curl = curl_easy_init();
+        if (!curl) {
+            log_write("[CURL] curl_easy_init() failed\n");
+            return false;
+        }
+    }
+
+    if (!transfer_curl) {
+        transfer_curl = curl_easy_init();
+        if (!transfer_curl) {
+            log_write("[CURL] transfer curl_easy_init() failed\n");
+            return false;
+        }
+    }
+
+    // setup url, only the path is updated at runtime.
+    if (!curlu) {
+        curlu = curl_url();
+        if (!curlu) {
+            log_write("[CURL] curl_url() failed\n");
+            return false;
+        }
+
+        auto url = config.url;
+        if (url.starts_with("webdav://") || url.starts_with("webdavs://")) {
+            log_write("[CURL] updating host: %s\n", url.c_str());
+            url.replace(0, std::strlen("webdav"), "http");
+            log_write("[CURL] updated host: %s\n", url.c_str());
+        }
+
+        const auto flags = CURLU_DEFAULT_SCHEME|CURLU_URLENCODE;
+        CURLUcode rc = curl_url_set(curlu, CURLUPART_URL, url.c_str(), flags);
+        if (rc != CURLUE_OK) {
+            log_write("[CURL] curl_url_set() failed: %s\n", curl_url_strerror_wrap(rc));
+            return false;
+        }
+
+        if (config.port.has_value()) {
+            rc = curl_url_set(curlu, CURLUPART_PORT, std::to_string(config.port.value()).c_str(), flags);
+            if (rc != CURLUE_OK) {
+                log_write("[CURL] curl_url_set() port failed: %s\n", curl_url_strerror_wrap(rc));
+            }
+        }
+
+        if (!config.user.empty()) {
+            rc = curl_url_set(curlu, CURLUPART_USER, config.user.c_str(), flags);
+            if (rc != CURLUE_OK) {
+                log_write("[CURL] curl_url_set() user failed: %s\n", curl_url_strerror_wrap(rc));
+            }
+        }
+
+        if (!config.pass.empty()) {
+            rc = curl_url_set(curlu, CURLUPART_PASSWORD, config.pass.c_str(), flags);
+            if (rc != CURLUE_OK) {
+                log_write("[CURL] curl_url_set() pass failed: %s\n", curl_url_strerror_wrap(rc));
+            }
+        }
+
+        // try and parse the path from the url, if any.
+        // eg, https://example.com/some/path/here
+        char* path{};
+        rc = curl_url_get(curlu, CURLUPART_PATH, &path, 0);
+        if (rc == CURLUE_OK && path) {
+            log_write("[CURL] base path: %s\n", path);
+            m_url_path = path;
+            curl_free(path);
+        }
+    }
+
+    // create share handle, used to share info between curl and transfer_curl.
+    if (!m_curl_share) {
+        m_curl_share = curl_share_init();
+        if (!m_curl_share) {
+            log_write("[CURL] curl_share_init() failed\n");
+            return false;
+        }
+
+        // todo: use a mutex instead.
+        for (auto& e : m_rwlocks) {
+            rwlockInit(&e);
+        }
+
+        static const auto lock_func = [](CURL* handle, curl_lock_data data, curl_lock_access access, void* userptr) {
+            auto rwlocks = static_cast<RwLock*>(userptr);
+            rwlockWriteLock(&rwlocks[data]);
+
+            #if 0
+            if (access == CURL_LOCK_ACCESS_SHARED) {
+                rwlockReadLock(&rwlocks[data]);
+            } else {
+                rwlockWriteLock(&rwlocks[data]);
+            }
+            #endif
+        };
+
+        static const auto unlock_func = [](CURL* handle, curl_lock_data data, void* userptr) {
+            auto rwlocks = static_cast<RwLock*>(userptr);
+            rwlockWriteUnlock(&rwlocks[data]);
+        };
+
+        if (m_curl_share) {
+            curl_share_setopt(m_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_COOKIE);
+            curl_share_setopt(m_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
+            curl_share_setopt(m_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
+            curl_share_setopt(m_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
+            curl_share_setopt(m_curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_PSL);
+            curl_share_setopt(m_curl_share, CURLSHOPT_USERDATA, m_rwlocks);
+            curl_share_setopt(m_curl_share, CURLSHOPT_LOCKFUNC, lock_func);
+            curl_share_setopt(m_curl_share, CURLSHOPT_UNLOCKFUNC, unlock_func);
+        }
+    }
+
+    return m_mounted = true;
+}
+
+PushThreadData* MountCurlDevice::CreatePushData(CURL* curl, const std::string& url, size_t offset) {
+    auto data = new PushThreadData{curl};
+    if (!data) {
+        log_write("[PUSH:PULL] Failed to allocate PushThreadData\n");
+        return nullptr;
+    }
+
+    curl_set_common_options(curl, url);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, PushThreadData::push_thread_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)data);
+
+    if (offset > 0) {
+        char range[64];
+        std::snprintf(range, sizeof(range), "%zu-", offset);
+        log_write("[PUSH:PULL] Requesting range: %s\n", range);
+        curl_easy_setopt(curl, CURLOPT_RANGE, range);
+    }
+
+    if (R_FAILED(data->CreateAndStart())) {
+        log_write("[PUSH:PULL] Failed to create and start push thread\n");
+        delete data;
+        return nullptr;
+    }
+
+    return data;
+}
+
+PullThreadData* MountCurlDevice::CreatePullData(CURL* curl, const std::string& url, bool append) {
+    auto data = new PullThreadData{curl};
+    if (!data) {
+        log_write("[PUSH:PULL] Failed to allocate PullThreadData\n");
+        return nullptr;
+    }
+
+    curl_set_common_options(curl, url);
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+    curl_easy_setopt(curl, CURLOPT_READFUNCTION, PullThreadData::pull_thread_callback);
+    curl_easy_setopt(curl, CURLOPT_READDATA, (void *)data);
+
+    if (append) {
+        log_write("[PUSH:PULL] Setting append mode for upload\n");
+        curl_easy_setopt(curl, CURLOPT_APPEND, 1L);
+    }
+
+    if (R_FAILED(data->CreateAndStart())) {
+        log_write("[PUSH:PULL] Failed to create and start pull thread\n");
+        delete data;
+        return nullptr;
+    }
+
+    return data;
+}
+
+void MountCurlDevice::curl_set_common_options(CURL* curl, const std::string& url) {
+    // NOTE: port, user and pass are set in the curl_url.
+    curl_easy_reset(curl);
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    // cancel if speed is less than 1 bytes/sec for timeout seconds.
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+    // todo: change config to accept seconds rather than ms.
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, config.timeout / 1000L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, config.timeout);
+    curl_easy_setopt(curl, CURLOPT_AUTOREFERER, 1L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 15L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 1024L * 64L);
+    curl_easy_setopt(curl, CURLOPT_UPLOAD_BUFFERSIZE, 1024L * 64L);
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
+
+    if (m_curl_share) {
+        curl_easy_setopt(curl, CURLOPT_SHARE, m_curl_share);
+    }
+}
+
+size_t MountCurlDevice::write_memory_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
+    auto data = static_cast<std::vector<char>*>(userdata);
+
+    // increase by chunk size.
+    const auto realsize = size * nmemb;
+    if (data->capacity() < data->size() + realsize) {
+        const auto rsize = std::max(realsize, data->size() + 1024 * 1024);
+        data->reserve(rsize);
+    }
+
+    // store the data.
+    const auto offset = data->size();
+    data->resize(offset + realsize);
+    std::memcpy(data->data() + offset, ptr, realsize);
+
+    return realsize;
+}
+
+size_t MountCurlDevice::write_data_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
+    auto data = static_cast<std::span<char>*>(userdata);
+    const auto rsize = std::min(size * nmemb, data->size());
+
+    std::memcpy(data->data(), ptr, rsize);
+    *data = data->subspan(rsize);
+    return rsize;
+}
+
+size_t MountCurlDevice::read_data_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
+    auto data = static_cast<std::span<const char>*>(userdata);
+    const auto rsize = std::min(size * nmemb, data->size());
+
+    std::memcpy(ptr, data->data(), rsize);
+    *data = data->subspan(rsize);
+    return rsize;
+}
+
+// libcurl doesn't handle html encodings, so we have to do it manually.
+std::string MountCurlDevice::html_decode(const std::string_view& str) {
+    struct Entry {
+        std::string_view key;
+        char value;
+    };
+
+    static constexpr Entry map[]{
+        { "&amp;", '&' },
+        { "&lt;", '<' },
+        { "&gt;", '>' },
+        { "&quot;", '"' },
+        { "&apos;", '\'' },
+        { "&nbsp;", ' ' },
+        { "&#38;", '&' },
+        { "&#60;", '<' },
+        { "&#62;", '>' },
+        { "&#34;", '"' },
+        { "&#39;", '\'' },
+        { "&#160;", ' ' },
+        { "&#35;", '#' },
+        { "&#37;", '%' },
+        { "&#43;", '+' },
+        { "&#61;", '=' },
+        { "&#64;", '@' },
+        { "&#91;", '[' },
+        { "&#93;", ']' },
+        { "&#123;", '{' },
+        { "&#125;", '}' },
+        { "&#126;", '~' },
+    };
+
+    std::string output{};
+    output.reserve(str.size());
+
+    for (size_t i = 0; i < str.size(); i++) {
+        if (str[i] == '&') {
+            bool found = false;
+            for (const auto& e : map) {
+                if (!str.compare(i, e.key.length(), e.key)) {
+                    output += e.value;
+                    i += e.key.length() - 1; // skip ahead.
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                output += '&';
+            }
+        } else {
+            output += str[i];
+        }
+    }
+
+    return output;
+}
+
+std::string MountCurlDevice::url_decode(const std::string& str) {
+    auto unescaped = curl_unescape(str.c_str(), str.length());
+    if (!unescaped) {
+        return str;
+    }
+    ON_SCOPE_EXIT(curl_free(unescaped));
+
+    return html_decode(unescaped);
+}
+
+std::string MountCurlDevice::build_url(const std::string& _path, bool is_dir) {
+    log_write("[CURL] building url for path: %s\n", _path.c_str());
+    auto path = _path;
+    if (is_dir && !path.ends_with('/')) {
+        path += '/'; // append trailing slash for folder.
+    }
+
+    if (!m_url_path.empty()) {
+        if (path.starts_with('/') || m_url_path.ends_with('/')) {
+            path = m_url_path + path;
+        } else {
+            path = m_url_path + '/' + path;
+        }
+    }
+
+    if (!path.empty()) {
+        const auto rc = curl_url_set(curlu, CURLUPART_PATH, path.c_str(), CURLU_URLENCODE);
+        if (rc != CURLUE_OK) {
+            log_write("[CURL] failed to set path: %s\n", curl_url_strerror_wrap(rc));
+            return {};
+        }
+    }
+
+    char* encoded_url;
+    const auto rc = curl_url_get(curlu, CURLUPART_URL, &encoded_url, 0);
+    if (rc != CURLUE_OK) {
+        log_write("[CURL] failed to get encoded url: %s\n", curl_url_strerror_wrap(rc));
+        return {};
+    }
+    ON_SCOPE_EXIT(curl_free(encoded_url));
+
+    log_write("[CURL] encoded url: %s\n", encoded_url);
+    return encoded_url;
+}
+
 } // sphaira::devoptab::common
+
+namespace sphaira::devoptab {
+
+using namespace sphaira::devoptab::common;
+
+Result GetNetworkDevices(location::StdioEntries& out) {
+    SCOPED_RWLOCK(&g_rwlock, false);
+    out.clear();
+
+    for (const auto& entry : g_entries) {
+        if (entry) {
+            u32 flags = 0;
+            if (entry->device.config.read_only) {
+                flags |= location::FsEntryFlag::FsEntryFlag_ReadOnly;
+            }
+            if (entry->device.config.no_stat_file) {
+                flags |= location::FsEntryFlag::FsEntryFlag_NoStatFile;
+            }
+            if (entry->device.config.no_stat_dir) {
+                flags |= location::FsEntryFlag::FsEntryFlag_NoStatDir;
+            }
+
+            out.emplace_back(entry->mount, entry->name, flags);
+        }
+    }
+
+    R_SUCCEED();
+}
+
+void UmountAllNeworkDevices() {
+    SCOPED_RWLOCK(&g_rwlock, true);
+
+    for (auto& entry : g_entries) {
+        if (!entry) {
+            continue;
+        }
+
+        log_write("[DEVOPTAB] Unmounting %s\n", entry->device.config.url.c_str());
+        entry.reset();
+    }
+}
+
+} // sphaira::devoptab

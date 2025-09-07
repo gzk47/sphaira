@@ -93,32 +93,8 @@ auto GetStdio(bool write) -> StdioEntries {
 
     {
         StdioEntries entries;
-        if (R_SUCCEEDED(devoptab::GetNfsMounts(entries))) {
-            log_write("[NFS] got nfs mounts: %zu\n", entries.size());
-            add_from_entries(entries, out, write);
-        }
-    }
-
-    {
-        StdioEntries entries;
-        if (R_SUCCEEDED(devoptab::GetSmb2Mounts(entries))) {
-            log_write("[SMB2] got smb2 mounts: %zu\n", entries.size());
-            add_from_entries(entries, out, write);
-        }
-    }
-
-    {
-        StdioEntries entries;
-        if (R_SUCCEEDED(devoptab::GetHttpMounts(entries))) {
-            log_write("[HTTP] got http mounts: %zu\n", entries.size());
-            add_from_entries(entries, out, write);
-        }
-    }
-
-    {
-        StdioEntries entries;
-        if (R_SUCCEEDED(devoptab::GetFtpMounts(entries))) {
-            log_write("[FTP] got ftp mounts: %zu\n", entries.size());
+        if (R_SUCCEEDED(devoptab::GetNetworkDevices(entries))) {
+            log_write("[LOCATION] got devoptab mounts: %zu\n", entries.size());
             add_from_entries(entries, out, write);
         }
     }
