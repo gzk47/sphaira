@@ -212,6 +212,6 @@ private:
 };
 
 using CreateDeviceCallback = std::function<std::unique_ptr<MountDevice>(const MountConfig& config)>;
-Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* config_path, const char* name);
+Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* name);
 
 } // namespace sphaira::devoptab::common

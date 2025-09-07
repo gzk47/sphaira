@@ -1,9 +1,7 @@
 #include "utils/devoptab_common.hpp"
 #include "defines.hpp"
 #include "log.hpp"
-#include "location.hpp"
 
-#include <sys/iosupport.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <cstring>
@@ -16,7 +14,7 @@ namespace sphaira::devoptab {
 namespace {
 
 struct Device final : common::MountDevice {
-    Device(const common::MountConfig& cfg) : MountDevice{cfg} {}
+    using MountDevice::MountDevice;
     ~Device();
 
 private:
@@ -155,11 +153,7 @@ int Device::devoptab_open(void *fileStruct, const char *path, int flags, int mod
 int Device::devoptab_close(void *fd) {
     auto file = static_cast<File*>(fd);
 
-    if (file && file->fd) {
-        nfs_close(nfs, file->fd);
-        file->fd = nullptr;
-    }
-
+    nfs_close(nfs, file->fd);
     return 0;
 }
 
@@ -308,9 +302,6 @@ int Device::devoptab_diropen(void* fd, const char *path) {
 
 int Device::devoptab_dirreset(void* fd) {
     auto dir = static_cast<Dir*>(fd);
-    if (!dir->dir) {
-        return -EINVAL;
-    }
 
     nfs_rewinddir(nfs, dir->dir);
     return 0;
@@ -318,10 +309,6 @@ int Device::devoptab_dirreset(void* fd) {
 
 int Device::devoptab_dirnext(void* fd, char *filename, struct stat *filestat) {
     auto dir = static_cast<Dir*>(fd);
-
-    if (!dir->dir) {
-        return EINVAL;
-    }
 
     const auto entry = nfs_readdir(nfs, dir->dir);
     if (!entry) {
@@ -351,11 +338,7 @@ int Device::devoptab_dirnext(void* fd, char *filename, struct stat *filestat) {
 int Device::devoptab_dirclose(void* fd) {
     auto dir = static_cast<Dir*>(fd);
 
-    if (dir && dir->dir) {
-        nfs_closedir(nfs, dir->dir);
-        dir->dir = nullptr;
-    }
-
+    nfs_closedir(nfs, dir->dir);
     return 0;
 }
 
@@ -424,7 +407,6 @@ Result MountNfsAll() {
             return std::make_unique<Device>(cfg);
         },
         sizeof(File), sizeof(Dir),
-        "/config/sphaira/nfs.ini",
         "NFS"
     );
 }

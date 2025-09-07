@@ -646,7 +646,6 @@ Result MountWebdavAll() {
             return std::make_unique<Device>(config);
         },
         sizeof(File), sizeof(Dir),
-        "/config/sphaira/webdav.ini",
         "WEBDAV"
     );
 }

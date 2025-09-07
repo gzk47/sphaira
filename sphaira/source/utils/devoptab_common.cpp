@@ -759,7 +759,7 @@ void update_devoptab_for_read_only(devoptab_t* devoptab, bool read_only) {
     }
 }
 
-Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* config_path, const char* name) {
+Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* name) {
     {
         static Mutex rw_lock_init_mutex{};
         SCOPED_MUTEX(&rw_lock_init_mutex);
@@ -817,7 +817,10 @@ Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file
         return 1;
     };
 
-    MountConfigs configs;
+    fs::FsPath config_path{};
+    std::snprintf(config_path, sizeof(config_path), "/config/sphaira/mount/%s.ini", name);
+
+    MountConfigs configs{};
     ini_browse(cb, &configs, config_path);
     log_write("[DEVOPTAB] Found %zu mount configs\n", configs.size());
 

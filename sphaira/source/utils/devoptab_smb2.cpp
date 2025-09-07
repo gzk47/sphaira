@@ -15,7 +15,7 @@ namespace sphaira::devoptab {
 namespace {
 
 struct Device final : common::MountDevice {
-    Device(const common::MountConfig& cfg) : MountDevice{cfg} {}
+    using MountDevice::MountDevice;
     ~Device();
 
 private:
@@ -262,9 +262,6 @@ int Device::devoptab_diropen(void* fd, const char *path) {
 
 int Device::devoptab_dirreset(void* fd) {
     auto dir = static_cast<Dir*>(fd);
-    if (!dir->dir) {
-        return -EINVAL;
-    }
 
     smb2_rewinddir(this->smb2, dir->dir);
     return 0;
@@ -362,7 +359,6 @@ Result MountSmb2All() {
             return std::make_unique<Device>(cfg);
         },
         sizeof(File), sizeof(Dir),
-        "/config/sphaira/smb.ini",
         "SMB"
     );
 }

@@ -410,7 +410,6 @@ Result MountHttpAll() {
             return std::make_unique<Device>(config);
         },
         sizeof(File), sizeof(Dir),
-        "/config/sphaira/http.ini",
         "HTTP"
     );
 }

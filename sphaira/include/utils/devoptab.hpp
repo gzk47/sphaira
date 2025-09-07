@@ -33,6 +33,7 @@ void UmountBfsar(const fs::FsPath& mount);
 Result MountNro(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path);
 void UmountNro(const fs::FsPath& mount);
 
+Result MountVfsAll();
 Result MountWebdavAll();
 Result MountHttpAll();
 Result MountFtpAll();

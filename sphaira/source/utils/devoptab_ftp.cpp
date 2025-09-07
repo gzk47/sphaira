@@ -709,7 +709,6 @@ Result MountFtpAll() {
             return std::make_unique<Device>(config);
         },
         sizeof(File), sizeof(Dir),
-        "/config/sphaira/ftp.ini",
         "FTP"
     );
 }

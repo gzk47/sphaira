@@ -1600,6 +1600,11 @@ App::App(const char* argv0) {
 
         // this has to come after curl init as it inits curl global.
         {
+            SCOPED_TIMESTAMP("vfs init");
+            devoptab::MountVfsAll();
+        }
+
+        {
             SCOPED_TIMESTAMP("http init");
             devoptab::MountHttpAll();
         }
