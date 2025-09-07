@@ -1595,12 +1595,6 @@ void FsView::DisplayOptions() {
     SidebarEntryArray::Items mount_items;
     std::vector<FsEntry> fs_entries;
 
-    const auto stdio_locations = location::GetStdio(false);
-    for (const auto& e: stdio_locations) {
-        fs_entries.emplace_back(e.name, e.mount, FsType::Stdio, e.flags);
-        mount_items.push_back(e.name);
-    }
-
     for (const auto& e: FS_ENTRIES) {
         fs_entries.emplace_back(e);
         mount_items.push_back(i18n::get(e.name));
@@ -1611,8 +1605,12 @@ void FsView::DisplayOptions() {
         mount_items.push_back(m_menu->m_custom_fs_entry.name);
     }
 
-    const auto fat_entries = location::GetFat();
-    for (const auto& e: fat_entries) {
+    const auto stdio_locations = location::GetStdio(false);
+    for (const auto& e: stdio_locations) {
+        if (e.fs_hidden) {
+            continue;
+        }
+
         fs_entries.emplace_back(e.name, e.mount, FsType::Stdio, e.flags);
         mount_items.push_back(e.name);
     }

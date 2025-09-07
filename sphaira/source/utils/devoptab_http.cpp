@@ -410,7 +410,8 @@ Result MountHttpAll() {
             return std::make_unique<Device>(config);
         },
         sizeof(File), sizeof(Dir),
-        "HTTP"
+        "HTTP",
+        true
     );
 }
 

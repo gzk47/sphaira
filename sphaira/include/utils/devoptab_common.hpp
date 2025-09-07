@@ -134,6 +134,8 @@ struct MountConfig {
     bool read_only{};
     bool no_stat_file{true};
     bool no_stat_dir{true};
+    bool fs_hidden{};
+    bool dump_hidden{};
 
     std::unordered_map<std::string, std::string> extra{};
 };
@@ -212,6 +214,9 @@ private:
 };
 
 using CreateDeviceCallback = std::function<std::unique_ptr<MountDevice>(const MountConfig& config)>;
-Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* name);
+Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* name, bool force_read_only = false);
+
+// same as above but takes in the device and expects the mount name to be set.
+bool MountNetworkDevice2(std::unique_ptr<MountDevice>&& device, const MountConfig& config, size_t file_size, size_t dir_size, const char* name, const char* mount_name);
 
 } // namespace sphaira::devoptab::common

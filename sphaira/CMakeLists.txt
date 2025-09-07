@@ -90,7 +90,6 @@ add_executable(sphaira
     source/threaded_file_transfer.cpp
     source/title_info.cpp
     source/minizip_helper.cpp
-    source/fatfs.cpp
     source/usbdvd.cpp
 
     source/utils/utils.cpp
@@ -111,6 +110,7 @@ add_executable(sphaira
     source/utils/devoptab_ftp.cpp
     source/utils/devoptab_webdav.cpp
     source/utils/devoptab_vfs.cpp
+    source/utils/devoptab_fatfs.cpp
 
     source/usb/base.cpp
     source/usb/usbds.cpp

@@ -4,9 +4,7 @@
 #include "usbdvd.hpp"
 #include "utils/devoptab.hpp"
 
-#include <ff.h>
 #include <cstring>
-#include <minIni.h>
 #include <usbhsfs.h>
 
 namespace sphaira::location {
@@ -17,11 +15,15 @@ namespace {
 auto GetStdio(bool write) -> StdioEntries {
     StdioEntries out{};
 
-    const auto add_from_entries = [](const StdioEntries& entries, StdioEntries& out, bool write) {
-        for (const auto& e : entries) {
+    const auto add_from_entries = [](StdioEntries& entries, StdioEntries& out, bool write) {
+        for (auto& e : entries) {
             if (write && (e.flags & FsEntryFlag::FsEntryFlag_ReadOnly)) {
                 log_write("[STDIO] skipping read only mount: %s\n", e.name.c_str());
                 continue;
+            }
+
+            if (e.flags & FsEntryFlag::FsEntryFlag_ReadOnly) {
+                e.name += " (Read Only)";
             }
 
             out.emplace_back(e);
@@ -75,22 +77,6 @@ auto GetStdio(bool write) -> StdioEntries {
 
         out.emplace_back(e.name, display_name, flags);
         log_write("\t[USBHSFS] %s name: %s serial: %s man: %s\n", e.name, e.product_name, e.serial_number, e.manufacturer);
-    }
-
-    return out;
-}
-
-auto GetFat() -> StdioEntries {
-    StdioEntries out{};
-
-    for (auto& e : VolumeStr) {
-        char path[64];
-        std::snprintf(path, sizeof(path), "%s:/", e);
-
-        char display_name[0x100];
-        std::snprintf(display_name, sizeof(display_name), "%s (Read Only)", path);
-
-        out.emplace_back(path, display_name, FsEntryFlag::FsEntryFlag_ReadOnly);
     }
 
     return out;

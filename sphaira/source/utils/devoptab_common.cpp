@@ -759,7 +759,68 @@ void update_devoptab_for_read_only(devoptab_t* devoptab, bool read_only) {
     }
 }
 
-Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* name) {
+bool MountNetworkDevice2(std::unique_ptr<MountDevice>&& device, const MountConfig& config, size_t file_size, size_t dir_size, const char* name, const char* mount_name) {
+    if (!device) {
+        log_write("[DEVOPTAB] No device for %s\n", mount_name);
+        return false;
+    }
+
+    bool already_mounted = false;
+    for (const auto& entry : g_entries) {
+        if (entry && entry->mount == mount_name) {
+            already_mounted = true;
+            break;
+        }
+    }
+
+    if (already_mounted) {
+        log_write("[DEVOPTAB] Already mounted %s, skipping\n", mount_name);
+        return false;
+    }
+
+    // otherwise, find next free entry.
+    auto itr = std::ranges::find_if(g_entries, [](auto& e){
+        return !e;
+    });
+
+    if (itr == g_entries.end()) {
+        log_write("[DEVOPTAB] No free entries to mount %s\n", mount_name);
+        return false;
+    }
+
+    auto entry = std::make_unique<Entry>();
+    entry->device.mount_device = std::forward<decltype(device)>(device);
+    entry->device.file_size = file_size;
+    entry->device.dir_size = dir_size;
+    entry->device.config = config;
+
+    if (!entry->device.mount_device) {
+        log_write("[DEVOPTAB] Failed to create device for %s\n", config.url.c_str());
+        return false;
+    }
+
+    entry->devoptab = DEVOPTAB;
+    entry->devoptab.name = entry->name;
+    entry->devoptab.deviceData = &entry->device;
+    std::snprintf(entry->name, sizeof(entry->name), "%s", name);
+    std::snprintf(entry->mount, sizeof(entry->mount), "%s", mount_name);
+    common::update_devoptab_for_read_only(&entry->devoptab, config.read_only);
+
+    if (AddDevice(&entry->devoptab) < 0) {
+        log_write("[DEVOPTAB] Failed to add device %s\n", mount_name);
+        return false;
+    }
+
+    log_write("[DEVOPTAB] DEVICE SUCCESS %s %s\n", name, mount_name);
+
+    entry->ref_count++;
+    *itr = std::move(entry);
+    log_write("[DEVOPTAB] Mounted %s at /%s\n", name, mount_name);
+
+    return true;
+}
+
+Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* name, bool force_read_only) {
     {
         static Mutex rw_lock_init_mutex{};
         SCOPED_MUTEX(&rw_lock_init_mutex);
@@ -809,6 +870,10 @@ Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file
             e->back().no_stat_file = ini_parse_getbool(Value, e->back().no_stat_file);
         } else if (!std::strcmp(Key, "no_stat_dir")) {
             e->back().no_stat_dir = ini_parse_getbool(Value, e->back().no_stat_dir);
+        } else if (!std::strcmp(Key, "fs_hidden")) {
+            e->back().fs_hidden = ini_parse_getbool(Value, e->back().fs_hidden);
+        } else if (!std::strcmp(Key, "dump_hidden")) {
+            e->back().dump_hidden = ini_parse_getbool(Value, e->back().dump_hidden);
         } else {
             log_write("[DEVOPTAB] INI: extra key %s=%s\n", Key, Value);
             e->back().extra.emplace(Key, Value);
@@ -824,55 +889,31 @@ Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file
     ini_browse(cb, &configs, config_path);
     log_write("[DEVOPTAB] Found %zu mount configs\n", configs.size());
 
-    for (const auto& config : configs) {
-        // check if we already have the http mounted.
-        bool already_mounted = false;
-        for (const auto& entry : g_entries) {
-            if (entry && entry->mount == config.name) {
-                already_mounted = true;
-                break;
-            }
-        }
-
-        if (already_mounted) {
-            log_write("[DEVOPTAB] Already mounted %s, skipping\n", config.name.c_str());
+    for (auto& config : configs) {
+        if (config.name.empty()) {
+            log_write("[DEVOPTAB] Skipping empty name\n");
             continue;
         }
 
-        // otherwise, find next free entry.
-        auto itr = std::ranges::find_if(g_entries, [](auto& e){
-            return !e;
-        });
-
-        if (itr == g_entries.end()) {
-            log_write("[DEVOPTAB] No free entries to mount %s\n", config.name.c_str());
-            break;
-        }
-
-        auto entry = std::make_unique<Entry>();
-        entry->device.mount_device = create_device(config);
-        entry->device.file_size = file_size;
-        entry->device.dir_size = dir_size;
-        entry->device.config = config;
-
-        if (!entry->device.mount_device) {
-            log_write("[DEVOPTAB] Failed to create device for %s\n", config.url.c_str());
+        if (config.url.empty()) {
+            log_write("[DEVOPTAB] Skipping empty url for %s\n", config.name.c_str());
             continue;
         }
 
-        entry->devoptab = DEVOPTAB;
-        entry->devoptab.name = entry->name;
-        entry->devoptab.deviceData = &entry->device;
-        std::snprintf(entry->name, sizeof(entry->name), "[%s] %s", name, config.name.c_str());
-        std::snprintf(entry->mount, sizeof(entry->mount), "[%s] %s:/", name, config.name.c_str());
-        common::update_devoptab_for_read_only(&entry->devoptab, config.read_only);
+        if (force_read_only) {
+            config.read_only = true;
+        }
 
-        R_UNLESS(AddDevice(&entry->devoptab) >= 0, 0x1);
-        log_write("[DEVOPTAB] DEVICE SUCCESS %s %s\n", entry->device.config.url.c_str(), entry->name);
+        fs::FsPath _name{};
+        std::snprintf(_name, sizeof(_name), "[%s] %s", name, config.name.c_str());
 
-        entry->ref_count++;
-        *itr = std::move(entry);
-        log_write("[DEVOPTAB] Mounted %s at /%s\n", config.url.c_str(), config.name.c_str());
+        fs::FsPath _mount{};
+        std::snprintf(_mount, sizeof(_mount), "[%s] %s:/", name, config.name.c_str());
+
+        if (!MountNetworkDevice2(create_device(config), config, file_size, dir_size, _name, _mount)) {
+            log_write("[DEVOPTAB] Failed to mount %s\n", config.name.c_str());
+            continue;
+        }
     }
 
     R_SUCCEED();
@@ -1373,18 +1414,20 @@ Result GetNetworkDevices(location::StdioEntries& out) {
 
     for (const auto& entry : g_entries) {
         if (entry) {
+            const auto& config = entry->device.config;
+
             u32 flags = 0;
-            if (entry->device.config.read_only) {
+            if (config.read_only) {
                 flags |= location::FsEntryFlag::FsEntryFlag_ReadOnly;
             }
-            if (entry->device.config.no_stat_file) {
+            if (config.no_stat_file) {
                 flags |= location::FsEntryFlag::FsEntryFlag_NoStatFile;
             }
-            if (entry->device.config.no_stat_dir) {
+            if (config.no_stat_dir) {
                 flags |= location::FsEntryFlag::FsEntryFlag_NoStatDir;
             }
 
-            out.emplace_back(entry->mount, entry->name, flags, entry->device.config.dump_path);
+            out.emplace_back(entry->mount, entry->name, flags, config.dump_path, config.fs_hidden, config.dump_hidden);
         }
     }
 

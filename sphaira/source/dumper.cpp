@@ -494,11 +494,17 @@ void DumpGetLocation(const std::string& title, u32 location_flags, const OnLocat
     ui::PopupList::Items items;
     std::vector<DumpEntry> dump_entries;
 
-    out.stdio = location::GetStdio(true);
+    const auto stdio_entries = location::GetStdio(true);
     if (location_flags & (1 << DumpLocationType_Stdio)) {
-        for (s32 i = 0; i < std::size(out.stdio); i++) {
-            dump_entries.emplace_back(DumpLocationType_Stdio, i);
-            items.emplace_back(out.stdio[i].name);
+        for (auto& e : stdio_entries) {
+            if (e.dump_hidden) {
+                continue;
+            }
+
+            const auto index = out.stdio.size();
+            dump_entries.emplace_back(DumpLocationType_Stdio, index);
+            items.emplace_back(e.name);
+            out.stdio.emplace_back(e);
         }
     }
 

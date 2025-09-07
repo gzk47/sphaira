@@ -39,6 +39,7 @@ Result MountHttpAll();
 Result MountFtpAll();
 Result MountNfsAll();
 Result MountSmb2All();
+Result MountFatfsAll();
 
 Result GetNetworkDevices(location::StdioEntries& out);
 void UmountAllNeworkDevices();

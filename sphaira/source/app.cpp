@@ -22,7 +22,6 @@
 #include "haze_helper.hpp"
 #include "web.hpp"
 #include "swkbd.hpp"
-#include "fatfs.hpp"
 #include "usbdvd.hpp"
 
 #include "utils/profile.hpp"
@@ -1580,13 +1579,6 @@ App::App(const char* argv0) {
         }
 
         {
-            SCOPED_TIMESTAMP("fat init");
-            if (R_FAILED(fatfs::MountAll())) {
-                log_write("[FAT] failed to mount bis\n");
-            }
-        }
-
-        {
             SCOPED_TIMESTAMP("usbdvd init");
             if (R_FAILED(usbdvd::MountAll())) {
                 log_write("[USBDVD] failed to mount\n");
@@ -1627,6 +1619,11 @@ App::App(const char* argv0) {
         {
             SCOPED_TIMESTAMP("smb init");
             devoptab::MountSmb2All();
+        }
+
+        {
+            SCOPED_TIMESTAMP("fatfs init");
+            devoptab::MountFatfsAll();
         }
 
         {
@@ -2224,11 +2221,6 @@ App::~App() {
             {
                 SCOPED_TIMESTAMP("hdd exit");
                 usbHsFsExit();
-            }
-
-            {
-                SCOPED_TIMESTAMP("fatfs exit");
-                fatfs::UnmountAll();
             }
 
             // this has to come before curl exit as it uses curl global.
