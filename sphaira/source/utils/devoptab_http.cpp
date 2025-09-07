@@ -59,14 +59,14 @@ private:
     int devoptab_dirclose(void* fd) override;
     int devoptab_lstat(const char *path, struct stat *st) override;
 
-    bool http_dirlist(const std::string& path, DirEntries& out);
-    bool http_stat(const std::string& path, struct stat* st, bool is_dir);
+    int http_dirlist(const std::string& path, DirEntries& out);
+    int http_stat(const std::string& path, struct stat* st, bool is_dir);
 
 private:
     bool mounted{};
 };
 
-bool Device::http_dirlist(const std::string& path, DirEntries& out) {
+int Device::http_dirlist(const std::string& path, DirEntries& out) {
     const auto url = build_url(path, true);
     std::vector<char> chunk;
 
@@ -79,7 +79,29 @@ bool Device::http_dirlist(const std::string& path, DirEntries& out) {
     const auto res = curl_easy_perform(this->curl);
     if (res != CURLE_OK) {
         log_write("[HTTP] curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-        return false;
+        return -EIO;
+    }
+
+    long response_code = 0;
+    curl_easy_getinfo(this->curl, CURLINFO_RESPONSE_CODE, &response_code);
+
+    switch (response_code) {
+        case 200: // OK
+        case 206: // Partial Content
+            break;
+        case 301: // Moved Permanently
+        case 302: // Found
+        case 303: // See Other
+        case 307: // Temporary Redirect
+        case 308: // Permanent Redirect
+            return -EIO;
+        case 401: // Unauthorized
+        case 403: // Forbidden
+            return -EACCES;
+        case 404: // Not Found
+            return -ENOENT;
+        default:
+            return -EIO;
     }
 
     log_write("[HTTP] Received %zu bytes for directory listing\n", chunk.size());
@@ -147,10 +169,10 @@ bool Device::http_dirlist(const std::string& path, DirEntries& out) {
 
     log_write("[HTTP] Parsed %zu entries from directory listing\n", out.size());
 
-    return true;
+    return 0;
 }
 
-bool Device::http_stat(const std::string& path, struct stat* st, bool is_dir) {
+int Device::http_stat(const std::string& path, struct stat* st, bool is_dir) {
     std::memset(st, 0, sizeof(*st));
     const auto url = build_url(path, is_dir);
 
@@ -161,7 +183,7 @@ bool Device::http_stat(const std::string& path, struct stat* st, bool is_dir) {
     const auto res = curl_easy_perform(this->curl);
     if (res != CURLE_OK) {
         log_write("[HTTP] curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-        return false;
+        return -EIO;
     }
 
     long response_code = 0;
@@ -179,10 +201,23 @@ bool Device::http_stat(const std::string& path, struct stat* st, bool is_dir) {
     const char* effective_url{};
     curl_easy_getinfo(this->curl, CURLINFO_EFFECTIVE_URL, &effective_url);
 
-    // handle error codes.
-    if (response_code != 200 && response_code != 206) {
-        log_write("[HTTP] Unexpected HTTP response code: %ld\n", response_code);
-        return false;
+    switch (response_code) {
+        case 200: // OK
+        case 206: // Partial Content
+            break;
+        case 301: // Moved Permanently
+        case 302: // Found
+        case 303: // See Other
+        case 307: // Temporary Redirect
+        case 308: // Permanent Redirect
+            return -EIO;
+        case 401: // Unauthorized
+        case 403: // Forbidden
+            return -EACCES;
+        case 404: // Not Found
+            return -ENOENT;
+        default:
+            return -EIO;
     }
 
     if (effective_url) {
@@ -207,7 +242,7 @@ bool Device::http_stat(const std::string& path, struct stat* st, bool is_dir) {
     st->st_ctime = st->st_mtime;
     st->st_nlink = 1;
 
-    return true;
+    return 0;
 }
 
 bool Device::Mount() {
@@ -229,9 +264,10 @@ int Device::devoptab_open(void *fileStruct, const char *path, int flags, int mod
     auto file = static_cast<File*>(fileStruct);
 
     struct stat st;
-    if (!http_stat(path, &st, false)) {
-        log_write("[HTTP] http_stat() failed for file: %s\n", path);
-        return -ENOENT;
+    const auto ret = http_stat(path, &st, false);
+    if (ret < 0) {
+        log_write("[HTTP] http_stat() failed for file: %s errno: %s\n", path, std::strerror(-ret));
+        return ret;
     }
 
     if (st.st_mode & S_IFDIR) {
@@ -306,9 +342,11 @@ int Device::devoptab_diropen(void* fd, const char *path) {
 
     log_write("[HTTP] Opening directory: %s\n", path);
     auto entries = new DirEntries();
-    if (!http_dirlist(path, *entries)) {
+    const auto ret = http_dirlist(path, *entries);
+    if (ret < 0) {
+        log_write("[HTTP] http_dirlist() failed for directory: %s errno: %s\n", path, std::strerror(-ret));
         delete entries;
-        return -ENOENT;
+        return ret;
     }
 
     log_write("[HTTP] Opened directory: %s with %zu entries\n", path, entries->size());
@@ -352,8 +390,14 @@ int Device::devoptab_dirclose(void* fd) {
 }
 
 int Device::devoptab_lstat(const char *path, struct stat *st) {
-    if (!http_stat(path, st, false) && !http_stat(path, st, true)) {
-        return -ENOENT;
+    auto ret = http_stat(path, st, false);
+    if (ret < 0) {
+        ret = http_stat(path, st, true);
+    }
+
+    if (ret < 0) {
+        log_write("[HTTP] http_stat() failed for path: %s errno: %s\n", path, std::strerror(-ret));
+        return ret;
     }
 
     return 0;

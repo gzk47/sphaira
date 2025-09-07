@@ -58,13 +58,13 @@ private:
     static bool ftp_parse_mlist(std::string_view chunk, struct stat* st);
 
     std::pair<bool, long> ftp_quote(std::span<const std::string> commands, bool is_dir, std::vector<char>* response_data = nullptr);
-    bool ftp_dirlist(const std::string& path, DirEntries& out);
-    bool ftp_stat(const std::string& path, struct stat* st, bool is_dir);
-    bool ftp_remove_file_folder(const std::string& path, bool is_dir);
-    bool ftp_unlink(const std::string& path);
-    bool ftp_rename(const std::string& old_path, const std::string& new_path, bool is_dir);
-    bool ftp_mkdir(const std::string& path);
-    bool ftp_rmdir(const std::string& path);
+    int ftp_dirlist(const std::string& path, DirEntries& out);
+    int ftp_stat(const std::string& path, struct stat* st, bool is_dir);
+    int ftp_remove_file_folder(const std::string& path, bool is_dir);
+    int ftp_unlink(const std::string& path);
+    int ftp_rename(const std::string& old_path, const std::string& new_path, bool is_dir);
+    int ftp_mkdir(const std::string& path);
+    int ftp_rmdir(const std::string& path);
 
 private:
     bool mounted{};
@@ -267,7 +267,7 @@ std::pair<bool, long> Device::ftp_quote(std::span<const std::string> commands, b
     return {true, response_code};
 }
 
-bool Device::ftp_dirlist(const std::string& path, DirEntries& out) {
+int Device::ftp_dirlist(const std::string& path, DirEntries& out) {
     const auto url = build_url(path, true);
     std::vector<char> chunk;
 
@@ -279,51 +279,82 @@ bool Device::ftp_dirlist(const std::string& path, DirEntries& out) {
     const auto res = curl_easy_perform(this->curl);
     if (res != CURLE_OK) {
         log_write("[FTP] curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-        return false;
+        return -EIO;
+    }
+
+    long response_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+
+    switch (response_code) {
+        case 125: // Data connection already open; transfer starting.
+        case 150: // File status okay; about to open data connection.
+        case 226: // Closing data connection. Requested file action successful.
+            break;
+        case 450: // Requested file action not taken. File unavailable (e.g., file busy).
+        case 550: // Requested action not taken. File unavailable (e.g., file not found, no access).
+            return -ENOENT;
+        default:
+            return -EIO;
     }
 
     ftp_parse_mlsd({chunk.data(), chunk.size()}, out);
-    return true;
+    return 0;
 }
 
-bool Device::ftp_stat(const std::string& path, struct stat* st, bool is_dir) {
+int Device::ftp_stat(const std::string& path, struct stat* st, bool is_dir) {
     std::memset(st, 0, sizeof(*st));
 
     std::vector<char> chunk;
     const auto [success, response_code] = ftp_quote({"MLST " + path}, is_dir, &chunk);
     if (!success) {
-        return false;
+        return -EIO;
     }
 
-    if (!success || response_code >= 400) {
-        log_write("[FTP] MLST command failed with response code: %ld\n", response_code);
-        return false;
+    switch (response_code) {
+        case 250: // Requested file action okay, completed.
+            break;
+        case 450: // Requested file action not taken. File unavailable (e.g., file busy).
+        case 550: // Requested action not taken. File unavailable (e.g., file not found, no access).
+            return -ENOENT;
+        default:
+            return -EIO;
     }
 
     if (!ftp_parse_mlist({chunk.data(), chunk.size()}, st)) {
         log_write("[FTP] Failed to parse MLST response for path: %s\n", path.c_str());
-        return false;
+        return -EIO;
     }
 
-    return true;
+    return 0;
 }
 
-bool Device::ftp_remove_file_folder(const std::string& path, bool is_dir) {
+int Device::ftp_remove_file_folder(const std::string& path, bool is_dir) {
     const auto cmd = (is_dir ? "RMD " : "DELE ") + path;
     const auto [success, response_code] = ftp_quote({cmd}, is_dir);
-    if (!success || response_code >= 400) {
-        log_write("[FTP] MLST command failed with response code: %ld\n", response_code);
-        return false;
+
+    if (!success) {
+        return -EIO;
     }
 
-    return true;
+    switch (response_code) {
+        case 250: // Requested file action okay, completed.
+        case 200: // Command okay.
+            break;
+        case 450: // Requested file action not taken. File unavailable (e.g., file busy).
+        case 550: // Requested action not taken. File unavailable (e.g., file not found, no access).
+            return -ENOENT;
+        default:
+            return -EIO;
+    }
+
+    return 0;
 }
 
-bool Device::ftp_unlink(const std::string& path) {
+int Device::ftp_unlink(const std::string& path) {
     return ftp_remove_file_folder(path, false);
 }
 
-bool Device::ftp_rename(const std::string& old_path, const std::string& new_path, bool is_dir) {
+int Device::ftp_rename(const std::string& old_path, const std::string& new_path, bool is_dir) {
     const auto url = build_url("/", is_dir);
 
     std::vector<std::string> commands;
@@ -331,31 +362,50 @@ bool Device::ftp_rename(const std::string& old_path, const std::string& new_path
     commands.emplace_back("RNTO " + new_path);
 
     const auto [success, response_code] = ftp_quote(commands, is_dir);
-    if (!success || response_code >= 400) {
-        log_write("[FTP] MLST command failed with response code: %ld\n", response_code);
-        return false;
+    if (!success) {
+        return -EIO;
     }
 
-    return true;
+    switch (response_code) {
+        case 250: // Requested file action okay, completed.
+        case 200: // Command okay.
+            break;
+        case 450: // Requested file action not taken. File unavailable (e.g., file busy).
+        case 550: // Requested action not taken. File unavailable (e.g., file not found, no access).
+            return -ENOENT;
+        case 553: // Requested action not taken. File name not allowed.
+            return -EEXIST;
+        default:
+            return -EIO;
+    }
+
+    return 0;
 }
 
-bool Device::ftp_mkdir(const std::string& path) {
+int Device::ftp_mkdir(const std::string& path) {
     std::vector<char> chunk;
     const auto [success, response_code] = ftp_quote({"MKD " + path}, true);
     if (!success) {
-        return false;
+        return -EIO;
     }
 
-    // todo: handle result if directory already exists.
-    if (response_code >= 400) {
-        log_write("[FTP] MLST command failed with response code: %ld\n", response_code);
-        return false;
+    switch (response_code) {
+        case 257: // "PATHNAME" created.
+        case 250: // Requested file action okay, completed.
+        case 200: // Command okay.
+            break;
+        case 550: // Requested action not taken. File unavailable (e.g., file not found, no access).
+            return -ENOENT; // Parent directory does not exist or no permission.
+        case 521: // Directory already exists.
+            return -EEXIST;
+        default:
+            return -EIO;
     }
 
-    return true;
+    return 0;
 }
 
-bool Device::ftp_rmdir(const std::string& path) {
+int Device::ftp_rmdir(const std::string& path) {
     return ftp_remove_file_folder(path, true);
 }
 
@@ -401,9 +451,9 @@ int Device::devoptab_open(void *fileStruct, const char *path, int flags, int mod
 
     if ((flags & O_ACCMODE) == O_RDONLY || (flags & O_APPEND)) {
         // ensure the file exists and get its size.
-        if (!ftp_stat(path, &st, false)) {
-            log_write("[FTP] File not found: %s\n", path);
-            return -ENOENT;
+        const auto ret = ftp_stat(path, &st, false);
+        if (ret < 0) {
+            return ret;
         }
 
         if (st.st_mode & S_IFDIR) {
@@ -522,32 +572,44 @@ int Device::devoptab_fstat(void *fd, struct stat *st) {
 }
 
 int Device::devoptab_unlink(const char *path) {
-    if (!ftp_unlink(path)) {
-        return -EIO;
+    const auto ret = ftp_unlink(path);
+    if (ret < 0) {
+        log_write("[FTP] ftp_unlink() failed: %s errno: %s\n", path, std::strerror(-ret));
+        return ret;
     }
 
     return 0;
 }
 
 int Device::devoptab_rename(const char *oldName, const char *newName) {
-    if (!ftp_rename(oldName, newName, false) && !ftp_rename(oldName, newName, true)) {
-        return -EIO;
+    auto ret = ftp_rename(oldName, newName, false);
+    if (ret == -ENOENT) {
+        ret = ftp_rename(oldName, newName, true);
+    }
+
+    if (ret < 0) {
+        log_write("[FTP] ftp_rename() failed: %s -> %s errno: %s\n", oldName, newName, std::strerror(-ret));
+        return ret;
     }
 
     return 0;
 }
 
 int Device::devoptab_mkdir(const char *path, int mode) {
-    if (!ftp_mkdir(path)) {
-        return -EIO;
+    const auto ret = ftp_mkdir(path);
+    if (ret < 0) {
+        log_write("[FTP] ftp_mkdir() failed: %s errno: %s\n", path, std::strerror(-ret));
+        return ret;
     }
 
     return 0;
 }
 
 int Device::devoptab_rmdir(const char *path) {
-    if (!ftp_rmdir(path)) {
-        return -EIO;
+    const auto ret = ftp_rmdir(path);
+    if (ret < 0) {
+        log_write("[FTP] ftp_rmdir() failed: %s errno: %s\n", path, std::strerror(-ret));
+        return ret;
     }
 
     return 0;
@@ -557,9 +619,11 @@ int Device::devoptab_diropen(void* fd, const char *path) {
     auto dir = static_cast<Dir*>(fd);
 
     auto entries = new DirEntries();
-    if (!ftp_dirlist(path, *entries)) {
+    const auto ret = ftp_dirlist(path, *entries);
+    if (ret < 0) {
+        log_write("[FTP] ftp_dirlist() failed: %s errno: %s\n", path, std::strerror(-ret));
         delete entries;
-        return -ENOENT;
+        return ret;
     }
 
     dir->entries = entries;
@@ -602,8 +666,14 @@ int Device::devoptab_dirclose(void* fd) {
 }
 
 int Device::devoptab_lstat(const char *path, struct stat *st) {
-    if (!ftp_stat(path, st, false) && !ftp_stat(path, st, true)) {
-        return -ENOENT;
+    auto ret = ftp_stat(path, st, false);
+    if (ret == -ENOENT) {
+        ret = ftp_stat(path, st, true);
+    }
+
+    if (ret < 0) {
+        log_write("[FTP] ftp_stat() failed: %s errno: %s\n", path, std::strerror(-ret));
+        return ret;
     }
 
     return 0;
@@ -614,7 +684,7 @@ int Device::devoptab_ftruncate(void *fd, off_t len) {
 
     if (!file->write_mode) {
         log_write("[FTP] Attempt to truncate a read-only file\n");
-        return EBADF;
+        return -EBADF;
     }
 
     file->entry->st.st_size = len;

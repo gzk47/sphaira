@@ -223,7 +223,6 @@ long minizip_seek_file_func_stdio(voidpf opaque, voidpf stream, ZPOS64_T offset,
 
 uLong minizip_read_file_func_stdio(voidpf opaque, voidpf stream, void* buf, uLong size) {
     auto file = static_cast<std::FILE*>(stream);
-    log_write("[ZIP] doing read\n");
     return std::fread(buf, 1, size, file);
 }
 

@@ -235,7 +235,7 @@ Result CreateDirectoryRecursivelyWithPath(FsFileSystem* fs, const FsPath& _path,
 
     // strip file name form path.
     const auto last_slash = std::strrchr(_path, '/');
-    if (!last_slash) {
+    if (!last_slash || last_slash == _path.s) {
         R_SUCCEED();
     }
 

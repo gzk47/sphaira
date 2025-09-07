@@ -73,13 +73,13 @@ private:
     int devoptab_fsync(void *fd) override;
 
     std::pair<bool, long> webdav_custom_command(const std::string& path, const std::string& cmd, std::string_view postfields, std::span<const std::string> headers, bool is_dir, std::vector<char>* response_data = nullptr);
-    bool webdav_dirlist(const std::string& path, DirEntries& out);
-    bool webdav_stat(const std::string& path, struct stat* st, bool is_dir);
-    bool webdav_remove_file_folder(const std::string& path, bool is_dir);
-    bool webdav_unlink(const std::string& path);
-    bool webdav_rename(const std::string& old_path, const std::string& new_path, bool is_dir);
-    bool webdav_mkdir(const std::string& path);
-    bool webdav_rmdir(const std::string& path);
+    int webdav_dirlist(const std::string& path, DirEntries& out);
+    int webdav_stat(const std::string& path, struct stat* st, bool is_dir);
+    int webdav_remove_file_folder(const std::string& path, bool is_dir);
+    int webdav_unlink(const std::string& path);
+    int webdav_rename(const std::string& old_path, const std::string& new_path, bool is_dir);
+    int webdav_mkdir(const std::string& path);
+    int webdav_rmdir(const std::string& path);
 };
 
 size_t dummy_data_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
@@ -126,7 +126,7 @@ std::pair<bool, long> Device::webdav_custom_command(const std::string& path, con
     return {true, response_code};
 }
 
-bool Device::webdav_dirlist(const std::string& path, DirEntries& out) {
+int Device::webdav_dirlist(const std::string& path, DirEntries& out) {
     const std::string_view post_fields =
         "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
         "<d:propfind xmlns:d=\"DAV:\">"
@@ -143,9 +143,20 @@ bool Device::webdav_dirlist(const std::string& path, DirEntries& out) {
 
     std::vector<char> chunk;
     const auto [success, response_code] = webdav_custom_command(path, "PROPFIND", post_fields, custom_headers, true, &chunk);
-    if (!success || response_code != 207) {
-        log_write("[WEBDAV] PROPFIND failed or returned HTTP error code: %ld\n", response_code);
-        return false;
+    if (!success) {
+        return -EIO;
+    }
+
+    switch (response_code) {
+        case 207: // Multi-Status
+            break;
+        case 404: // Not Found
+            return -ENOENT;
+        case 403: // Forbidden
+            return -EACCES;
+        default:
+            log_write("[WEBDAV] Unexpected HTTP response code: %ld\n", response_code);
+            return -EIO;
     }
 
     SCOPED_TIMESTAMP("webdav_dirlist parse");
@@ -154,7 +165,7 @@ bool Device::webdav_dirlist(const std::string& path, DirEntries& out) {
     const auto result = doc.load_buffer_inplace(chunk.data(), chunk.size());
     if (!result) {
         log_write("[WEBDAV] Failed to parse XML: %s\n", result.description());
-        return false;
+        return -EIO;
     }
 
     log_write("\n[WEBDAV] XML parsed successfully\n");
@@ -219,11 +230,11 @@ bool Device::webdav_dirlist(const std::string& path, DirEntries& out) {
 
     log_write("[WEBDAV] Parsed %zu entries from directory listing\n", out.size());
 
-    return true;
+    return 0;
 }
 
 // todo: use PROPFIND to get file size and time, although it is slower...
-bool Device::webdav_stat(const std::string& path, struct stat* st, bool is_dir) {
+int Device::webdav_stat(const std::string& path, struct stat* st, bool is_dir) {
     std::memset(st, 0, sizeof(*st));
     const auto url = build_url(path, is_dir);
 
@@ -234,7 +245,7 @@ bool Device::webdav_stat(const std::string& path, struct stat* st, bool is_dir) 
     const auto res = curl_easy_perform(this->curl);
     if (res != CURLE_OK) {
         log_write("[WEBDAV] curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-        return false;
+        return -EIO;
     }
 
     long response_code = 0;
@@ -252,10 +263,17 @@ bool Device::webdav_stat(const std::string& path, struct stat* st, bool is_dir) 
     const char* effective_url{};
     curl_easy_getinfo(this->curl, CURLINFO_EFFECTIVE_URL, &effective_url);
 
-    // handle error codes.
-    if (response_code != 200 && response_code != 206) {
-        log_write("[WEBDAV] Unexpected HTTP response code: %ld\n", response_code);
-        return false;
+    switch (response_code) {
+        case 200: // OK
+        case 206: // Partial Content
+            break;
+        case 404: // Not Found
+            return -ENOENT;
+        case 403: // Forbidden
+            return -EACCES;
+        default:
+            log_write("[WEBDAV] Unexpected HTTP response code: %ld\n", response_code);
+            return -EIO;
     }
 
     if (effective_url) {
@@ -280,24 +298,35 @@ bool Device::webdav_stat(const std::string& path, struct stat* st, bool is_dir) 
     st->st_ctime = st->st_mtime;
     st->st_nlink = 1;
 
-    return true;
+    return 0;
 }
 
-bool Device::webdav_remove_file_folder(const std::string& path, bool is_dir) {
+int Device::webdav_remove_file_folder(const std::string& path, bool is_dir) {
     const auto [success, response_code] = webdav_custom_command(path, "DELETE", "", {}, is_dir);
-    if (!success || (response_code != 200 && response_code != 204)) {
-        log_write("[WEBDAV] DELETE command failed with response code: %ld\n", response_code);
-        return false;
+    if (!success) {
+        return -EIO;
     }
 
-    return true;
+    switch (response_code) {
+        case 200: // OK
+        case 204: // No Content
+            return 0;
+        case 404: // Not Found
+            return -ENOENT;
+        case 403: // Forbidden
+            return -EACCES;
+        case 409: // Conflict
+            return -ENOTEMPTY; // Directory not empty
+        default:
+            return -EIO;
+    }
 }
 
-bool Device::webdav_unlink(const std::string& path) {
+int Device::webdav_unlink(const std::string& path) {
     return webdav_remove_file_folder(path, false);
 }
 
-bool Device::webdav_rename(const std::string& old_path, const std::string& new_path, bool is_dir) {
+int Device::webdav_rename(const std::string& old_path, const std::string& new_path, bool is_dir) {
     log_write("[WEBDAV] Renaming %s to %s\n", old_path.c_str(), new_path.c_str());
 
     const std::string custom_headers[] = {
@@ -306,25 +335,49 @@ bool Device::webdav_rename(const std::string& old_path, const std::string& new_p
     };
 
     const auto [success, response_code] = webdav_custom_command(old_path, "MOVE", "", custom_headers, is_dir);
-    if (!success || (response_code != 200 && response_code != 201 && response_code != 204)) {
-        log_write("[WEBDAV] MOVE command failed with response code: %ld\n", response_code);
-        return false;
+
+    if (!success) {
+        return -EIO;
     }
 
-    return true;
+    switch (response_code) {
+        case 201: // Created
+        case 204: // No Content
+            return 0;
+        case 404: // Not Found
+            return -ENOENT;
+        case 403: // Forbidden
+            return -EACCES;
+        case 412: // Precondition Failed
+            return -EEXIST; // Destination already exists and Overwrite is F
+        case 409: // Conflict
+            return -ENOENT; // Parent directory of destination does not exist
+        default:
+            return -EIO;
+    }
 }
 
-bool Device::webdav_mkdir(const std::string& path) {
+int Device::webdav_mkdir(const std::string& path) {
     const auto [success, response_code] = webdav_custom_command(path, "MKCOL", "", {}, true);
-    if (!success || response_code != 201) {
-        log_write("[WEBDAV] MKCOL command failed with response code: %ld\n", response_code);
-        return false;
+    if (!success) {
+        return -EIO;
     }
 
-    return true;
+    switch (response_code) {
+        case 201: // Created
+            return 0;
+        case 405: // Method Not Allowed
+            return -EEXIST; // Collection already exists
+        case 409: // Conflict
+            return -ENOENT; // Parent collection does not exist
+        case 403: // Forbidden
+            return -EACCES;
+        default:
+            return -EIO;
+    }
 }
 
-bool Device::webdav_rmdir(const std::string& path) {
+int Device::webdav_rmdir(const std::string& path) {
     return webdav_remove_file_folder(path, true);
 }
 
@@ -339,9 +392,9 @@ int Device::devoptab_open(void *fileStruct, const char *path, int flags, int mod
 
     if ((flags & O_ACCMODE) == O_RDONLY) {
         // ensure the file exists and get its size.
-        if (!webdav_stat(path, &st, false)) {
-            log_write("[WEBDAV] File not found: %s\n", path);
-            return -ENOENT;
+        const auto ret = webdav_stat(path, &st, false);
+        if (ret < 0) {
+            return ret;
         }
 
         if (st.st_mode & S_IFDIR) {
@@ -456,32 +509,44 @@ int Device::devoptab_fstat(void *fd, struct stat *st) {
 }
 
 int Device::devoptab_unlink(const char *path) {
-    if (!webdav_unlink(path)) {
-        return -EIO;
+    const auto ret = webdav_unlink(path);
+    if (ret < 0) {
+        log_write("[WEBDAV] webdav_unlink() failed: %s errno: %s\n", path, std::strerror(-ret));
+        return ret;
     }
 
     return 0;
 }
 
 int Device::devoptab_rename(const char *oldName, const char *newName) {
-    if (!webdav_rename(oldName, newName, false) && !webdav_rename(oldName, newName, true)) {
-        return -EIO;
+    auto ret = webdav_rename(oldName, newName, false);
+    if (ret == -ENOENT) {
+        ret = webdav_rename(oldName, newName, true);
+    }
+
+    if (ret < 0) {
+        log_write("[WEBDAV] webdav_rename() failed: %s to %s errno: %s\n", oldName, newName, std::strerror(-ret));
+        return ret;
     }
 
     return 0;
 }
 
 int Device::devoptab_mkdir(const char *path, int mode) {
-    if (!webdav_mkdir(path)) {
-        return -EIO;
+    const auto ret = webdav_mkdir(path);
+    if (ret < 0) {
+        log_write("[WEBDAV] webdav_mkdir() failed: %s errno: %s\n", path, std::strerror(-ret));
+        return ret;
     }
 
     return 0;
 }
 
 int Device::devoptab_rmdir(const char *path) {
-    if (!webdav_rmdir(path)) {
-        return -EIO;
+    const auto ret = webdav_rmdir(path);
+    if (ret < 0) {
+        log_write("[WEBDAV] webdav_rmdir() failed: %s errno: %s\n", path, std::strerror(-ret));
+        return ret;
     }
 
     return 0;
@@ -491,9 +556,11 @@ int Device::devoptab_diropen(void* fd, const char *path) {
     auto dir = static_cast<Dir*>(fd);
 
     auto entries = new DirEntries();
-    if (!webdav_dirlist(path, *entries)) {
+    const auto ret = webdav_dirlist(path, *entries);
+    if (ret < 0) {
+        log_write("[WEBDAV] webdav_dirlist() failed: %s errno: %s\n", path, std::strerror(-ret));
         delete entries;
-        return -ENOENT;
+        return ret;
     }
 
     dir->entries = entries;
@@ -536,8 +603,14 @@ int Device::devoptab_dirclose(void* fd) {
 }
 
 int Device::devoptab_lstat(const char *path, struct stat *st) {
-    if (!webdav_stat(path, st, false) && !webdav_stat(path, st, true)) {
-        return -ENOENT;
+    auto ret = webdav_stat(path, st, false);
+    if (ret == -ENOENT) {
+        ret = webdav_stat(path, st, true);
+    }
+
+    if (ret < 0) {
+        log_write("[WEBDAV] webdav_stat() failed: %s errno: %s\n", path, std::strerror(-ret));
+        return ret;
     }
 
     return 0;
@@ -548,7 +621,7 @@ int Device::devoptab_ftruncate(void *fd, off_t len) {
 
     if (!file->write_mode) {
         log_write("[WEBDAV] Attempt to truncate a read-only file\n");
-        return EBADF;
+        return -EBADF;
     }
 
     file->entry->st.st_size = len;

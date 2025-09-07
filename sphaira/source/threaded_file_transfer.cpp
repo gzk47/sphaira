@@ -777,9 +777,14 @@ Result TransferUnzipAll(ui::ProgressBox* pbox, void* zfile, fs::Fs* fs, const fs
             continue;
         }
 
+        const auto path_len = std::strlen(path);
+        if (!path_len) {
+            continue;
+        }
+
         pbox->NewTransfer(name);
 
-        if (path[std::strlen(path) -1] == '/') {
+        if (path[path_len -1] == '/') {
             Result rc;
             if (R_FAILED(rc = fs->CreateDirectoryRecursively(path)) && rc != FsError_PathAlreadyExists) {
                 log_write("failed to create folder: %s 0x%04X\n", path.s, rc);

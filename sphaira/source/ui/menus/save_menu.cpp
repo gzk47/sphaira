@@ -730,17 +730,23 @@ void Menu::BackupSaves(std::vector<std::reference_wrapper<Entry>>& entries) {
 
 void Menu::RestoreSave() {
     dump::DumpGetLocation("Select restore location"_i18n, dump::DumpLocationFlag_SdCard|dump::DumpLocationFlag_Stdio, [this](const dump::DumpLocation& location){
-        std::unique_ptr<fs::Fs> fs;
+        std::unique_ptr<fs::Fs> fs{};
+        fs::FsPath mount{};
+
         if (location.entry.type == dump::DumpLocationType_Stdio) {
+            mount = fs::AppendPath(location.stdio[location.entry.index].mount, location.stdio[location.entry.index].dump_path);
             fs = std::make_unique<fs::FsStdio>(true, location.stdio[location.entry.index].mount);
         } else if (location.entry.type == dump::DumpLocationType_SdCard) {
             fs = std::make_unique<fs::FsNativeSd>();
+        } else {
+            App::PushErrorBox(MAKERESULT(Module_Libnx, LibnxError_BadInput), "Invalid location type!"_i18n);
+            return;
         }
 
         // get saves in /Saves/Name and /Saves/app_id
         filebrowser::FsDirCollection collections[2]{};
         for (auto i = 0; i < std::size(collections); i++) {
-            const auto save_path = fs::AppendPath(fs->Root(), BuildSaveBasePath(m_entries[m_index], i != 0));
+            const auto save_path = fs::AppendPath(mount, BuildSaveBasePath(m_entries[m_index], i != 0));
             filebrowser::FsView::get_collection(fs.get(), save_path, "", collections[i], true, false, false);
             // reverse as they will be sorted in oldest -> newest.
             // todo: better impl when both id and normal app folders are used.
@@ -763,7 +769,7 @@ void Menu::RestoreSave() {
 
         if (paths.empty()) {
             App::Push<ui::OptionBox>(
-                "No saves found in "_i18n + fs::AppendPath(fs->Root(), BuildSaveBasePath(m_entries[m_index])).toString(),
+                "No saves found in "_i18n + fs::AppendPath(mount, BuildSaveBasePath(m_entries[m_index])).toString(),
                 "OK"_i18n
             );
             return;
