@@ -110,6 +110,7 @@ auto PopupList::Draw(NVGcontext* vg, Theme* theme) -> void {
     gfx::drawText(vg, m_pos + m_title_pos, 24.f, theme->GetColour(ThemeEntryID_TEXT), m_title.c_str());
     gfx::drawRect(vg, 30.f, m_line_top, m_line_width, 1.f, theme->GetColour(ThemeEntryID_LINE));
     gfx::drawRect(vg, 30.f, m_line_bottom, m_line_width, 1.f, theme->GetColour(ThemeEntryID_LINE));
+    gfx::drawTextArgs(vg, 80, 675, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "%zu / %zu", m_index + 1, m_items.size());
 
     m_list->Draw(vg, theme, m_items.size(), [this](auto* vg, auto* theme, auto& v, auto i) {
         const auto& [x, y, w, h] = v;

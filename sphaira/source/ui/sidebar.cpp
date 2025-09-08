@@ -405,6 +405,7 @@ auto Sidebar::Draw(NVGcontext* vg, Theme* theme) -> void {
     }
     gfx::drawRect(vg, m_top_bar, theme->GetColour(ThemeEntryID_LINE));
     gfx::drawRect(vg, m_bottom_bar, theme->GetColour(ThemeEntryID_LINE));
+    gfx::drawTextArgs(vg, m_pos.x + 30, 675, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "%zu / %zu", m_index + 1, m_items.size());
 
     Widget::Draw(vg, theme);
 
