@@ -1322,7 +1322,7 @@ Result Menu::MountGcFs() {
     R_TRY(devoptab::MountXciSource(source, m_storage_trimmed_size, e.lang_entry.name, root));
 
     auto fs = std::make_shared<filebrowser::FsStdioWrapper>(root, [root](){
-        devoptab::UmountXci(root);
+        devoptab::UmountNeworkDevice(root);
     });
 
     filebrowser::MountFsHelper(fs, e.lang_entry.name);

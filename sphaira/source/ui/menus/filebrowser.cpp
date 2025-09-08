@@ -711,15 +711,15 @@ void FsView::OnClick() {
                     }
                 });
         } else if (IsExtension(entry.GetExtension(), NCA_EXTENSIONS)) {
-            MountFileFs(devoptab::MountNca, devoptab::UmountNca);
+            MountFileFs(devoptab::MountNca, devoptab::UmountNeworkDevice);
         } else if (IsExtension(entry.GetExtension(), NSP_EXTENSIONS)) {
-            MountFileFs(devoptab::MountNsp, devoptab::UmountNsp);
+            MountFileFs(devoptab::MountNsp, devoptab::UmountNeworkDevice);
         } else if (IsExtension(entry.GetExtension(), XCI_EXTENSIONS)) {
-            MountFileFs(devoptab::MountXci, devoptab::UmountXci);
+            MountFileFs(devoptab::MountXci, devoptab::UmountNeworkDevice);
         } else if (IsExtension(entry.GetExtension(), "zip")) {
-            MountFileFs(devoptab::MountZip, devoptab::UmountZip);
+            MountFileFs(devoptab::MountZip, devoptab::UmountNeworkDevice);
         } else if (IsExtension(entry.GetExtension(), "bfsar")) {
-            MountFileFs(devoptab::MountBfsar, devoptab::UmountBfsar);
+            MountFileFs(devoptab::MountBfsar, devoptab::UmountNeworkDevice);
         } else if (IsExtension(entry.GetExtension(), MUSIC_EXTENSIONS)) {
             App::Push<music::Menu>(GetFs(), GetNewPathCurrent());
         } else if (IsExtension(entry.GetExtension(), IMAGE_EXTENSIONS)) {

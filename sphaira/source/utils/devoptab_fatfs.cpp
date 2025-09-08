@@ -428,7 +428,6 @@ Result MountFatfsAll() {
         const auto& bis = BIS_MOUNT_ENTRIES[i];
 
         common::MountConfig config{};
-        config.url = "fatfs dummy url";
         config.read_only = true;
         config.dump_hidden = true;
 
@@ -457,10 +456,7 @@ const char* VolumeStr[] {
 };
 
 Result fatfs_read(u8 num, void* dst, u64 offset, u64 size) {
-    // log_write("[FAT] num: %u\n", num);
-    log_write("[FAT] read: %s, off: 0x%lx, size: 0x%lx\n", VolumeStr[num], offset, size);
     auto& fat = sphaira::devoptab::g_fat_storage[num];
-    log_write("[FAT] buffered: %p\n", fat.buffered.get());
     return fat.buffered->Read2(dst, offset, size);
 }
 

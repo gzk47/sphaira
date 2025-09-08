@@ -527,7 +527,7 @@ Result Menu::MountNroFs() {
     R_TRY(devoptab::MountNro(App::GetApp()->m_fs.get(), e.path, root));
 
     auto fs = std::make_shared<filebrowser::FsStdioWrapper>(root, [root](){
-        devoptab::UmountNro(root);
+        devoptab::UmountNeworkDevice(root);
     });
 
     filebrowser::MountFsHelper(fs, root);

@@ -10,7 +10,6 @@
 #include <array>
 #include <memory>
 #include <algorithm>
-#include <sys/iosupport.h>
 #include <zlib.h>
 
 namespace sphaira::devoptab {
@@ -113,11 +112,6 @@ struct DirectoryEntry {
 
 using FileTableEntries = std::vector<FileEntry>;
 
-struct Device {
-    std::unique_ptr<common::LruBufferedData> source;
-    DirectoryEntry root;
-};
-
 struct Zfile {
     z_stream z; // zlib stream.
     Bytef* buffer; // buffer that compressed data is read into.
@@ -126,7 +120,6 @@ struct Zfile {
 };
 
 struct File {
-    Device* device;
     const FileEntry* entry;
     Zfile zfile; // only used if the file is compressed.
     size_t data_off; // offset of the file data.
@@ -134,7 +127,6 @@ struct File {
 };
 
 struct Dir {
-    Device* device;
     const DirectoryEntry* entry;
     u32 index;
 };
@@ -194,44 +186,58 @@ void set_stat_file(const FileEntry* entry, struct stat *st) {
     st->st_ctime = st->st_atime;
 }
 
-int set_errno(struct _reent *r, int err) {
-    r->_errno = err;
-    return -1;
-}
+struct Device final : common::MountDevice {
+    Device(std::unique_ptr<common::LruBufferedData>&& _source, const DirectoryEntry& _root, const common::MountConfig& _config)
+    : MountDevice{_config}
+    , source{std::forward<decltype(_source)>(_source)}
+    , root{_root} {
 
-int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int flags, int mode) {
-    auto device = (Device*)r->deviceData;
-    auto file = static_cast<File*>(fileStruct);
-    std::memset(file, 0, sizeof(*file));
-
-    char path[PATH_MAX]{};
-    if (!common::fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
     }
 
-    const auto entry = find_file_entry(device->root, path);
+private:
+    bool Mount() override { return true; }
+    int devoptab_open(void *fileStruct, const char *path, int flags, int mode) override;
+    int devoptab_close(void *fd) override;
+    ssize_t devoptab_read(void *fd, char *ptr, size_t len) override;
+    off_t devoptab_seek(void *fd, off_t pos, int dir) override;
+    int devoptab_fstat(void *fd, struct stat *st) override;
+    int devoptab_diropen(void* fd, const char *path) override;
+    int devoptab_dirreset(void* fd) override;
+    int devoptab_dirnext(void* fd, char *filename, struct stat *filestat) override;
+    int devoptab_dirclose(void* fd) override;
+    int devoptab_lstat(const char *path, struct stat *st) override;
+
+private:
+    std::unique_ptr<common::LruBufferedData> source;
+    const DirectoryEntry root;
+};
+
+int Device::devoptab_open(void *fileStruct, const char *path, int flags, int mode) {
+    auto file = static_cast<File*>(fileStruct);
+
+    const auto entry = find_file_entry(this->root, path);
     if (!entry) {
-        return set_errno(r, ENOENT);
+        return -ENOENT;
     }
 
     if ((entry->flags & mmz_Flag_Encrypted) || (entry->flags & mmz_Flag_StrongEncrypted)) {
         log_write("[ZIP] encrypted zip not supported\n");
-        return set_errno(r, ENOENT);
+        return -ENOENT;
     }
 
     if (entry->compression_type != mmz_Compression_None && entry->compression_type != mmz_Compression_Deflate) {
         log_write("[ZIP] unsuported compression type: %u\n", entry->compression_type);
-        return set_errno(r, ENOENT);
+        return -ENOENT;
     }
 
     mmz_LocalHeader local_hdr{};
     auto offset = entry->local_file_header_off;
-    if (R_FAILED(device->source->Read2(&local_hdr, offset, sizeof(local_hdr)))) {
-        return set_errno(r, ENOENT);
+    if (R_FAILED(this->source->Read2(&local_hdr, offset, sizeof(local_hdr)))) {
+        return -ENOENT;
     }
 
     if (local_hdr.sig != LOCAL_HEADER_SIG) {
-        return set_errno(r, ENOENT);
+        return -ENOENT;
     }
 
     offset += sizeof(local_hdr) + local_hdr.filename_len + local_hdr.extrafield_len;
@@ -239,12 +245,12 @@ int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int fla
     // todo: does a decs take prio over file header?
     if (local_hdr.flags & mmz_Flag_DataDescriptor) {
         mmz_DataDescriptor data_desc{};
-        if (R_FAILED(device->source->Read2(&data_desc, offset, sizeof(data_desc)))) {
-            return set_errno(r, ENOENT);
+        if (R_FAILED(this->source->Read2(&data_desc, offset, sizeof(data_desc)))) {
+            return -ENOENT;
         }
 
         if (data_desc.sig != DATA_DESCRIPTOR_SIG) {
-            return set_errno(r, ENOENT);
+            return -ENOENT;
         }
 
         offset += sizeof(data_desc);
@@ -253,41 +259,39 @@ int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int fla
     if (entry->compression_type == mmz_Compression_Deflate) {
         auto& zfile = file->zfile;
         zfile.buffer_size = 1024 * 64;
-        zfile.buffer = (Bytef*)calloc(1, zfile.buffer_size);
+        zfile.buffer = (Bytef*)std::calloc(1, zfile.buffer_size);
         if (!zfile.buffer) {
-            return set_errno(r, ENOENT);
+            return -ENOENT;
         }
 
         // skip zlib header.
         if (Z_OK != inflateInit2(&zfile.z, -MAX_WBITS)) {
-            free(zfile.buffer);
+            std::free(zfile.buffer);
             zfile.buffer = nullptr;
-            return set_errno(r, ENOENT);
+            return -ENOENT;
         }
     }
 
-    file->device = device;
     file->entry = entry;
     file->data_off = offset;
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_close(struct _reent *r, void *fd) {
+int Device::devoptab_close(void *fd) {
     auto file = static_cast<File*>(fd);
 
-    if (file->entry->compression_type == mmz_Compression_Deflate) {
+     if (file->entry->compression_type == mmz_Compression_Deflate) {
         inflateEnd(&file->zfile.z);
 
         if (file->zfile.buffer) {
-            free(file->zfile.buffer);
+            std::free(file->zfile.buffer);
         }
     }
 
-    std::memset(file, 0, sizeof(*file));
-    return r->_errno = 0;
+    return 0;
 }
 
-ssize_t devoptab_read(struct _reent *r, void *fd, char *ptr, size_t len) {
+ssize_t Device::devoptab_read(void *fd, char *ptr, size_t len) {
     auto file = static_cast<File*>(fd);
     len = std::min(len, file->entry->uncompressed_size - file->off);
 
@@ -296,8 +300,8 @@ ssize_t devoptab_read(struct _reent *r, void *fd, char *ptr, size_t len) {
     }
 
     if (file->entry->compression_type == mmz_Compression_None) {
-        if (R_FAILED(file->device->source->Read2(ptr, file->data_off + file->off, len))) {
-            return set_errno(r, ENOENT);
+        if (R_FAILED(this->source->Read2(ptr, file->data_off + file->off, len))) {
+            return -ENOENT;
         }
     } else if (file->entry->compression_type == mmz_Compression_Deflate) {
         auto& zfile = file->zfile;
@@ -309,8 +313,8 @@ ssize_t devoptab_read(struct _reent *r, void *fd, char *ptr, size_t len) {
             // check if we need to fetch more data.
             if (!zfile.z.next_in || !zfile.z.avail_in) {
                 const auto clen = std::min(zfile.buffer_size, file->entry->compressed_size - zfile.compressed_off);
-                if (R_FAILED(file->device->source->Read2(zfile.buffer, file->data_off + zfile.compressed_off, clen))) {
-                    return set_errno(r, ENOENT);
+                if (R_FAILED(this->source->Read2(zfile.buffer, file->data_off + zfile.compressed_off, clen))) {
+                    return -ENOENT;
                 }
 
                 zfile.compressed_off += clen;
@@ -324,7 +328,7 @@ ssize_t devoptab_read(struct _reent *r, void *fd, char *ptr, size_t len) {
                     len -= zfile.z.avail_out;
                 } else {
                     log_write("[ZLIB] failed to inflate: %d %s\n", rc, zfile.z.msg);
-                    return set_errno(r, ENOENT);
+                    return -ENOENT;
                 }
             }
         }
@@ -334,7 +338,7 @@ ssize_t devoptab_read(struct _reent *r, void *fd, char *ptr, size_t len) {
     return len;
 }
 
-off_t devoptab_seek(struct _reent *r, void *fd, off_t pos, int dir) {
+off_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
     auto file = static_cast<File*>(fd);
 
     // seek like normal.
@@ -365,58 +369,44 @@ off_t devoptab_seek(struct _reent *r, void *fd, off_t pos, int dir) {
         }
     }
 
-    r->_errno = 0;
     return file->off = std::clamp<u64>(pos, 0, file->entry->uncompressed_size);
 }
 
-int devoptab_fstat(struct _reent *r, void *fd, struct stat *st) {
+int Device::devoptab_fstat(void *fd, struct stat *st) {
     auto file = static_cast<File*>(fd);
 
-    std::memset(st, 0, sizeof(*st));
     set_stat_file(file->entry, st);
-    return r->_errno = 0;
+    return 0;
 }
 
-DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_path) {
-    auto device = (Device*)r->deviceData;
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    std::memset(dir, 0, sizeof(*dir));
+int Device::devoptab_diropen(void* fd, const char *path) {
+    auto dir = static_cast<Dir*>(fd);
 
-    char path[PATH_MAX];
-    if (!common::fix_path(_path, path)) {
-        set_errno(r, ENOENT);
-        return NULL;
-    }
-
-    const auto entry = find_dir_entry(device->root, path);
+    const auto entry = find_dir_entry(this->root, path);
     if (!entry) {
-        set_errno(r, ENOENT);
-        return NULL;
+        return -ENOENT;
     }
 
-    dir->device = device;
     dir->entry = entry;
-    r->_errno = 0;
-    return dirState;
+    return 0;
 }
 
-int devoptab_dirreset(struct _reent *r, DIR_ITER *dirState) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
+int Device::devoptab_dirreset(void* fd) {
+    auto dir = static_cast<Dir*>(fd);
 
     dir->index = 0;
 
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struct stat *filestat) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    std::memset(filestat, 0, sizeof(*filestat));
+int Device::devoptab_dirnext(void* fd, char *filename, struct stat *filestat) {
+    auto dir = static_cast<Dir*>(fd);
 
     u32 index = dir->index;
     if (index >= dir->entry->dir_child.size()) {
         index -= dir->entry->dir_child.size();
         if (index >= dir->entry->file_child.size()) {
-            return set_errno(r, ENOENT);
+            return -ENOENT;
         } else {
             const auto& entry = dir->entry->file_child[index];
             const auto rel_path = entry.path.substr(entry.path.find_last_of('/') + 1);
@@ -434,58 +424,30 @@ int devoptab_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struc
     }
 
     dir->index++;
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_dirclose(struct _reent *r, DIR_ITER *dirState) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
+int Device::devoptab_dirclose(void* fd) {
+    auto dir = static_cast<Dir*>(fd);
     std::memset(dir, 0, sizeof(*dir));
 
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
-    auto device = (Device*)r->deviceData;
-
-    if (!device) {
-        return set_errno(r, ENOENT);
-    }
-
-    char path[PATH_MAX];
-    if (!common::fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
-    }
-
-    std::memset(st, 0, sizeof(*st));
+int Device::devoptab_lstat(const char *path, struct stat *st) {
     st->st_nlink = 1;
 
-    if (find_dir_entry(device->root, path)) {
+    if (find_dir_entry(this->root, path)) {
         st->st_mode = S_IFDIR | S_IRUSR | S_IRGRP | S_IROTH;
-    } else if (auto entry = find_file_entry(device->root, path)) {
+    } else if (auto entry = find_file_entry(this->root, path)) {
         set_stat_file(entry, st);
     } else {
         log_write("[ZIP] didn't find in lstat\n");
-        return set_errno(r, ENOENT);
+        return -ENOENT;
     }
 
-    return r->_errno = 0;
+    return 0;
 }
-
-constexpr devoptab_t DEVOPTAB = {
-    .structSize   = sizeof(File),
-    .open_r       = devoptab_open,
-    .close_r      = devoptab_close,
-    .read_r       = devoptab_read,
-    .seek_r       = devoptab_seek,
-    .fstat_r      = devoptab_fstat,
-    .stat_r       = devoptab_lstat,
-    .dirStateSize = sizeof(Dir),
-    .diropen_r    = devoptab_diropen,
-    .dirreset_r   = devoptab_dirreset,
-    .dirnext_r    = devoptab_dirnext,
-    .dirclose_r   = devoptab_dirclose,
-    .lstat_r      = devoptab_lstat,
-};
 
 auto BuildPath(const std::string& path) -> std::string {
     if (path.starts_with('/')) {
@@ -600,48 +562,13 @@ Result ParseZip(common::LruBufferedData* source, s64 size, FileTableEntries& out
     R_SUCCEED();
 }
 
-struct Entry {
-    Device device{};
-    devoptab_t devoptab{};
-    fs::FsPath path{};
-    fs::FsPath mount{};
-    char name[32]{};
-    s32 ref_count{};
-
-    ~Entry() {
-        RemoveDevice(mount);
-    }
-};
-
-Mutex g_mutex;
-std::array<std::unique_ptr<Entry>, common::MAX_ENTRIES> g_entries;
-
 } // namespace
 
 Result MountZip(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
-    SCOPED_MUTEX(&g_mutex);
-
-    // check if we already have the save mounted.
-    for (auto& e : g_entries) {
-        if (e && e->path == path) {
-            e->ref_count++;
-            out_path = e->mount;
-            R_SUCCEED();
-        }
-    }
-
-    // otherwise, find next free entry.
-    auto itr = std::ranges::find_if(g_entries, [](auto& e){
-        return !e;
-    });
-    R_UNLESS(itr != g_entries.end(), 0x1);
-
-    const auto index = std::distance(g_entries.begin(), itr);
     auto source = std::make_shared<yati::source::File>(fs, path);
 
     s64 size;
     R_TRY(source->GetSize(&size));
-
     auto buffered = std::make_unique<common::LruBufferedData>(source, size);
 
     FileTableEntries table_entries;
@@ -651,44 +578,18 @@ Result MountZip(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
     DirectoryEntry root;
     Parse(table_entries, root);
 
-    auto entry = std::make_unique<Entry>();
-    entry->path = path;
-    entry->devoptab = DEVOPTAB;
-    entry->devoptab.name = entry->name;
-    entry->devoptab.deviceData = &entry->device;
-    entry->device.source = std::move(buffered);
-    entry->device.root = root;
-    std::snprintf(entry->name, sizeof(entry->name), "zip_%zu", index);
-    std::snprintf(entry->mount, sizeof(entry->mount), "zip_%zu:/", index);
-
-    R_UNLESS(AddDevice(&entry->devoptab) >= 0, 0x1);
-    log_write("[ZIP] DEVICE SUCCESS %s %s\n", path.s, entry->name);
-
-    out_path = entry->mount;
-    entry->ref_count++;
-    *itr = std::move(entry);
+    if (!common::MountReadOnlyIndexDevice(
+        [&buffered, &root](const common::MountConfig& config) {
+            return std::make_unique<Device>(std::move(buffered), root, config);
+        },
+        sizeof(File), sizeof(Dir),
+        "ZIP", out_path
+    )) {
+        log_write("[ZIP] Failed to mount %s\n", path.s);
+        R_THROW(0x1);
+    }
 
     R_SUCCEED();
-}
-
-void UmountZip(const fs::FsPath& mount) {
-    SCOPED_MUTEX(&g_mutex);
-
-    auto itr = std::ranges::find_if(g_entries, [&mount](auto& e){
-        return e && e->mount == mount;
-    });
-
-    if (itr == g_entries.end()) {
-        return;
-    }
-
-    if ((*itr)->ref_count) {
-        (*itr)->ref_count--;
-    }
-
-    if (!(*itr)->ref_count) {
-        itr->reset();
-    }
 }
 
 } // namespace sphaira::devoptab

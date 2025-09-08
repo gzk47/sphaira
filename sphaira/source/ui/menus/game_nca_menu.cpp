@@ -413,7 +413,7 @@ Result Menu::MountNcaFs() {
         R_TRY(devoptab::MountNcaNcm(m_meta.cs, &e.content_id, root));
 
         auto fs = std::make_shared<filebrowser::FsStdioWrapper>(root, [root](){
-            devoptab::UmountNca(root);
+            devoptab::UmountNeworkDevice(root);
         });
 
         filebrowser::MountFsHelper(fs, utils::hexIdToStr(e.content_id).str);

@@ -820,6 +820,39 @@ bool MountNetworkDevice2(std::unique_ptr<MountDevice>&& device, const MountConfi
     return true;
 }
 
+bool MountReadOnlyIndexDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* name, fs::FsPath& out_path) {
+    static Mutex mutex{};
+    static u32 next_index{};
+    SCOPED_MUTEX(&mutex);
+
+    MountConfig config{};
+    config.read_only = true;
+    config.no_stat_dir = false;
+    config.no_stat_file = false;
+    config.fs_hidden = true;
+    config.dump_hidden = true;
+
+    const auto index = next_index;
+    next_index = (next_index + 1) % 30;
+
+    fs::FsPath _name{};
+    std::snprintf(_name, sizeof(_name), "%s_%u", name, index);
+
+    fs::FsPath _mount{};
+    std::snprintf(_mount, sizeof(_mount), "%s_%u:/", name, index);
+
+    if (!common::MountNetworkDevice2(
+        create_device(config),
+        config, file_size, dir_size,
+        _name, _mount
+    )) {
+        return false;
+    }
+
+    out_path = _mount;
+    return true;
+}
+
 Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* name, bool force_read_only) {
     {
         static Mutex rw_lock_init_mutex{};
@@ -1444,6 +1477,21 @@ void UmountAllNeworkDevices() {
 
         log_write("[DEVOPTAB] Unmounting %s\n", entry->device.config.url.c_str());
         entry.reset();
+    }
+}
+
+void UmountNeworkDevice(const fs::FsPath& mount) {
+    SCOPED_RWLOCK(&g_rwlock, true);
+
+    auto it = std::ranges::find_if(g_entries, [&](const auto& e){
+        return e && e->mount == mount;
+    });
+
+    if (it != g_entries.end()) {
+        log_write("[DEVOPTAB] Unmounting %s\n", (*it)->device.config.url.c_str());
+        it->reset();
+    } else {
+        log_write("[DEVOPTAB] No such mount %s\n", mount.s);
     }
 }
 

@@ -1131,8 +1131,8 @@ Result Menu::MountSaveFs() {
         fs::FsPath root;
         R_TRY(devoptab::MountSaveSystem(e.system_save_data_id, root));
 
-        auto fs = std::make_shared<filebrowser::FsStdioWrapper>(root, [&e](){
-            devoptab::UnmountSave(e.system_save_data_id);
+        auto fs = std::make_shared<filebrowser::FsStdioWrapper>(root, [root](){
+            devoptab::UmountNeworkDevice(root);
         });
 
         filebrowser::MountFsHelper(fs, e.GetName());

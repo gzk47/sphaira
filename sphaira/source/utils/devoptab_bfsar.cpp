@@ -4,8 +4,6 @@
 #include "defines.hpp"
 #include "log.hpp"
 
-#include "yati/container/nsp.hpp"
-#include "yati/container/xci.hpp"
 #include "yati/source/file.hpp"
 
 #include <pulsar.h>
@@ -15,24 +13,16 @@
 #include <array>
 #include <memory>
 #include <algorithm>
-#include <sys/iosupport.h>
 
 namespace sphaira::devoptab {
 namespace {
 
-struct Device {
-    PLSR_BFSAR bfsar;
-    std::FILE* file; // points to archive file.
-};
-
 struct File {
-    Device* device;
     PLSR_BFWARFileInfo info;
     size_t off;
 };
 
 struct Dir {
-    Device* device;
     u32 index;
 };
 
@@ -82,56 +72,69 @@ PLSR_RC GetFileInfo(const PLSR_BFSAR *bfsar, std::string_view path, PLSR_BFWARFi
 
 }
 
-int set_errno(struct _reent *r, int err) {
-    r->_errno = err;
-    return -1;
-}
-
-int devoptab_open(struct _reent *r, void *fileStruct, const char *_path, int flags, int mode) {
-    auto device = (Device*)r->deviceData;
-    auto file = static_cast<File*>(fileStruct);
-    std::memset(file, 0, sizeof(*file));
-
-    char path[PATH_MAX];
-    if (!common::fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
+struct Device final : common::MountDevice {
+    Device(const PLSR_BFSAR& _bfsar, const common::MountConfig& _config)
+    : MountDevice{_config}
+    , bfsar{_bfsar} {
+        this->file = this->bfsar.ar.handle->f;
     }
+
+    ~Device() {
+        plsrBFSARClose(&bfsar);
+    }
+
+private:
+    bool Mount() override { return true; }
+    int devoptab_open(void *fileStruct, const char *path, int flags, int mode) override;
+    int devoptab_close(void *fd) override;
+    ssize_t devoptab_read(void *fd, char *ptr, size_t len) override;
+    off_t devoptab_seek(void *fd, off_t pos, int dir) override;
+    int devoptab_fstat(void *fd, struct stat *st) override;
+    int devoptab_diropen(void* fd, const char *path) override;
+    int devoptab_dirreset(void* fd) override;
+    int devoptab_dirnext(void* fd, char *filename, struct stat *filestat) override;
+    int devoptab_dirclose(void* fd) override;
+    int devoptab_lstat(const char *path, struct stat *st) override;
+
+private:
+    PLSR_BFSAR bfsar;
+    std::FILE* file; // points to archive file.
+};
+
+int Device::devoptab_open(void *fileStruct, const char *path, int flags, int mode) {
+    auto file = static_cast<File*>(fileStruct);
 
     PLSR_BFWARFileInfo info;
-    if (R_FAILED(GetFileInfo(&device->bfsar, path, info))) {
-        return set_errno(r, ENOENT);
+    if (R_FAILED(GetFileInfo(&this->bfsar, path, info))) {
+        return -ENOENT;
     }
 
-    file->device = device;
     file->info = info;
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_close(struct _reent *r, void *fd) {
+int Device::devoptab_close(void *fd) {
     auto file = static_cast<File*>(fd);
     std::memset(file, 0, sizeof(*file));
 
-    return r->_errno = 0;
+    return 0;
 }
 
-ssize_t devoptab_read(struct _reent *r, void *fd, char *ptr, size_t len) {
+ssize_t Device::devoptab_read(void *fd, char *ptr, size_t len) {
     auto file = static_cast<File*>(fd);
     const auto& info = file->info;
 
-    // const auto real_len = len;
     // plsr seems to read oob, so allow for some tollerance.
     const auto oob_allowed = 64;
     len = std::min(len, info.size + oob_allowed - file->off);
-    std::fseek(file->device->file, file->info.offset + file->off, SEEK_SET);
-    const auto bytes_read = std::fread(ptr, 1, len, file->device->file);
-
-    // log_write("bytes read: %zu len: %zu real_len: %zu off: %zu size: %u\n", bytes_read, len, real_len, file->off, info.size);
+    std::fseek(this->file, file->info.offset + file->off, SEEK_SET);
+    const auto bytes_read = std::fread(ptr, 1, len, this->file);
 
     file->off += bytes_read;
     return bytes_read;
 }
 
-off_t devoptab_seek(struct _reent *r, void *fd, off_t pos, int dir) {
+off_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
     auto file = static_cast<File*>(fd);
     const auto& info = file->info;
 
@@ -141,11 +144,10 @@ off_t devoptab_seek(struct _reent *r, void *fd, off_t pos, int dir) {
         pos = info.size;
     }
 
-    r->_errno = 0;
     return file->off = std::clamp<u64>(pos, 0, info.size);
 }
 
-int devoptab_fstat(struct _reent *r, void *fd, struct stat *st) {
+int Device::devoptab_fstat(void *fd, struct stat *st) {
     auto file = static_cast<File*>(fd);
     const auto& info = file->info;
 
@@ -153,51 +155,36 @@ int devoptab_fstat(struct _reent *r, void *fd, struct stat *st) {
     st->st_nlink = 1;
     st->st_size = info.size;
     st->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
-    return r->_errno = 0;
+    return 0;
 }
 
-DIR_ITER* devoptab_diropen(struct _reent *r, DIR_ITER *dirState, const char *_path) {
-    auto device = (Device*)r->deviceData;
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    std::memset(dir, 0, sizeof(*dir));
-
-    char path[PATH_MAX];
-    if (!common::fix_path(_path, path)) {
-        set_errno(r, ENOENT);
-        return NULL;
-    }
-
+int Device::devoptab_diropen(void* fd, const char *path) {
     if (!std::strcmp(path, "/")) {
-        dir->device = device;
-    } else {
-        set_errno(r, ENOENT);
-        return NULL;
+        return 0;
     }
 
-    r->_errno = 0;
-    return dirState;
+    return -ENOENT;
 }
 
-int devoptab_dirreset(struct _reent *r, DIR_ITER *dirState) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
+int Device::devoptab_dirreset(void* fd) {
+    auto dir = static_cast<Dir*>(fd);
 
     dir->index = 0;
 
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struct stat *filestat) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
-    std::memset(filestat, 0, sizeof(*filestat));
+int Device::devoptab_dirnext(void* fd, char *filename, struct stat *filestat) {
+    auto dir = static_cast<Dir*>(fd);
 
     do {
-        if (dir->index >= plsrBFSARSoundCount(&dir->device->bfsar)) {
-            log_write("finished getting call entries: %u vs %u\n", dir->index, plsrBFSARSoundCount(&dir->device->bfsar));
-            return set_errno(r, ENOENT);
+        if (dir->index >= plsrBFSARSoundCount(&this->bfsar)) {
+            log_write("finished getting call entries: %u vs %u\n", dir->index, plsrBFSARSoundCount(&this->bfsar));
+            return -ENOENT;
         }
 
         PLSR_BFSARSoundInfo info{};
-        if (R_FAILED(plsrBFSARSoundGet(&dir->device->bfsar, dir->index, &info))) {
+        if (R_FAILED(plsrBFSARSoundGet(&this->bfsar, dir->index, &info))) {
             continue;
         }
 
@@ -206,7 +193,7 @@ int devoptab_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struc
             continue;
         }
 
-        if (R_FAILED(plsrBFSARStringGet(&dir->device->bfsar, info.stringIndex, filename, NAME_MAX))) {
+        if (R_FAILED(plsrBFSARStringGet(&this->bfsar, info.stringIndex, filename, NAME_MAX))) {
             continue;
         }
 
@@ -230,139 +217,52 @@ int devoptab_dirnext(struct _reent *r, DIR_ITER *dirState, char *filename, struc
         break;
     } while (dir->index++);
 
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_dirclose(struct _reent *r, DIR_ITER *dirState) {
-    auto dir = static_cast<Dir*>(dirState->dirStruct);
+int Device::devoptab_dirclose(void* fd) {
+    auto dir = static_cast<Dir*>(fd);
     std::memset(dir, 0, sizeof(*dir));
 
-    log_write("[BFSAR] devoptab_dirclose\n");
-    return r->_errno = 0;
+    return 0;
 }
 
-int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
-    auto device = (Device*)r->deviceData;
-
-    char path[PATH_MAX];
-    if (!common::fix_path(_path, path)) {
-        return set_errno(r, ENOENT);
-    }
-
-    std::memset(st, 0, sizeof(*st));
+int Device::devoptab_lstat(const char *path, struct stat *st) {
+    st->st_nlink = 1;
 
     if (!std::strcmp(path, "/")) {
         st->st_mode = S_IFDIR | S_IRUSR | S_IRGRP | S_IROTH;
     } else {
         PLSR_BFWARFileInfo info{};
-        if (R_FAILED(GetFileInfo(&device->bfsar, path, info))) {
-            return set_errno(r, ENOENT);
+        if (R_FAILED(GetFileInfo(&this->bfsar, path, info))) {
+            return -ENOENT;
         }
 
         st->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
         st->st_size = info.size;
     }
 
-    st->st_nlink = 1;
-
-    return r->_errno = 0;
+    return 0;
 }
-
-constexpr devoptab_t DEVOPTAB = {
-    .structSize   = sizeof(File),
-    .open_r       = devoptab_open,
-    .close_r      = devoptab_close,
-    .read_r       = devoptab_read,
-    .seek_r       = devoptab_seek,
-    .fstat_r      = devoptab_fstat,
-    .stat_r       = devoptab_lstat,
-    .dirStateSize = sizeof(Dir),
-    .diropen_r    = devoptab_diropen,
-    .dirreset_r   = devoptab_dirreset,
-    .dirnext_r    = devoptab_dirnext,
-    .dirclose_r   = devoptab_dirclose,
-    .lstat_r      = devoptab_lstat,
-};
-
-struct Entry {
-    Device device{};
-    devoptab_t devoptab{};
-    fs::FsPath path{};
-    fs::FsPath mount{};
-    char name[32]{};
-    s32 ref_count{};
-
-    ~Entry() {
-        log_write("[BFSAR] entry called\n");
-        RemoveDevice(mount);
-        plsrBFSARClose(&device.bfsar);
-    }
-};
-
-Mutex g_mutex;
-std::array<std::unique_ptr<Entry>, common::MAX_ENTRIES> g_entries;
 
 } // namespace
 
 Result MountBfsar(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& out_path) {
-    SCOPED_MUTEX(&g_mutex);
+    PLSR_BFSAR bfsar{};
+    PLSR_RC_TRY(plsrBFSAROpen(path, &bfsar));
 
-    // check if we already have the save mounted.
-    for (auto& e : g_entries) {
-        if (e && e->path == path) {
-            e->ref_count++;
-            out_path = e->mount;
-            R_SUCCEED();
-        }
+    if (!common::MountReadOnlyIndexDevice(
+        [&bfsar](const common::MountConfig& config) {
+            return std::make_unique<Device>(bfsar, config);
+        },
+        sizeof(File), sizeof(Dir),
+        "BFSAR", out_path
+    )) {
+        log_write("[BFSAR] Failed to mount %s\n", path.s);
+        R_THROW(0x1);
     }
-
-    // otherwise, find next free entry.
-    auto itr = std::ranges::find_if(g_entries, [](auto& e){
-        return !e;
-    });
-    R_UNLESS(itr != g_entries.end(), 0x1);
-
-    const auto index = std::distance(g_entries.begin(), itr);
-
-    auto entry = std::make_unique<Entry>();
-    entry->path = path;
-    entry->devoptab = DEVOPTAB;
-    entry->devoptab.name = entry->name;
-    entry->devoptab.deviceData = &entry->device;
-    std::snprintf(entry->name, sizeof(entry->name), "BFSAR_%zu", index);
-    std::snprintf(entry->mount, sizeof(entry->mount), "BFSAR_%zu:/", index);
-
-    PLSR_RC_TRY(plsrBFSAROpen(path, &entry->device.bfsar));
-    entry->device.file = entry->device.bfsar.ar.handle->f;
-
-    R_UNLESS(AddDevice(&entry->devoptab) >= 0, 0x1);
-    log_write("[BFSAR] DEVICE SUCCESS %s %s\n", path.s, entry->name);
-
-    out_path = entry->mount;
-    entry->ref_count++;
-    *itr = std::move(entry);
 
     R_SUCCEED();
-}
-
-void UmountBfsar(const fs::FsPath& mount) {
-    SCOPED_MUTEX(&g_mutex);
-
-    auto itr = std::ranges::find_if(g_entries, [&mount](auto& e){
-        return e && e->mount == mount;
-    });
-
-    if (itr == g_entries.end()) {
-        return;
-    }
-
-    if ((*itr)->ref_count) {
-        (*itr)->ref_count--;
-    }
-
-    if (!(*itr)->ref_count) {
-        itr->reset();
-    }
 }
 
 } // namespace sphaira::devoptab

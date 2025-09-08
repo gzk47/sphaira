@@ -185,7 +185,6 @@ struct MountDevice {
 
 struct MountCurlDevice : MountDevice {
     using MountDevice::MountDevice;
-    // MountCurlDevice(const MountConfig& _config);
     virtual ~MountCurlDevice();
 
     PushThreadData* CreatePushData(CURL* curl, const std::string& url, size_t offset);
@@ -218,5 +217,7 @@ Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file
 
 // same as above but takes in the device and expects the mount name to be set.
 bool MountNetworkDevice2(std::unique_ptr<MountDevice>&& device, const MountConfig& config, size_t file_size, size_t dir_size, const char* name, const char* mount_name);
+
+bool MountReadOnlyIndexDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* name, fs::FsPath& out_path);
 
 } // namespace sphaira::devoptab::common
