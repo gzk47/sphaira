@@ -21,7 +21,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #pragma GCC diagnostic ignored "-Wunused-function"
-#if 0
+#if 1
 #define DR_FLAC_IMPLEMENTATION
 #define DR_FLAC_NO_OGG
 #define DR_FLAC_NO_STDIO
@@ -669,7 +669,7 @@ private:
     #endif
 };
 
-#if 0
+#if 1
 struct DrFLAC final : CustomBase {
     ~DrFLAC() {
         drflac_close(m_flac);
@@ -886,11 +886,12 @@ struct SongEntry {
     }
 };
 
-Mutex g_mutex;
-SongEntry g_songs[MAX_SONGS];
+Mutex g_mutex{};
+SongEntry g_songs[MAX_SONGS]{};
 PLSR_PlayerSoundId g_sound_ids[std::to_underlying(SoundEffect::MAX)]{};
 Thread g_thread{};
 UEvent g_cancel_uevent{};
+std::atomic_bool g_is_init{};
 
 void thread_func(void* arg) {
     auto player = plsrPlayerGetInstance();
@@ -950,6 +951,10 @@ void thread_func(void* arg) {
 } // namespace
 
 Result Init() {
+    if (g_is_init) {
+        R_SUCCEED();
+    }
+
     SCOPED_MUTEX(&g_mutex);
     R_TRY(plsrPlayerInit());
 
@@ -996,14 +1001,21 @@ Result Init() {
     R_TRY(utils::CreateThread(&g_thread, thread_func, nullptr, 1024*128, 0x20));
     R_TRY(threadStart(&g_thread));
 
+    g_is_init = true;
     R_SUCCEED();
 }
 
 void ExitSignal() {
-    ueventSignal(&g_cancel_uevent);
+    if (g_is_init) {
+        ueventSignal(&g_cancel_uevent);
+    }
 }
 
 void Exit() {
+    if (!g_is_init) {
+        return;
+    }
+
     ExitSignal();
     threadWaitForExit(&g_thread);
     threadClose(&g_thread);
@@ -1025,9 +1037,12 @@ void Exit() {
 
     std::memset(g_songs, 0, sizeof(g_songs));
     std::memset(g_sound_ids, 0, sizeof(g_sound_ids));
+    g_is_init = false;
 }
 
 Result PlaySoundEffect(SoundEffect effect) {
+    R_UNLESS(g_is_init, 0x1);
+
     SCOPED_MUTEX(&g_mutex);
     const auto id = g_sound_ids[std::to_underlying(effect)];
 
@@ -1040,6 +1055,8 @@ Result PlaySoundEffect(SoundEffect effect) {
 }
 
 Result OpenSong(fs::Fs* fs, const fs::FsPath& path, u32 flags, SongID* id) {
+    R_UNLESS(g_is_init, 0x1);
+
     SCOPED_MUTEX(&g_mutex);
     R_UNLESS(fs && id && !path.empty(), 0x1);
 
@@ -1064,9 +1081,9 @@ Result OpenSong(fs::Fs* fs, const fs::FsPath& path, u32 flags, SongID* id) {
             else if (path.ends_with(".adf")) {
                 source = std::make_unique<DrMP3>(std::make_unique<GTAViceCityFile>());
             }
-            // else if (path.ends_with(".flac")) {
-            //     source = std::make_unique<DrFLAC>();
-            // }
+            else if (path.ends_with(".flac")) {
+                source = std::make_unique<DrFLAC>();
+            }
             // else if (path.ends_with(".ogg")) {
             //     source = std::make_unique<DrOGG>();
             // }
@@ -1090,6 +1107,8 @@ Result OpenSong(fs::Fs* fs, const fs::FsPath& path, u32 flags, SongID* id) {
 }
 
 Result CloseSong(SongID* id) {
+    R_UNLESS(g_is_init, 0x1);
+
     R_UNLESS(id && *id, 0x1);
     auto e = static_cast<SongEntry*>(*id);
 
@@ -1104,6 +1123,8 @@ Result CloseSong(SongID* id) {
 }
 
 #define LockSongAndDo(cond_func, ...) do { \
+    R_UNLESS(g_is_init, 0x1); \
+    \
     R_UNLESS(id, 0x1); \
     auto e = static_cast<SongEntry*>(id); \
     \

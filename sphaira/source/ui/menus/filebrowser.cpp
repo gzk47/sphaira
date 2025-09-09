@@ -115,7 +115,7 @@ constexpr std::string_view ZIP_EXTENSIONS[] = {
 };
 // supported music playback extensions.
 constexpr std::string_view MUSIC_EXTENSIONS[] = {
-    "bfstm", "bfwav", "wav", "mp3", "ogg", "adf",
+    "bfstm", "bfwav", "wav", "mp3", "ogg", "flac", "adf",
 };
 // supported theme music playback extensions.
 constexpr std::span THEME_MUSIC_EXTENSIONS = MUSIC_EXTENSIONS;
@@ -1475,7 +1475,7 @@ auto FsView::get_collections(fs::Fs* fs, const fs::FsPath& path, const fs::FsPat
 }
 
 auto FsView::get_collection(const fs::FsPath& path, const fs::FsPath& parent_name, FsDirCollection& out, bool inc_file, bool inc_dir, bool inc_size) -> Result {
-    return get_collection(m_fs.get(), path, parent_name, out, true, true, inc_size);
+    return get_collection(m_fs.get(), path, parent_name, out, inc_file, inc_dir, inc_size);
 }
 
 auto FsView::get_collections(const fs::FsPath& path, const fs::FsPath& parent_name, FsDirCollections& out, bool inc_size) -> Result {
