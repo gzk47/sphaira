@@ -5,7 +5,6 @@
 #include "log.hpp"
 #include "ui/nvg_util.hpp"
 #include "i18n.hpp"
-#include "haze_helper.hpp"
 
 #include "utils/thread.hpp"
 
@@ -35,10 +34,10 @@ Menu::Menu(u32 flags) : MenuBase{"USB"_i18n, flags} {
     }});
 
     // if mtp is enabled, disable it for now.
-    m_was_mtp_enabled = haze::IsInit();
+    m_was_mtp_enabled = App::GetMtpEnable();
     if (m_was_mtp_enabled) {
         App::Notify("Disable MTP for usb install"_i18n);
-        haze::Exit();
+        App::SetMtpEnable(false);
     }
 
     // 3 second timeout for transfers.
@@ -70,7 +69,7 @@ Menu::~Menu() {
 
     if (m_was_mtp_enabled) {
         App::Notify("Re-enabled MTP"_i18n);
-        haze::Init();
+        App::SetMtpEnable(true);
     }
 }
 

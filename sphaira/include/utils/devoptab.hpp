@@ -23,6 +23,7 @@ Result MountVfsAll();
 Result MountWebdavAll();
 Result MountHttpAll();
 Result MountFtpAll();
+Result MountSftpAll();
 Result MountNfsAll();
 Result MountSmb2All();
 Result MountFatfsAll();

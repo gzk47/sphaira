@@ -31,7 +31,6 @@
 #include "yati/yati.hpp"
 #include "yati/source/file.hpp"
 
-#include <usbdvd.h>
 #include <minIni.h>
 #include <minizip/zip.h>
 #include <minizip/unzip.h>
@@ -44,6 +43,10 @@
 #include <span>
 #include <utility>
 #include <ranges>
+
+#ifdef ENABLE_LIBUSBDVD
+#include <usbdvd.h>
+#endif // ENABLE_LIBUSBDVD
 
 namespace sphaira::ui::menu::filebrowser {
 namespace {
@@ -724,7 +727,9 @@ void FsView::OnClick() {
             App::Push<music::Menu>(GetFs(), GetNewPathCurrent());
         } else if (IsExtension(entry.GetExtension(), IMAGE_EXTENSIONS)) {
             App::Push<imageview::Menu>(GetFs(), GetNewPathCurrent());
-        } else if (IsExtension(entry.GetExtension(), CDDVD_EXTENSIONS)) {
+        }
+#ifdef ENABLE_LIBUSBDVD
+        else if (IsExtension(entry.GetExtension(), CDDVD_EXTENSIONS)) {
             std::shared_ptr<CUSBDVD> usbdvd;
 
             if (entry.GetExtension() == "cue") {
@@ -748,7 +753,9 @@ void FsView::OnClick() {
             } else {
                 log_write("[USBDVD] failed to mount\n");
             }
-        } else if (IsExtension(entry.GetExtension(), INSTALL_EXTENSIONS)) {
+        }
+#endif // ENABLE_LIBUSBDVD
+        else if (IsExtension(entry.GetExtension(), INSTALL_EXTENSIONS)) {
             InstallFiles();
         } else if (IsSd()) {
             const auto assoc_list = m_menu->FindFileAssocFor();
@@ -1894,12 +1901,6 @@ void FsView::DisplayAdvancedOptions() {
             });
             options->Add<SidebarEntryCallback>("/dev/null (Speed Test)"_i18n, [this](){
                 DisplayHash(hash::Type::Null);
-            });
-            options->Add<SidebarEntryCallback>("Deflate (Speed Test)"_i18n, [this](){
-                DisplayHash(hash::Type::Deflate);
-            });
-            options->Add<SidebarEntryCallback>("ZSTD (Speed Test)"_i18n, [this](){
-                DisplayHash(hash::Type::Zstd);
             });
         });
     }

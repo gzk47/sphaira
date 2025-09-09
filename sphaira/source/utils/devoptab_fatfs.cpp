@@ -460,4 +460,15 @@ Result fatfs_read(u8 num, void* dst, u64 offset, u64 size) {
     return fat.buffered->Read2(dst, offset, size);
 }
 
+// libusbhsfs also defines these, so only define if not using it.
+#ifndef ENABLE_LIBUSBHSFS
+void* ff_memalloc (UINT msize) {
+    return std::malloc(msize);
+}
+
+void ff_memfree (void* mblock) {
+    std::free(mblock);
+}
+#endif // ENABLE_LIBUSBHSFS
+
 } // extern "C"

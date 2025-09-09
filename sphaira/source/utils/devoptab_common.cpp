@@ -1475,7 +1475,7 @@ void UmountAllNeworkDevices() {
             continue;
         }
 
-        log_write("[DEVOPTAB] Unmounting %s\n", entry->device.config.url.c_str());
+        log_write("[DEVOPTAB] Unmounting %s URL: %s\n", entry->mount.s, entry->device.config.url.c_str());
         entry.reset();
     }
 }
@@ -1488,7 +1488,7 @@ void UmountNeworkDevice(const fs::FsPath& mount) {
     });
 
     if (it != g_entries.end()) {
-        log_write("[DEVOPTAB] Unmounting %s\n", (*it)->device.config.url.c_str());
+        log_write("[DEVOPTAB] Unmounting %s URL: %s\n", (*it)->mount.s, (*it)->device.config.url.c_str());
         it->reset();
     } else {
         log_write("[DEVOPTAB] No such mount %s\n", mount.s);

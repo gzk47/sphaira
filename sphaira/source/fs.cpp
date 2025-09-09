@@ -468,6 +468,10 @@ bool DirExists(const FsPath& path) {
 }
 
 Result OpenFile(fs::Fs* fs, const FsPathReal& path, u32 mode, File* f) {
+    const auto should_buffer = (mode & OpenMode_EnableBuffer);
+    // remove the invalid flag so that native fs doesn't error.
+    mode &= ~OpenMode_EnableBuffer;
+
     f->m_fs = fs;
     f->m_mode = mode;
 
@@ -486,6 +490,13 @@ Result OpenFile(fs::Fs* fs, const FsPathReal& path, u32 mode, File* f) {
         }
 
         R_UNLESS(f->m_stdio, Result_FsUnknownStdioError);
+
+        // disable buffering to match native fs behavior.
+        // this also causes problems with network io as it will do double reads.
+        // which kills performance (see sftp).
+        if (!should_buffer) {
+            std::setvbuf(f->m_stdio, nullptr, _IONBF, 0);
+        }
     }
 
     R_SUCCEED();

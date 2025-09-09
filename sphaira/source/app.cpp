@@ -37,7 +37,10 @@
 #include <ctime>
 #include <span>
 #include <dirent.h>
-#include <usbhsfs.h>
+
+#ifdef ENABLE_LIBUSBHSFS
+    #include <usbhsfs.h>
+#endif // ENABLE_LIBUSBHSFS
 
 extern "C" {
     u32 __nx_applet_exit_mode = 0;
@@ -748,6 +751,7 @@ void App::SetNxlinkEnable(bool enable) {
 void App::SetHddEnable(bool enable) {
     if (App::GetHddEnable() != enable) {
         g_app->m_hdd_enabled.Set(enable);
+#ifdef ENABLE_LIBUSBHSFS
         if (enable) {
             if (App::GetWriteProtect()) {
                 usbHsFsSetFileSystemMountFlags(UsbHsFsMountFlags_ReadOnly);
@@ -756,6 +760,7 @@ void App::SetHddEnable(bool enable) {
         } else {
             usbHsFsExit();
         }
+#endif // ENABLE_LIBUSBHSFS
     }
 }
 
@@ -763,11 +768,13 @@ void App::SetWriteProtect(bool enable) {
     if (App::GetWriteProtect() != enable) {
         g_app->m_hdd_write_protect.Set(enable);
 
+#ifdef ENABLE_LIBUSBHSFS
         if (enable) {
             usbHsFsSetFileSystemMountFlags(UsbHsFsMountFlags_ReadOnly);
         } else {
             usbHsFsSetFileSystemMountFlags(0);
         }
+#endif // ENABLE_LIBUSBHSFS
     }
 }
 
@@ -911,22 +918,28 @@ void App::Set12HourTimeEnable(bool enable) {
 void App::SetMtpEnable(bool enable) {
     if (App::GetMtpEnable() != enable) {
         g_app->m_mtp_enabled.Set(enable);
+
+#ifdef ENABLE_LIBHAZE
         if (enable) {
             haze::Init();
         } else {
             haze::Exit();
         }
+#endif // ENABLE_LIBHAZE
     }
 }
 
 void App::SetFtpEnable(bool enable) {
     if (App::GetFtpEnable() != enable) {
         g_app->m_ftp_enabled.Set(enable);
+
+#ifdef ENABLE_FTPSRV
         if (enable) {
             ftpsrv::Init();
         } else {
             ftpsrv::Exit();
         }
+#endif // ENABLE_FTPSRV
     }
 }
 
@@ -1554,21 +1567,26 @@ App::App(const char* argv0) {
             }
         }
 
+#ifdef ENABLE_LIBHAZE
         if (App::GetMtpEnable()) {
             SCOPED_TIMESTAMP("mtp init");
             haze::Init();
         }
+#endif // ENABLE_LIBHAZE
 
+#ifdef ENABLE_FTPSRV
         if (App::GetFtpEnable()) {
             SCOPED_TIMESTAMP("ftp init");
             ftpsrv::Init();
         }
+#endif // ENABLE_FTPSRV
 
         if (App::GetNxlinkEnable()) {
             SCOPED_TIMESTAMP("nxlink init");
             nxlinkInitialize(nxlink_callback);
         }
 
+#ifdef ENABLE_LIBUSBHSFS
         if (App::GetHddEnable()) {
             SCOPED_TIMESTAMP("hdd init");
             if (App::GetWriteProtect()) {
@@ -1577,13 +1595,16 @@ App::App(const char* argv0) {
 
             usbHsFsInitialize(1);
         }
+#endif // ENABLE_LIBUSBHSFS
 
+#ifdef ENABLE_LIBUSBDVD
         {
             SCOPED_TIMESTAMP("usbdvd init");
             if (R_FAILED(usbdvd::MountAll())) {
                 log_write("[USBDVD] failed to mount\n");
             }
         }
+#endif // ENABLE_LIBUSBDVD
 
         {
             SCOPED_TIMESTAMP("curl init");
@@ -1596,30 +1617,47 @@ App::App(const char* argv0) {
             devoptab::MountVfsAll();
         }
 
+        #ifdef ENABLE_DEVOPTAB_HTTP
         {
             SCOPED_TIMESTAMP("http init");
             devoptab::MountHttpAll();
         }
+        #endif // ENABLE_DEVOPTAB_HTTP
 
+        #ifdef ENABLE_DEVOPTAB_WEBDAV
         {
             SCOPED_TIMESTAMP("webdav init");
             devoptab::MountWebdavAll();
         }
+        #endif // ENABLE_DEVOPTAB_WEBDAV
 
+        #ifdef ENABLE_DEVOPTAB_FTP
         {
             SCOPED_TIMESTAMP("ftp init");
             devoptab::MountFtpAll();
         }
+        #endif // ENABLE_DEVOPTAB_FTP
 
+        #ifdef ENABLE_DEVOPTAB_SFTP
+        {
+            SCOPED_TIMESTAMP("sftp init");
+            devoptab::MountSftpAll();
+        }
+        #endif // ENABLE_DEVOPTAB_SFTP
+
+        #ifdef ENABLE_DEVOPTAB_NFS
         {
             SCOPED_TIMESTAMP("nfs init");
             devoptab::MountNfsAll();
         }
+        #endif // ENABLE_DEVOPTAB_NFS
 
+        #ifdef ENABLE_DEVOPTAB_SMB2
         {
             SCOPED_TIMESTAMP("smb init");
             devoptab::MountSmb2All();
         }
+        #endif // ENABLE_DEVOPTAB_SMB2
 
         {
             SCOPED_TIMESTAMP("fatfs init");
@@ -2186,8 +2224,10 @@ App::~App() {
         // async exit as these threads sleep every 100ms.
         {
             SCOPED_TIMESTAMP("async signal");
-            nxlinkSignalExit();
+#ifdef ENABLE_FTPSRV
             ftpsrv::ExitSignal();
+#endif // ENABLE_FTPSRV
+            nxlinkSignalExit();
             audio::ExitSignal();
             curl::ExitSignal();
         }
@@ -2204,24 +2244,30 @@ App::~App() {
 
         utils::Async async_exit([this](){
             {
-                SCOPED_TIMESTAMP("usbdvd_exit");
-                usbdvd::UnmountAll();
-            }
-
-            {
                 SCOPED_TIMESTAMP("i18n_exit");
                 i18n::exit();
             }
 
+#ifdef ENABLE_LIBUSBDVD
+            {
+                SCOPED_TIMESTAMP("usbdvd_exit");
+                usbdvd::UnmountAll();
+            }
+#endif // ENABLE_LIBUSBDVD
+
+#ifdef ENABLE_LIBHAZE
             {
                 SCOPED_TIMESTAMP("mtp exit");
                 haze::Exit();
             }
+#endif // ENABLE_LIBHAZE
 
+#ifdef ENABLE_LIBUSBHSFS
             {
                 SCOPED_TIMESTAMP("hdd exit");
                 usbHsFsExit();
             }
+#endif // ENABLE_LIBUSBHSFS
 
             // this has to come before curl exit as it uses curl global.
             {
@@ -2236,10 +2282,12 @@ App::~App() {
                 audio::Exit();
             }
 
+#ifdef ENABLE_FTPSRV
             {
                 SCOPED_TIMESTAMP("ftp exit");
                 ftpsrv::Exit();
             }
+#endif // ENABLE_FTPSRV
 
             {
                 SCOPED_TIMESTAMP("nxlink exit");

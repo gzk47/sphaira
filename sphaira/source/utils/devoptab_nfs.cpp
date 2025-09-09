@@ -1,3 +1,5 @@
+#ifdef ENABLE_DEVOPTAB_NFS
+
 #include "utils/devoptab_common.hpp"
 #include "defines.hpp"
 #include "log.hpp"
@@ -412,3 +414,17 @@ Result MountNfsAll() {
 }
 
 } // namespace sphaira::devoptab
+
+#else // ENABLE_DEVOPTAB_NFS
+
+#include "defines.hpp"
+
+namespace sphaira::devoptab {
+
+Result MountNfsAll() {
+    R_SUCCEED();
+}
+
+} // namespace sphaira::devoptab
+
+#endif // ENABLE_DEVOPTAB_NFS

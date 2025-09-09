@@ -323,6 +323,7 @@ private:
     const s64 m_offset;
 };
 
+#ifdef ENABLE_NSZ
 Result NszExport(ProgressBox* pbox, const keys::Keys& keys, dump::BaseSource* _source, dump::WriteSource* writer, const fs::FsPath& path) {
     auto source = (XciSource*)_source;
 
@@ -464,6 +465,7 @@ Result NszExport(ProgressBox* pbox, const keys::Keys& keys, dump::BaseSource* _s
 
     R_SUCCEED();
 }
+#endif // ENABLE_NSZ
 
 struct GcSource final : yati::source::Base {
     GcSource(const ApplicationEntry& entry, fs::FsNativeGameCard* fs);
@@ -617,7 +619,9 @@ Menu::Menu(u32 flags) : MenuBase{"GameCard"_i18n, flags} {
                 add("Export Certificate"_i18n, DumpFileFlag_Cert);
                 add("Export Initial Data"_i18n, DumpFileFlag_Initial);
             } else if (m_option_index == 2) {
+#ifdef ENABLE_NSZ
                 DumpXcz(0);
+#endif // ENABLE_NSZ
             } else if (m_option_index == 3) {
                 const auto rc = MountGcFs();
                 App::PushErrorBox(rc, "Failed to mount GameCard filesystem"_i18n);
@@ -728,6 +732,11 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
         }
         if (!m_mounted) {
             colour = ThemeEntryID_TEXT_INFO;
+        }
+        if (i == 2) {
+#ifndef ENABLE_NSZ
+            colour = ThemeEntryID_TEXT_INFO;
+#endif // ENABLE_NSZ
         }
 
         gfx::drawTextArgs(vg, x + 15, y + (h / 2.f), 23.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(colour), "%s", i18n::get(g_option_list[i]).c_str());
@@ -1099,6 +1108,7 @@ void Menu::OnChangeIndex(s64 new_index) {
     }
 }
 
+#ifdef ENABLE_NSZ
 Result Menu::DumpXcz(u32 flags) {
     R_TRY(GcMountStorage());
 
@@ -1122,6 +1132,7 @@ Result Menu::DumpXcz(u32 flags) {
 
     R_SUCCEED();
 }
+#endif // ENABLE_NSZ
 
 Result Menu::DumpGames(u32 flags) {
     // first, try and mount the storage.
@@ -1183,18 +1194,8 @@ Result Menu::DumpGames(u32 flags) {
             paths.emplace_back(BuildFullDumpPath(DumpFileType_Initial, m_entries));
         }
 
-        if (0) {
-            // todo: log keys error.
-            keys::Keys keys;
-            keys::parse_keys(keys, true);
 
-            dump::Dump(source, paths, [keys](ProgressBox* pbox, dump::BaseSource* source, dump::WriteSource* writer, const fs::FsPath& path) {
-                return NszExport(pbox, keys, source, writer, path);
-            });
-        } else {
-            dump::Dump(source, paths, nullptr, location_flags);
-        }
-
+        dump::Dump(source, paths, nullptr, location_flags);
         R_SUCCEED();
     };
 

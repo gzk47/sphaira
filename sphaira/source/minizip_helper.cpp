@@ -372,7 +372,7 @@ void FileFuncNative(zlib_filefunc64_def* funcs) {
 
 Result PeekFirstFileName(fs::Fs* fs, const fs::FsPath& path, fs::FsPath& name) {
     fs::File file;
-    R_TRY(fs->OpenFile(path, FsOpenMode_Read, &file));
+    R_TRY(fs->OpenFile(path, fs::OpenMode_ReadBuffered, &file));
 
     mmz_LocalHeader local_hdr;
     u64 bytes_read;

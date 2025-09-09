@@ -1,5 +1,33 @@
 cmake_minimum_required(VERSION 3.13)
 
+# generic options.
+option(ENABLE_NVJPG "" OFF)
+option(ENABLE_NSZ "enables exporting to nsz" ON)
+
+# lib options.
+option(ENABLE_LIBUSBHSFS "enables FAT/exFAT hdd mounting" ON)
+option(ENABLE_LIBUSBDVD "enables cd/dvd/iso/cue mounting" ON)
+option(ENABLE_FTPSRV "enables MTP server support" ON)
+option(ENABLE_LIBHAZE "enables MTP server support" ON)
+
+# audio options.
+option(ENABLE_AUDIO_MP3 "" ON)
+option(ENABLE_AUDIO_OGG "" ON)
+option(ENABLE_AUDIO_WAV "" ON)
+option(ENABLE_AUDIO_FLAC "" ON)
+
+# devoptab options.
+option(ENABLE_DEVOPTAB_HTTP "" ON)
+option(ENABLE_DEVOPTAB_NFS "" ON)
+option(ENABLE_DEVOPTAB_SMB2 "" ON)
+option(ENABLE_DEVOPTAB_FTP "" ON)
+option(ENABLE_DEVOPTAB_WEBDAV "" ON)
+# disable by default because we are CPU bound for upload/download.
+# max speed is 8MiB/s, which is fine for wifi, but awful for ethernet.
+# other clients get 36-40MiB/s.
+# it also adds 230k to binary size, and i don't think anyone will use it.
+option(ENABLE_DEVOPTAB_SFTP "" OFF)
+
 set(sphaira_VERSION 0.13.3)
 
 project(sphaira
@@ -46,8 +74,6 @@ add_executable(sphaira
     source/ui/menus/themezer.cpp
     source/ui/menus/ghdl.cpp
     source/ui/menus/usb_menu.cpp
-    source/ui/menus/ftp_menu.cpp
-    source/ui/menus/mtp_menu.cpp
     source/ui/menus/gc_menu.cpp
     source/ui/menus/game_menu.cpp
     source/ui/menus/game_meta_menu.cpp
@@ -85,16 +111,12 @@ add_executable(sphaira
     source/web.cpp
     source/hasher.cpp
     source/i18n.cpp
-    source/ftpsrv_helper.cpp
-    source/haze_helper.cpp
     source/threaded_file_transfer.cpp
     source/title_info.cpp
     source/minizip_helper.cpp
-    source/usbdvd.cpp
 
     source/utils/utils.cpp
     source/utils/audio.cpp
-    source/utils/nsz_dumper.cpp
     source/utils/devoptab_common.cpp
     source/utils/devoptab_romfs.cpp
     source/utils/devoptab_save.cpp
@@ -104,11 +126,6 @@ add_executable(sphaira
     source/utils/devoptab_xci.cpp
     source/utils/devoptab_zip.cpp
     source/utils/devoptab_bfsar.cpp
-    source/utils/devoptab_http.cpp
-    source/utils/devoptab_nfs.cpp
-    source/utils/devoptab_smb2.cpp
-    source/utils/devoptab_ftp.cpp
-    source/utils/devoptab_webdav.cpp
     source/utils/devoptab_vfs.cpp
     source/utils/devoptab_fatfs.cpp
 
@@ -188,17 +205,6 @@ target_compile_options(sphaira PRIVATE
 include(FetchContent)
 set(FETCHCONTENT_QUIET FALSE)
 
-FetchContent_Declare(ftpsrv
-    GIT_REPOSITORY https://github.com/ITotalJustice/ftpsrv.git
-    GIT_TAG 85b3cf0
-    SOURCE_SUBDIR NONE
-)
-
-FetchContent_Declare(libhaze
-    GIT_REPOSITORY https://github.com/ITotalJustice/libhaze.git
-    GIT_TAG f0b2a14
-)
-
 FetchContent_Declare(libpulsar
     GIT_REPOSITORY https://github.com/ITotalJustice/switch-libpulsar.git
     GIT_TAG ac7bc97
@@ -230,11 +236,6 @@ FetchContent_Declare(zstd
     SOURCE_SUBDIR build/cmake
 )
 
-FetchContent_Declare(libusbhsfs
-    GIT_REPOSITORY https://github.com/ITotalJustice/libusbhsfs.git
-    GIT_TAG 625269b
-)
-
 FetchContent_Declare(libnxtc
     GIT_REPOSITORY https://github.com/ITotalJustice/libnxtc.git
     GIT_TAG 88ce3d8
@@ -251,54 +252,286 @@ FetchContent_Declare(dr_libs
     SOURCE_SUBDIR NONE
 )
 
-FetchContent_Declare(id3v2lib
-    GIT_REPOSITORY https://github.com/larsbs/id3v2lib.git
-    GIT_TAG 141ffb8
-)
+if (ENABLE_NVJPG)
+    FetchContent_Declare(nvjpg
+        GIT_REPOSITORY https://github.com/ITotalJustice/oss-nvjpg.git
+        GIT_TAG 45680e7
+    )
 
-FetchContent_Declare(libusbdvd
-    GIT_REPOSITORY https://github.com/proconsule/libusbdvd.git
-    GIT_TAG 3cb0613
-)
+    FetchContent_MakeAvailable(nvjpg)
 
-FetchContent_Declare(libnfs
-    GIT_REPOSITORY https://github.com/ITotalJustice/libnfs.git
-    GIT_TAG 65f3e11
-)
+    add_library(nvjpg
+        ${nvjpg_SOURCE_DIR}/lib/decoder.cpp
+        ${nvjpg_SOURCE_DIR}/lib/image.cpp
+        ${nvjpg_SOURCE_DIR}/lib/surface.cpp
+    )
 
-FetchContent_Declare(libsmb2
-    GIT_REPOSITORY https://github.com/ITotalJustice/libsmb2.git
-    GIT_TAG 867beea
-)
+    target_include_directories(nvjpg PUBLIC ${nvjpg_SOURCE_DIR}/include)
+    set_target_properties(nvjpg PROPERTIES CXX_STANDARD 26)
 
-FetchContent_Declare(pugixml
-    GIT_REPOSITORY https://github.com/zeux/pugixml.git
-    GIT_TAG v1.15
-)
+    target_link_libraries(nvjpg PRIVATE nvjpg)
+    target_compile_definitions(sphaira PRIVATE ENABLE_NVJPG)
+endif()
 
-set(PUGIXML_NO_EXCEPTIONS ON)
-# set(PUGIXML_NO_XPATH ON)
-set(PUGIXML_WCHAR_MODE OFF)
+if (ENABLE_NSZ)
+    target_sources(sphaira PRIVATE source/utils/nsz_dumper.cpp)
+    target_compile_definitions(sphaira PRIVATE ENABLE_NSZ)
+endif()
 
-set(USE_NEW_ZSTD ON)
-# has issues with some homebrew and game icons (oxenfree, overwatch2).
-set(USE_NVJPG OFF)
+if (ENABLE_LIBUSBHSFS)
+    # enable this if you want ntfs and ext4 support, at the cost of a huge final binary size.
+    set(USBHSFS_GPL OFF)
+    set(USBHSFS_SXOS_DISABLE ON)
 
+    FetchContent_Declare(libusbhsfs
+        GIT_REPOSITORY https://github.com/ITotalJustice/libusbhsfs.git
+        GIT_TAG 625269b
+    )
+
+    FetchContent_MakeAvailable(libusbhsfs)
+
+    target_compile_definitions(sphaira PRIVATE ENABLE_LIBUSBHSFS)
+    target_link_libraries(sphaira PRIVATE libusbhsfs)
+else()
+    target_sources(sphaira PRIVATE source/ff16/ffunicode.c)
+endif()
+
+if (ENABLE_LIBUSBDVD)
+    FetchContent_Declare(libusbdvd
+        GIT_REPOSITORY https://github.com/proconsule/libusbdvd.git
+        GIT_TAG 3cb0613
+    )
+
+    FetchContent_MakeAvailable(libusbdvd)
+
+    add_library(libusbdvd
+        ${libusbdvd_SOURCE_DIR}/source/usbdvd.cpp
+        ${libusbdvd_SOURCE_DIR}/source/usbdvd_scsi.cpp
+        ${libusbdvd_SOURCE_DIR}/source/usbdvd_utils.cpp
+        ${libusbdvd_SOURCE_DIR}/source/fs/usbdvd_datadisc.cpp
+        ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs/audiocdfs.cpp
+        ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs/cdaudio_devoptab.cpp
+        ${libusbdvd_SOURCE_DIR}/source/fs/iso9660/usbdvd_iso9660.cpp
+        ${libusbdvd_SOURCE_DIR}/source/fs/iso9660/iso9660_devoptab.cpp
+        ${libusbdvd_SOURCE_DIR}/source/fs/udf/usbdvd_udf.cpp
+        ${libusbdvd_SOURCE_DIR}/source/fs/udf/udf_devoptab.cpp
+        ${libusbdvd_SOURCE_DIR}/source/os/switch/switch_usb.cpp
+
+    )
+    target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/)
+    target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/os/switch)
+    target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs)
+    target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs)
+    target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/iso9660)
+    target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/udf)
+    target_include_directories(libusbdvd PUBLIC ${libusbdvd_SOURCE_DIR}/include)
+
+    target_compile_definitions(sphaira PRIVATE ENABLE_LIBUSBDVD)
+    target_link_libraries(sphaira PRIVATE libusbdvd)
+    target_sources(sphaira PRIVATE source/usbdvd.cpp)
+endif()
+
+if (ENABLE_FTPSRV)
+    FetchContent_Declare(ftpsrv
+        GIT_REPOSITORY https://github.com/ITotalJustice/ftpsrv.git
+        GIT_TAG 85b3cf0
+        SOURCE_SUBDIR NONE
+    )
+
+    FetchContent_MakeAvailable(ftpsrv)
+
+    set(FTPSRV_LIB_BUILD TRUE)
+    set(FTPSRV_LIB_VFS_CUSTOM ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs_nx.h)
+    set(FTPSRV_LIB_PATH_SIZE 0x301)
+    set(FTPSRV_LIB_SESSIONS 16)
+    set(FTPSRV_LIB_BUF_SIZE 1024*64)
+
+    set(FTPSRV_LIB_CUSTOM_DEFINES
+        USE_VFS_SAVE=$<BOOL:FALSE>
+        USE_VFS_STORAGE=$<BOOL:TRUE>
+        # disabled as it may conflict with the gamecard menu.
+        USE_VFS_GC=$<BOOL:FALSE>
+        USE_VFS_USBHSFS=$<BOOL:${ENABLE_LIBUSBHSFS}>
+        VFS_NX_BUFFER_IO=$<BOOL:TRUE>
+        # let sphaira handle init / closing of the hdd.
+        USE_VFS_USBHSFS_INIT=$<BOOL:FALSE>
+        # disable romfs mounting as otherwise we cannot write / modify sphaira.nro
+        USE_VFS_ROMFS=$<BOOL:FALSE>
+        FTP_SOCKET_HEADER="${ftpsrv_SOURCE_DIR}/src/platform/nx/socket_nx.h"
+    )
+
+    add_subdirectory(${ftpsrv_SOURCE_DIR} binary_dir)
+
+    add_library(ftpsrv_helper
+        ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs_nx.c
+        ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_none.c
+        ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_root.c
+        ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_fs.c
+        ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_storage.c
+        ${ftpsrv_SOURCE_DIR}/src/platform/nx/utils.c
+    )
+
+    if (ENABLE_LIBUSBHSFS)
+        target_sources(ftpsrv_helper PRIVATE
+            ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_stdio.c
+            ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_hdd.c
+        )
+    endif()
+
+    target_link_libraries(ftpsrv_helper PUBLIC ftpsrv libusbhsfs)
+    target_include_directories(ftpsrv_helper PUBLIC ${ftpsrv_SOURCE_DIR}/src/platform)
+
+    target_compile_definitions(sphaira PRIVATE ENABLE_FTPSRV)
+    target_link_libraries(sphaira PRIVATE ftpsrv_helper)
+
+    target_sources(sphaira PRIVATE
+        source/ftpsrv_helper.cpp
+        source/ui/menus/ftp_menu.cpp
+    )
+endif()
+
+if (ENABLE_LIBHAZE)
+    FetchContent_Declare(libhaze
+        GIT_REPOSITORY https://github.com/ITotalJustice/libhaze.git
+        GIT_TAG f0b2a14
+    )
+
+    FetchContent_MakeAvailable(libhaze)
+    target_compile_definitions(sphaira PRIVATE ENABLE_LIBHAZE)
+    target_link_libraries(sphaira PRIVATE libhaze)
+
+    target_sources(sphaira PRIVATE
+        source/haze_helper.cpp
+        source/ui/menus/mtp_menu.cpp
+    )
+endif()
+
+if (ENABLE_DEVOPTAB_HTTP)
+    target_compile_definitions(sphaira PRIVATE ENABLE_DEVOPTAB_HTTP)
+    target_sources(sphaira PRIVATE source/utils/devoptab_http.cpp)
+endif()
+
+if (ENABLE_DEVOPTAB_NFS)
+    FetchContent_Declare(libnfs
+        GIT_REPOSITORY https://github.com/ITotalJustice/libnfs.git
+        GIT_TAG 65f3e11
+    )
+
+    FetchContent_MakeAvailable(libnfs)
+    target_compile_definitions(sphaira PRIVATE ENABLE_DEVOPTAB_NFS)
+    target_link_libraries(sphaira PRIVATE nfs)
+    target_sources(sphaira PRIVATE source/utils/devoptab_nfs.cpp)
+
+    # todo: fix this upstream as nfs should export these folders.
+    target_include_directories(sphaira PRIVATE
+        ${libnfs_SOURCE_DIR}/include
+        ${libnfs_SOURCE_DIR}/include/nfsc
+        ${libnfs_SOURCE_DIR}/nfs
+    )
+endif()
+
+if (ENABLE_DEVOPTAB_SMB2)
+    FetchContent_Declare(libsmb2
+        GIT_REPOSITORY https://github.com/ITotalJustice/libsmb2.git
+        GIT_TAG 867beea
+    )
+
+    FetchContent_MakeAvailable(libsmb2)
+    target_compile_definitions(sphaira PRIVATE ENABLE_DEVOPTAB_SMB2)
+    target_link_libraries(sphaira PRIVATE smb2)
+    target_sources(sphaira PRIVATE source/utils/devoptab_smb2.cpp)
+endif()
+
+if (ENABLE_DEVOPTAB_FTP)
+    target_compile_definitions(sphaira PRIVATE ENABLE_DEVOPTAB_FTP)
+    target_sources(sphaira PRIVATE source/utils/devoptab_ftp.cpp)
+endif()
+
+if (ENABLE_DEVOPTAB_SFTP)
+    # set to build from source, otherwise it will link against the older dkp libssh2.
+    if (1)
+        set(CRYPTO_BACKEND mbedTLS)
+        set(ENABLE_ZLIB_COMPRESSION ON)
+        set(ENABLE_DEBUG_LOGGING OFF)
+        set(BUILD_EXAMPLES OFF)
+        set(BUILD_TESTING OFF)
+        set(LINT OFF)
+
+        FetchContent_Declare(libssh2
+            GIT_REPOSITORY https://github.com/libssh2/libssh2.git
+            # GIT_TAG a0dafb3 # latest commit, works fine, but i'll stick to main release.
+            GIT_TAG libssh2-1.11.1
+        )
+
+        FetchContent_MakeAvailable(libssh2)
+        target_link_libraries(sphaira PRIVATE libssh2::libssh2)
+    else()
+        include(FindPkgConfig)
+        pkg_check_modules(LIBSSH2 libssh2 REQUIRED)
+        target_include_directories(sphaira PRIVATE ${LIBSSH2_INCLUDE_DIRS})
+        target_link_libraries(sphaira PRIVATE ${LIBSSH2_LIBRARIES})
+    endif()
+
+    target_compile_definitions(sphaira PRIVATE ENABLE_DEVOPTAB_SFTP)
+    target_sources(sphaira PRIVATE source/utils/devoptab_sftp.cpp)
+endif()
+
+if (ENABLE_DEVOPTAB_WEBDAV)
+    set(PUGIXML_NO_EXCEPTIONS ON)
+    set(PUGIXML_WCHAR_MODE OFF)
+
+    FetchContent_Declare(pugixml
+        GIT_REPOSITORY https://github.com/zeux/pugixml.git
+        GIT_TAG v1.15
+    )
+
+    FetchContent_MakeAvailable(pugixml)
+    target_compile_definitions(sphaira PRIVATE ENABLE_DEVOPTAB_WEBDAV)
+    target_link_libraries(sphaira PRIVATE pugixml)
+    target_sources(sphaira PRIVATE source/utils/devoptab_webdav.cpp)
+endif()
+
+if (ENABLE_AUDIO_MP3)
+    FetchContent_Declare(id3v2lib
+        GIT_REPOSITORY https://github.com/larsbs/id3v2lib.git
+        GIT_TAG 141ffb8
+    )
+
+    FetchContent_MakeAvailable(id3v2lib)
+    target_link_libraries(sphaira PRIVATE id3v2lib)
+    target_compile_definitions(sphaira PRIVATE ENABLE_AUDIO_MP3)
+endif()
+
+if (ENABLE_AUDIO_OGG)
+    target_compile_definitions(sphaira PRIVATE ENABLE_AUDIO_OGG)
+endif()
+
+if (ENABLE_AUDIO_WAV)
+    target_compile_definitions(sphaira PRIVATE ENABLE_AUDIO_WAV)
+endif()
+
+if (ENABLE_AUDIO_FLAC)
+    target_compile_definitions(sphaira PRIVATE ENABLE_AUDIO_FLAC)
+endif()
+
+# ztsd
 set(ZSTD_BUILD_STATIC ON)
 set(ZSTD_BUILD_SHARED OFF)
-set(ZSTD_BUILD_COMPRESSION ON)
-set(ZSTD_MULTITHREAD_SUPPORT ON)
+set(ZSTD_BUILD_COMPRESSION ${ENABLE_NSZ})
+set(ZSTD_MULTITHREAD_SUPPORT ${ENABLE_NSZ})
 set(ZSTD_BUILD_DECOMPRESSION ON)
 set(ZSTD_BUILD_DICTBUILDER OFF)
 set(ZSTD_LEGACY_SUPPORT OFF)
 set(ZSTD_BUILD_PROGRAMS OFF)
 set(ZSTD_BUILD_TESTS OFF)
 
+# minini
 set(MININI_LIB_NAME minIni)
 set(MININI_USE_STDIO ON)
 set(MININI_USE_NX OFF)
 set(MININI_USE_FLOAT ON)
 
+# nanovg
 if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     set(NANOVG_DEBUG ON)
 endif()
@@ -312,6 +545,7 @@ set(NANOVG_NO_HDR ON)
 set(NANOVG_NO_PIC ON)
 set(NANOVG_NO_PNM ON)
 
+# yyjson
 set(YYJSON_INSTALL OFF)
 set(YYJSON_DISABLE_READER OFF)
 set(YYJSON_DISABLE_WRITER OFF)
@@ -321,65 +555,16 @@ set(YYJSON_DISABLE_NON_STANDARD ON)
 set(YYJSON_DISABLE_UTF8_VALIDATION ON)
 set(YYJSON_DISABLE_UNALIGNED_MEMORY_ACCESS OFF)
 
-# enable this if you want ntfs and ext4 support, at the cost of a huge final binary size.
-set(USBHSFS_GPL OFF)
-set(USBHSFS_SXOS_DISABLE ON)
-
 FetchContent_MakeAvailable(
-    ftpsrv
-    libhaze
     libpulsar
     nanovg
     stb
     minIni
     yyjson
     zstd
-    libusbhsfs
     libnxtc
-    nvjpg
     dr_libs
-    id3v2lib
-    libusbdvd
-    libnfs
-    libsmb2
-    pugixml
 )
-
-set(FTPSRV_LIB_BUILD TRUE)
-set(FTPSRV_LIB_VFS_CUSTOM ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs_nx.h)
-set(FTPSRV_LIB_PATH_SIZE 0x301)
-set(FTPSRV_LIB_SESSIONS 16)
-set(FTPSRV_LIB_BUF_SIZE 1024*64)
-
-set(FTPSRV_LIB_CUSTOM_DEFINES
-    USE_VFS_SAVE=$<BOOL:FALSE>
-    USE_VFS_STORAGE=$<BOOL:TRUE>
-    # disabled as it may conflict with the gamecard menu.
-    USE_VFS_GC=$<BOOL:FALSE>
-    USE_VFS_USBHSFS=$<BOOL:TRUE>
-    VFS_NX_BUFFER_IO=$<BOOL:TRUE>
-    # let sphaira handle init / closing of the hdd.
-    USE_VFS_USBHSFS_INIT=$<BOOL:FALSE>
-    # disable romfs mounting as otherwise we cannot write / modify sphaira.nro
-    USE_VFS_ROMFS=$<BOOL:FALSE>
-    FTP_SOCKET_HEADER="${ftpsrv_SOURCE_DIR}/src/platform/nx/socket_nx.h"
-)
-
-add_subdirectory(${ftpsrv_SOURCE_DIR} binary_dir)
-
-add_library(ftpsrv_helper
-    ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs_nx.c
-    ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_none.c
-    ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_root.c
-    ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_fs.c
-    ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_storage.c
-    ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_stdio.c
-    ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_hdd.c
-    ${ftpsrv_SOURCE_DIR}/src/platform/nx/utils.c
-)
-
-target_link_libraries(ftpsrv_helper PUBLIC ftpsrv libusbhsfs)
-target_include_directories(ftpsrv_helper PUBLIC ${ftpsrv_SOURCE_DIR}/src/platform)
 
 add_library(stb INTERFACE)
 target_include_directories(stb INTERFACE ${stb_SOURCE_DIR})
@@ -394,38 +579,6 @@ add_library(libnxtc
 )
 target_include_directories(libnxtc PUBLIC ${libnxtc_SOURCE_DIR}/include)
 
-add_library(libusbdvd
-    ${libusbdvd_SOURCE_DIR}/source/usbdvd.cpp
-    ${libusbdvd_SOURCE_DIR}/source/usbdvd_scsi.cpp
-    ${libusbdvd_SOURCE_DIR}/source/usbdvd_utils.cpp
-    ${libusbdvd_SOURCE_DIR}/source/fs/usbdvd_datadisc.cpp
-    ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs/audiocdfs.cpp
-    ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs/cdaudio_devoptab.cpp
-    ${libusbdvd_SOURCE_DIR}/source/fs/iso9660/usbdvd_iso9660.cpp
-    ${libusbdvd_SOURCE_DIR}/source/fs/iso9660/iso9660_devoptab.cpp
-    ${libusbdvd_SOURCE_DIR}/source/fs/udf/usbdvd_udf.cpp
-    ${libusbdvd_SOURCE_DIR}/source/fs/udf/udf_devoptab.cpp
-    ${libusbdvd_SOURCE_DIR}/source/os/switch/switch_usb.cpp
-
-)
-target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/)
-target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/os/switch)
-target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs)
-target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs)
-target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/iso9660)
-target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/udf)
-target_include_directories(libusbdvd PUBLIC ${libusbdvd_SOURCE_DIR}/include)
-
-if (USE_NVJPG)
-    add_library(nvjpg
-        ${nvjpg_SOURCE_DIR}/lib/decoder.cpp
-        ${nvjpg_SOURCE_DIR}/lib/image.cpp
-        ${nvjpg_SOURCE_DIR}/lib/surface.cpp
-    )
-    target_include_directories(nvjpg PUBLIC ${nvjpg_SOURCE_DIR}/include)
-    set_target_properties(nvjpg PROPERTIES CXX_STANDARD 26)
-endif()
-
 find_package(ZLIB REQUIRED)
 find_library(minizip_lib minizip REQUIRED)
 find_path(minizip_inc minizip REQUIRED)
@@ -433,11 +586,6 @@ find_path(minizip_inc minizip REQUIRED)
 find_package(CURL REQUIRED)
 find_path(mbedtls_inc mbedtls REQUIRED)
 find_library(mbedcrypto_lib mbedcrypto REQUIRED)
-
-if (NOT USE_NEW_ZSTD)
-    find_path(zstd_inc zstd.h REQUIRED)
-    find_library(zstd_lib zstd REQUIRED)
-endif()
 
 add_library(fatfs
     source/ff16/diskio.c
@@ -453,50 +601,22 @@ set_target_properties(sphaira PROPERTIES
     CXX_EXTENSIONS ON
 )
 
-# todo: fix this upstream as nfs should export these folders.
-target_include_directories(sphaira PRIVATE
-    ${libnfs_SOURCE_DIR}/include
-    ${libnfs_SOURCE_DIR}/include/nfsc
-    ${libnfs_SOURCE_DIR}/nfs
-)
-
 target_link_libraries(sphaira PRIVATE
-    ftpsrv_helper
-    libhaze
     libpulsar
     minIni
     nanovg
     stb
     yyjson
-    # libusbhsfs
     libnxtc
     fatfs
     dr_libs
-    id3v2lib
-    libusbdvd
-    nfs
-    smb2
-    pugixml
+    libzstd_static
 
     ${minizip_lib}
     ZLIB::ZLIB
     CURL::libcurl
     ${mbedcrypto_lib}
 )
-
-if (USE_NEW_ZSTD)
-    message(STATUS "USING UPSTREAM ZSTD")
-    target_link_libraries(sphaira PRIVATE libzstd_static)
-else()
-    message(STATUS "USING LOCAL ZSTD")
-    target_link_libraries(sphaira PRIVATE ${zstd_lib})
-    target_include_directories(sphaira PRIVATE ${zstd_inc})
-endif()
-
-if (USE_NVJPG)
-    target_link_libraries(sphaira PRIVATE nvjpg)
-    target_compile_definitions(sphaira PRIVATE USE_NVJPG)
-endif()
 
 target_include_directories(sphaira PRIVATE
     include

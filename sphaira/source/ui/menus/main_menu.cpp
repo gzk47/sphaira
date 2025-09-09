@@ -78,15 +78,19 @@ const MiscMenuEntry MISC_MENU_ENTRIES[] = {
         "Download releases directly from GitHub. "\
         "Custom entries can be added to /config/sphaira/github" },
 
+#ifdef ENABLE_FTPSRV
     { .name = "FTP", .title = "FTP Install", .func = MiscMenuFuncGenerator<ui::menu::ftp::Menu>, .flag = MiscMenuFlag_Install, .info =
         "Install apps via FTP.\n\n"\
         "NOTE: This feature does not always work, use at your own risk. "\
         "If you encounter an issue, do not open an issue, it will not be fixed." },
+#endif // ENABLE_FTPSRV
 
+#ifdef ENABLE_LIBHAZE
     { .name = "MTP", .title = "MTP Install", .func = MiscMenuFuncGenerator<ui::menu::mtp::Menu>, .flag = MiscMenuFlag_Install, .info =
         "Install apps via MTP.\n\n"\
         "NOTE: This feature does not always work, use at your own risk. "\
         "If you encounter an issue, do not open an issue, it will not be fixed." },
+#endif // ENABLE_LIBHAZE
 
     { .name = "USB", .title = "USB Install", .func = MiscMenuFuncGenerator<ui::menu::usb::Menu>, .flag = MiscMenuFlag_Install, .info =
         "Install apps via USB.\n\n"\

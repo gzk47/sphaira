@@ -7,7 +7,6 @@
 #include "i18n.hpp"
 #include "location.hpp"
 #include "threaded_file_transfer.hpp"
-#include "haze_helper.hpp"
 
 #include "ui/sidebar.hpp"
 #include "ui/error_box.hpp"
@@ -133,9 +132,9 @@ struct WriteNullSource final : WriteSource {
 struct WriteUsbSource final : WriteSource {
     WriteUsbSource(u64 transfer_timeout) {
         // disable mtp if enabled.
-        m_was_mtp_enabled = haze::IsInit();
+        m_was_mtp_enabled = App::GetMtpEnable();
         if (m_was_mtp_enabled) {
-            haze::Exit();
+            App::SetMtpEnable(false);
         }
 
         m_usb = std::make_unique<usb::dump::Usb>(transfer_timeout);
@@ -145,7 +144,7 @@ struct WriteUsbSource final : WriteSource {
         m_usb.reset();
 
         if (m_was_mtp_enabled) {
-            haze::Init();
+            App::SetMtpEnable(true);
         }
     }
 

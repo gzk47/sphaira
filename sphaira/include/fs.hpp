@@ -12,6 +12,18 @@
 
 namespace fs {
 
+enum OpenMode : u32 {
+    OpenMode_Read = FsOpenMode_Read,
+    OpenMode_Write = FsOpenMode_Write,
+    OpenMode_Append = FsOpenMode_Append,
+
+    // enables buffering for stdio based files.
+    OpenMode_EnableBuffer = 1 << 16,
+    OpenMode_ReadBuffered = OpenMode_Read | OpenMode_EnableBuffer,
+    OpenMode_WriteBuffered = OpenMode_Write | OpenMode_EnableBuffer,
+    OpenMode_AppendBuffered = OpenMode_Append | OpenMode_EnableBuffer,
+};
+
 struct FsPath {
     FsPath() = default;
 

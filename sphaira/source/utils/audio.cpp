@@ -21,52 +21,55 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #pragma GCC diagnostic ignored "-Wunused-function"
-#if 1
-#define DR_FLAC_IMPLEMENTATION
-#define DR_FLAC_NO_OGG
-#define DR_FLAC_NO_STDIO
-#define DRFLAC_API static
-#define DRFLAC_PRIVATE static
-#include <dr_flac.h>
-#endif
-
-#define DR_WAV_IMPLEMENTATION
-#define DR_WAV_NO_STDIO
-#define DRWAV_API static
-#define DRWAV_PRIVATE static
-#include <dr_wav.h>
-
-#define DR_MP3_IMPLEMENTATION
-#define DR_MP3_NO_STDIO
-#define DRMP3_API static
-#define DRMP3_PRIVATE static
-// improves load / seek times.
-// hopefully drmp3 will have binary seek rather than linear.
-// this also improves
-#define DRMP3_DATA_CHUNK_SIZE (1024*64)
-#include <dr_mp3.h>
-
-#if 0
-#define DR_VORBIS_IMPLEMENTATION
-#define DR_VORBIS_NO_STDIO
-#define DR_VORBIS_API static
-#include "dr_vorbis.h"
-#endif
-#pragma GCC diagnostic pop
-#pragma GCC diagnostic pop
-
-#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Walloca"
-#pragma GCC diagnostic ignored "-Wunused-variable"
-#define STB_VORBIS_NO_PUSHDATA_API
-#define STB_VORBIS_NO_STDIO
-#define STB_VORBIS_NO_OPENMEM
-#include "stb_vorbis.h"
-#pragma GCC diagnostic pop
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-variable"
-#include <id3v2lib.h>
+#ifdef ENABLE_AUDIO_FLAC
+    #define DR_FLAC_IMPLEMENTATION
+    #define DR_FLAC_NO_OGG
+    #define DR_FLAC_NO_STDIO
+    #define DRFLAC_API static
+    #define DRFLAC_PRIVATE static
+    #include <dr_flac.h>
+#endif // ENABLE_AUDIO_FLAC
+
+#ifdef ENABLE_AUDIO_WAV
+    #define DR_WAV_IMPLEMENTATION
+    #define DR_WAV_NO_STDIO
+    #define DRWAV_API static
+    #define DRWAV_PRIVATE static
+    #include <dr_wav.h>
+#endif // ENABLE_AUDIO_WAV
+
+#ifdef ENABLE_AUDIO_MP3
+    #define DR_MP3_IMPLEMENTATION
+    #define DR_MP3_NO_STDIO
+    #define DRMP3_API static
+    #define DRMP3_PRIVATE static
+    // improves load / seek times.
+    // hopefully drmp3 will have binary seek rather than linear.
+    // this also improves
+    #define DRMP3_DATA_CHUNK_SIZE (1024*64)
+    #include <dr_mp3.h>
+    #include <id3v2lib.h>
+#endif // ENABLE_AUDIO_MP3
+
+#ifdef ENABLE_AUDIO_OGG
+    #if 0
+    #define DR_VORBIS_IMPLEMENTATION
+    #define DR_VORBIS_NO_STDIO
+    #define DR_VORBIS_API static
+    #include "dr_vorbis.h"
+    #endif
+    #define STB_VORBIS_NO_PUSHDATA_API
+    #define STB_VORBIS_NO_STDIO
+    #define STB_VORBIS_NO_OPENMEM
+    #include "stb_vorbis.h"
+#endif // ENABLE_AUDIO_OGG
+
+#pragma GCC diagnostic pop
+#pragma GCC diagnostic pop
+#pragma GCC diagnostic pop
 #pragma GCC diagnostic pop
 
 #include <pulsar.h>
@@ -130,6 +133,7 @@ private:
     s64 m_size{};
 };
 
+#ifdef ENABLE_AUDIO_MP3
 // gta vice "encrypted" mp3's using xor 0x22, very cool.
 struct GTAViceCityFile final : File {
     size_t ReadFile(void* _buf, size_t read_size) override {
@@ -164,6 +168,7 @@ auto convert_utf16(const ID3v2_TextFrameData* data) -> std::string{
     buf[sz] = 0;
     return buf;
 }
+#endif // ENABLE_AUDIO_MP3
 
 struct Base {
     virtual ~Base() = default;
@@ -458,6 +463,7 @@ struct PlsrBFWAV final : PlsrBase {
     }
 };
 
+#ifdef ENABLE_AUDIO_WAV
 struct DrWAV final : CustomBase {
     ~DrWAV() {
         drwav_uninit(&m_wav);
@@ -532,7 +538,9 @@ private:
     drwav m_wav{};
     File m_file{};
 };
+#endif // ENABLE_AUDIO_WAV
 
+#ifdef ENABLE_AUDIO_MP3
 struct DrMP3 final : CustomBase {
     DrMP3(std::unique_ptr<File>&& file = std::make_unique<File>()) : m_file{std::forward<decltype(file)>(file)} {
 
@@ -668,8 +676,9 @@ private:
     std::vector<drmp3_seek_point> m_seek_points{};
     #endif
 };
+#endif // ENABLE_AUDIO_MP3
 
-#if 1
+#ifdef ENABLE_AUDIO_FLAC
 struct DrFLAC final : CustomBase {
     ~DrFLAC() {
         drflac_close(m_flac);
@@ -718,8 +727,9 @@ private:
     drflac* m_flac{};
     File m_file{};
 };
-#endif
+#endif // ENABLE_AUDIO_FLAC
 
+#ifdef ENABLE_AUDIO_OGG
 // api is not ready, leaving this here for when it is.
 #if 0
 struct DrOGG final : CustomBase {
@@ -864,6 +874,7 @@ private:
     stb_vorbis* m_ogg{};
     File m_file{};
 };
+#endif // ENABLE_AUDIO_OGG
 
 constexpr u32 MAX_SONGS = 4;
 
@@ -1072,24 +1083,32 @@ Result OpenSong(fs::Fs* fs, const fs::FsPath& path, u32 flags, SongID* id) {
             else if (path.ends_with(".bfwav")) {
                 source = std::make_unique<PlsrBFWAV>();
             }
+#ifdef ENABLE_AUDIO_WAV
             else if (path.ends_with(".wav")) {
                 source = std::make_unique<DrWAV>();
             }
+#endif // ENABLE_AUDIO_WAV
+#ifdef ENABLE_AUDIO_MP3
             else if (path.ends_with(".mp3") || path.ends_with(".mp2") || path.ends_with(".mp1")) {
                 source = std::make_unique<DrMP3>();
             }
             else if (path.ends_with(".adf")) {
                 source = std::make_unique<DrMP3>(std::make_unique<GTAViceCityFile>());
             }
+#endif // ENABLE_AUDIO_MP3
+#ifdef ENABLE_AUDIO_FLAC
             else if (path.ends_with(".flac")) {
                 source = std::make_unique<DrFLAC>();
             }
+#endif // ENABLE_AUDIO_FLAC
+#ifdef ENABLE_AUDIO_OGG
             // else if (path.ends_with(".ogg")) {
             //     source = std::make_unique<DrOGG>();
             // }
             else if (path.ends_with(".ogg")) {
                 source = std::make_unique<stbOGG>();
             }
+#endif // ENABLE_AUDIO_OGG
 
             R_UNLESS(source, 0x1);
             R_TRY(source->LoadFile(fs, path, flags));

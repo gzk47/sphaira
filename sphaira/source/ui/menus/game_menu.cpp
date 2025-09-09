@@ -110,6 +110,7 @@ private:
     bool m_is_file_based_emummc{};
 };
 
+#ifdef ENABLE_NSZ
 Result NszExport(ProgressBox* pbox, const keys::Keys& keys, dump::BaseSource* _source, dump::WriteSource* writer, const fs::FsPath& path) {
     auto source = (NspSource*)_source;
 
@@ -145,6 +146,7 @@ Result NszExport(ProgressBox* pbox, const keys::Keys& keys, dump::BaseSource* _s
 
     R_SUCCEED();
 }
+#endif // ENABLE_NSZ
 
 Result Notify(Result rc, const std::string& error_message) {
     if (R_FAILED(rc)) {
@@ -979,6 +981,7 @@ void DumpNsp(const std::vector<NspEntry>& entries, bool to_nsz) {
     auto source = std::make_shared<NspSource>(entries);
 
     if (to_nsz) {
+#ifdef ENABLE_NSZ
         // todo: log keys error.
         keys::Keys keys;
         keys::parse_keys(keys, true);
@@ -986,6 +989,7 @@ void DumpNsp(const std::vector<NspEntry>& entries, bool to_nsz) {
         dump::Dump(source, paths, [keys](ProgressBox* pbox, dump::BaseSource* source, dump::WriteSource* writer, const fs::FsPath& path) {
             return NszExport(pbox, keys, source, writer, path);
         });
+#endif // ENABLE_NSZ
     } else {
         dump::Dump(source, paths);
     }

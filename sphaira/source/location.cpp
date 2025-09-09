@@ -1,11 +1,17 @@
 #include "location.hpp"
 #include "fs.hpp"
 #include "app.hpp"
-#include "usbdvd.hpp"
 #include "utils/devoptab.hpp"
 
 #include <cstring>
-#include <usbhsfs.h>
+
+#ifdef ENABLE_LIBUSBDVD
+    #include "usbdvd.hpp"
+#endif // ENABLE_LIBUSBDVD
+
+#ifdef ENABLE_LIBUSBHSFS
+    #include <usbhsfs.h>
+#endif // ENABLE_LIBUSBHSFS
 
 namespace sphaira::location {
 namespace {
@@ -38,6 +44,7 @@ auto GetStdio(bool write) -> StdioEntries {
         }
     }
 
+#ifdef ENABLE_LIBUSBDVD
     // try and load usbdvd entry.
     // todo: check if more than 1 entry is supported.
     // todo: only call if usbdvd is init.
@@ -47,7 +54,9 @@ auto GetStdio(bool write) -> StdioEntries {
             out.emplace_back(entry);
         }
     }
+#endif // ENABLE_LIBUSBDVD
 
+#ifdef ENABLE_LIBUSBHSFS
     // bail out early if usbhdd is disabled.
     if (!App::GetHddEnable()) {
         log_write("[USBHSFS] not enabled\n");
@@ -78,6 +87,7 @@ auto GetStdio(bool write) -> StdioEntries {
         out.emplace_back(e.name, display_name, flags);
         log_write("\t[USBHSFS] %s name: %s serial: %s man: %s\n", e.name, e.product_name, e.serial_number, e.manufacturer);
     }
+#endif // ENABLE_LIBUSBHSFS
 
     return out;
 }
