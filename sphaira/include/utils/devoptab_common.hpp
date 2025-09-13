@@ -91,6 +91,8 @@ bool fix_path(const char* str, char* out, bool strip_leading_slash = false);
 void update_devoptab_for_read_only(devoptab_t* devoptab, bool read_only);
 
 struct PushPullThreadData {
+    static constexpr size_t MAX_BUFFER_SIZE = 1024 * 64; // 64KB max buffer
+
     PushPullThreadData(CURL* _curl);
     virtual ~PushPullThreadData();
     Result CreateAndStart();
@@ -130,7 +132,7 @@ struct MountConfig {
     std::string pass{};
     std::string dump_path{};
     std::optional<long> port{};
-    int timeout{5000}; // 5 seconds.
+    long timeout{};
     bool read_only{};
     bool no_stat_file{true};
     bool no_stat_dir{true};
@@ -164,7 +166,7 @@ struct MountDevice {
     virtual int devoptab_close(void *fd) { return -EIO; }
     virtual ssize_t devoptab_read(void *fd, char *ptr, size_t len) { return -EIO; }
     virtual ssize_t devoptab_write(void *fd, const char *ptr, size_t len) { return -EIO; }
-    virtual off_t devoptab_seek(void *fd, off_t pos, int dir) { return 0; }
+    virtual ssize_t devoptab_seek(void *fd, off_t pos, int dir) { return 0; }
     virtual int devoptab_fstat(void *fd, struct stat *st) { return -EIO; }
     virtual int devoptab_unlink(const char *path) { return -EIO; }
     virtual int devoptab_rename(const char *oldName, const char *newName) { return -EIO; }

@@ -706,7 +706,6 @@ void Menu::ExportOptions(bool to_nsz) {
 
 void Menu::DumpGames(u32 flags, bool to_nsz) {
     auto targets = GetSelectedEntries();
-    ClearSelection();
 
     std::vector<NspEntry> nsp_entries;
     for (auto& e : targets) {

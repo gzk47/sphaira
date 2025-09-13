@@ -34,7 +34,7 @@ private:
     int devoptab_close(void *fd) override;
     ssize_t devoptab_read(void *fd, char *ptr, size_t len) override;
     ssize_t devoptab_write(void *fd, const char *ptr, size_t len) override;
-    off_t devoptab_seek(void *fd, off_t pos, int dir) override;
+    ssize_t devoptab_seek(void *fd, off_t pos, int dir) override;
     int devoptab_fstat(void *fd, struct stat *st) override;
     int devoptab_unlink(const char *path) override;
     int devoptab_rename(const char *oldName, const char *newName) override;
@@ -124,7 +124,7 @@ ssize_t Device::devoptab_write(void *fd, const char *ptr, size_t len) {
     return ret;
 }
 
-off_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
+ssize_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
     auto file = static_cast<File*>(fd);
 
     return lseek(file->fd, pos, dir);

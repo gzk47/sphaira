@@ -321,12 +321,12 @@ Result CreateFile(const FsPathReal& path, u64 size, u32 option, bool ignore_read
         }
 
         R_TRY(fsdevGetLastResult());
-        return Result_FsUnknownStdioError;
+        return Result_FsStdioFailedToCreate;
     }
     ON_SCOPE_EXIT(close(fd));
 
     if (size) {
-        R_UNLESS(!ftruncate(fd, size), Result_FsUnknownStdioError);
+        R_UNLESS(!ftruncate(fd, size), Result_FsStdioFailedToTruncate);
     }
 
     R_SUCCEED();
@@ -341,7 +341,7 @@ Result CreateDirectory(const FsPathReal& path, bool ignore_read_only) {
         }
 
         R_TRY(fsdevGetLastResult());
-        return Result_FsUnknownStdioError;
+        return Result_FsStdioFailedToCreateDirectory;
     }
     R_SUCCEED();
 }
@@ -363,7 +363,7 @@ Result DeleteFile(const FsPathReal& path, bool ignore_read_only) {
 
     if (unlink(path)) {
         R_TRY(fsdevGetLastResult());
-        return Result_FsUnknownStdioError;
+        return Result_FsStdioFailedToDeleteFile;
     }
     R_SUCCEED();
 }
@@ -373,7 +373,7 @@ Result DeleteDirectory(const FsPathReal& path, bool ignore_read_only) {
 
     if (rmdir(path)) {
         R_TRY(fsdevGetLastResult());
-        return Result_FsUnknownStdioError;
+        return Result_FsStdioFailedToDeleteDirectory;
     }
     R_SUCCEED();
 }
@@ -405,7 +405,7 @@ Result RenameFile(const FsPathReal& src, const FsPathReal& dst, bool ignore_read
 
     if (rename(src, dst)) {
         R_TRY(fsdevGetLastResult());
-        return Result_FsUnknownStdioError;
+        return Result_FsStdioFailedToRename;
     }
     R_SUCCEED();
 }
@@ -421,7 +421,7 @@ Result GetEntryType(const FsPathReal& path, FsDirEntryType* out) {
     struct stat st;
     if (stat(path, &st)) {
         R_TRY(fsdevGetLastResult());
-        return Result_FsUnknownStdioError;
+        return Result_FsStdioFailedToStat;
     }
     *out = S_ISREG(st.st_mode) ? FsDirEntryType_File : FsDirEntryType_Dir;
     R_SUCCEED();
@@ -431,7 +431,7 @@ Result GetFileTimeStampRaw(const FsPathReal& path, FsTimeStampRaw *out) {
     struct stat st;
     if (stat(path, &st)) {
         R_TRY(fsdevGetLastResult());
-        return Result_FsUnknownStdioError;
+        return Result_FsStdioFailedToStat;
     }
 
     out->is_valid = true;
@@ -489,7 +489,7 @@ Result OpenFile(fs::Fs* fs, const FsPathReal& path, u32 mode, File* f) {
             f->m_stdio = std::fopen(path, "rb+");
         }
 
-        R_UNLESS(f->m_stdio, Result_FsUnknownStdioError);
+        R_UNLESS(f->m_stdio, Result_FsStdioFailedToOpenFile);
 
         // disable buffering to match native fs behavior.
         // this also causes problems with network io as it will do double reads.
@@ -515,9 +515,11 @@ Result File::Read( s64 off, void* buf, u64 read_size, u32 option, u64* bytes_rea
     } else {
         R_UNLESS(m_stdio, Result_FsUnknownStdioError);
 
-        if (std::ftell(m_stdio) != off) {
+        if (off != std::ftell(m_stdio)) {
             const auto ret = std::fseek(m_stdio, off, SEEK_SET);
-            R_UNLESS(ret == 0, Result_FsUnknownStdioError);
+            log_write("[FS] fseek to %ld ret: %d new_off: %zd\n", off, ret, std::ftell(m_stdio));
+            R_UNLESS(ret == 0, Result_FsStdioFailedToSeek);
+            R_UNLESS(off == std::ftell(m_stdio), Result_FsStdioFailedToSeek);
         }
 
         *bytes_read = std::fread(buf, 1, read_size, m_stdio);
@@ -526,7 +528,7 @@ Result File::Read( s64 off, void* buf, u64 read_size, u32 option, u64* bytes_rea
         if (*bytes_read < read_size) {
             if (!std::feof(m_stdio) && std::ferror(m_stdio)) {
                 log_write("[FS] fread error: %d\n", std::ferror(m_stdio));
-                R_THROW(Result_FsUnknownStdioError);
+                R_THROW(Result_FsStdioFailedToRead);
             }
         }
     }
@@ -542,14 +544,15 @@ Result File::Write(s64 off, const void* buf, u64 write_size, u32 option) {
     } else {
         R_UNLESS(m_stdio, Result_FsUnknownStdioError);
 
-        if (std::ftell(m_stdio) != off) {
+        if (off != std::ftell(m_stdio)) {
             const auto ret = std::fseek(m_stdio, off, SEEK_SET);
-            R_UNLESS(ret == 0, Result_FsUnknownStdioError);
+            R_UNLESS(ret == 0, Result_FsStdioFailedToSeek);
+            R_UNLESS(off == std::ftell(m_stdio), Result_FsStdioFailedToSeek);
         }
 
         const auto result = std::fwrite(buf, 1, write_size, m_stdio);
         // log_write("[FS] fwrite res: %zu vs %zu\n", result, write_size);
-        R_UNLESS(result == write_size, Result_FsUnknownStdioError);
+        R_UNLESS(result == write_size, Result_FsStdioFailedToWrite);
     }
 
     R_SUCCEED();
@@ -563,8 +566,8 @@ Result File::SetSize(s64 sz) {
     } else {
         R_UNLESS(m_stdio, Result_FsUnknownStdioError);
         const auto fd = fileno(m_stdio);
-        R_UNLESS(fd > 0, Result_FsUnknownStdioError);
-        R_UNLESS(!ftruncate(fd, sz), Result_FsUnknownStdioError);
+        R_UNLESS(fd > 0, Result_FsStdioFailedToTruncate);
+        R_UNLESS(!ftruncate(fd, sz), Result_FsStdioFailedToTruncate);
     }
 
     R_SUCCEED();
@@ -579,7 +582,7 @@ Result File::GetSize(s64* out) {
         R_UNLESS(m_stdio, Result_FsUnknownStdioError);
 
         struct stat st;
-        R_UNLESS(!fstat(fileno(m_stdio), &st), Result_FsUnknownStdioError);
+        R_UNLESS(!fstat(fileno(m_stdio), &st), Result_FsStdioFailedToStat);
         *out = st.st_size;
     }
 
@@ -617,7 +620,7 @@ Result OpenDirectory(fs::Fs* fs, const FsPathReal& path, u32 mode, Dir* d) {
         R_TRY(fsFsOpenDirectory(&fs->m_fs, path, mode, &d->m_native));
     } else {
         d->m_stdio = opendir(path);
-        R_UNLESS(d->m_stdio, Result_FsUnknownStdioError);
+        R_UNLESS(d->m_stdio, Result_FsStdioFailedToOpenDirectory);
     }
 
     R_SUCCEED();

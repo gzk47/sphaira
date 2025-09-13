@@ -1,5 +1,3 @@
-#ifdef ENABLE_DEVOPTAB_NFS
-
 #include "utils/devoptab_common.hpp"
 #include "defines.hpp"
 #include "log.hpp"
@@ -25,7 +23,7 @@ private:
     int devoptab_close(void *fd) override;
     ssize_t devoptab_read(void *fd, char *ptr, size_t len) override;
     ssize_t devoptab_write(void *fd, const char *ptr, size_t len) override;
-    off_t devoptab_seek(void *fd, off_t pos, int dir) override;
+    ssize_t devoptab_seek(void *fd, off_t pos, int dir) override;
     int devoptab_fstat(void *fd, struct stat *st) override;
     int devoptab_unlink(const char *path) override;
     int devoptab_rename(const char *oldName, const char *newName) override;
@@ -111,8 +109,10 @@ bool Device::Mount() {
             }
         }
 
-        nfs_set_timeout(nfs, this->config.timeout);
-        nfs_set_readonly(nfs, this->config.read_only);
+        if (this->config.timeout > 0) {
+            nfs_set_timeout(nfs, this->config.timeout);
+            nfs_set_readonly(nfs, this->config.read_only);
+        }
         // nfs_set_mountport(nfs, url->port);
     }
 
@@ -123,7 +123,7 @@ bool Device::Mount() {
         url = "nfs://" + url;
     }
 
-    auto nfs_url = nfs_parse_url_dir(nfs, url.c_str());
+    auto nfs_url = nfs_parse_url_full(nfs, url.c_str());
     if (!nfs_url) {
         log_write("[NFS] nfs_parse_url() failed for url: %s\n", url.c_str());
         return false;
@@ -225,7 +225,7 @@ ssize_t Device::devoptab_write(void *fd, const char *ptr, size_t len) {
     return written;
 }
 
-off_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
+ssize_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
     auto file = static_cast<File*>(fd);
 
     u64 current_offset = 0;
@@ -414,17 +414,3 @@ Result MountNfsAll() {
 }
 
 } // namespace sphaira::devoptab
-
-#else // ENABLE_DEVOPTAB_NFS
-
-#include "defines.hpp"
-
-namespace sphaira::devoptab {
-
-Result MountNfsAll() {
-    R_SUCCEED();
-}
-
-} // namespace sphaira::devoptab
-
-#endif // ENABLE_DEVOPTAB_NFS

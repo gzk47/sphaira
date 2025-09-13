@@ -28,7 +28,7 @@ private:
     int devoptab_close(void *fd) override;
     ssize_t devoptab_read(void *fd, char *ptr, size_t len) override;
     ssize_t devoptab_write(void *fd, const char *ptr, size_t len) override;
-    off_t devoptab_seek(void *fd, off_t pos, int dir) override;
+    ssize_t devoptab_seek(void *fd, off_t pos, int dir) override;
     int devoptab_fstat(void *fd, struct stat *st) override;
     int devoptab_unlink(const char *path) override;
     int devoptab_rename(const char *oldName, const char *newName) override;
@@ -118,7 +118,9 @@ bool Device::Mount() {
             smb2_set_workstation(this->smb2, workstation->second.c_str());
         }
 
-        smb2_set_timeout(this->smb2, this->config.timeout);
+        if (config.timeout > 0) {
+            smb2_set_timeout(this->smb2, this->config.timeout);
+        }
     }
 
     auto smb2_url = smb2_parse_url(this->smb2, this->config.url.c_str());
@@ -160,28 +162,56 @@ int Device::devoptab_close(void *fd) {
 ssize_t Device::devoptab_read(void *fd, char *ptr, size_t len) {
     auto file = static_cast<File*>(fd);
 
-    const auto ret = smb2_read(this->smb2, file->fd, reinterpret_cast<uint8_t*>(ptr), len);
-    if (ret < 0) {
-        log_write("[SMB2] smb2_read() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
-        return ret;
+    const auto max_read = smb2_get_max_read_size(this->smb2);
+    size_t bytes_read = 0;
+
+    while (bytes_read < len) {
+        const auto to_read = std::min<size_t>(len - bytes_read, max_read);
+        const auto ret = smb2_read(this->smb2, file->fd, (u8*)ptr, to_read);
+
+        if (ret < 0) {
+            log_write("[SMB2] smb2_read() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+            return ret;
+        }
+
+        ptr += ret;
+        bytes_read += ret;
+
+        if (ret < to_read) {
+            break;
+        }
     }
 
-    return ret;
+    return bytes_read;
 }
 
 ssize_t Device::devoptab_write(void *fd, const char *ptr, size_t len) {
     auto file = static_cast<File*>(fd);
 
-    const auto ret = smb2_write(this->smb2, file->fd, reinterpret_cast<const uint8_t*>(ptr), len);
-    if (ret < 0) {
-        log_write("[SMB2] smb2_write() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
-        return ret;
+    const auto max_write = smb2_get_max_write_size(this->smb2);
+    size_t written = 0;
+
+    while (written < len) {
+        const auto to_write = std::min<size_t>(len - written, max_write);
+        const auto ret = smb2_write(this->smb2, file->fd, (const u8*)ptr, to_write);
+
+        if (ret < 0) {
+            log_write("[SMB2] smb2_write() failed: %s errno: %s\n", smb2_get_error(this->smb2), std::strerror(-ret));
+            return ret;
+        }
+
+        ptr += ret;
+        written += ret;
+
+        if (ret < to_write) {
+            break;
+        }
     }
 
-    return ret;
+    return written;
 }
 
-off_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
+ssize_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
     auto file = static_cast<File*>(fd);
 
     u64 current_offset = 0;

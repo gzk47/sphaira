@@ -171,9 +171,14 @@ off_t devoptab_seek(struct _reent *r, void *fd, off_t pos, int dir) {
     SCOPED_RWLOCK(&g_rwlock, false);
     SCOPED_MUTEX(&file->device->mutex);
 
-    const auto off = file->device->mount_device->devoptab_seek(file->fd, pos, dir);
+    const auto ret = file->device->mount_device->devoptab_seek(file->fd, pos, dir);
+    if (ret < 0) {
+        set_errno(r, -ret);
+        return 0;
+    }
+
     r->_errno = 0;
-    return off;
+    return ret;
 }
 
 int devoptab_fstat(struct _reent *r, void *fd, struct stat *st) {
@@ -960,11 +965,17 @@ PushPullThreadData::PushPullThreadData(CURL* _curl) : curl{_curl} {
 
 PushPullThreadData::~PushPullThreadData() {
     Cancel();
-    threadWaitForExit(&thread);
+
+    if (started) {
+        threadWaitForExit(&thread);
+    }
+
     threadClose(&thread);
 }
 
 Result PushPullThreadData::CreateAndStart() {
+    SCOPED_MUTEX(&mutex);
+
     if (started) {
         R_SUCCEED();
     }
@@ -989,6 +1000,10 @@ bool PushPullThreadData::IsRunning() {
 }
 
 size_t PushPullThreadData::PullData(char* data, size_t total_size) {
+    if (!data || !total_size) {
+        return 0;
+    }
+
     SCOPED_MUTEX(&mutex);
     ON_SCOPE_EXIT(condvarWakeOne(&can_push));
 
@@ -1014,12 +1029,16 @@ size_t PushPullThreadData::PullData(char* data, size_t total_size) {
 }
 
 size_t PushPullThreadData::PushData(const char* data, size_t total_size) {
+    if (!data || !total_size) {
+        return 0;
+    }
+
     SCOPED_MUTEX(&mutex);
     ON_SCOPE_EXIT(condvarWakeOne(&can_pull));
 
     size_t bytes_written = 0;
     while (bytes_written < total_size && !error && !finished) {
-        const size_t space_left = (1024 * 64) - buffer.size(); // 64K max buffer
+        const size_t space_left = MAX_BUFFER_SIZE - buffer.size();
         if (space_left == 0) {
             condvarWakeOne(&can_pull);
             condvarWait(&can_push, &mutex);
@@ -1035,11 +1054,19 @@ size_t PushPullThreadData::PushData(const char* data, size_t total_size) {
 }
 
 size_t PushPullThreadData::push_thread_callback(const char *ptr, size_t size, size_t nmemb, void *userdata) {
+    if (!ptr || !userdata || !size || !nmemb) {
+        return 0;
+    }
+
     auto* data = static_cast<PushPullThreadData*>(userdata);
     return data->PushData(ptr, size * nmemb);
 }
 
 size_t PushPullThreadData::pull_thread_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
+    if (!ptr || !userdata || !size || !nmemb) {
+        return 0;
+    }
+
     auto* data = static_cast<PushPullThreadData*>(userdata);
     return data->PullData(ptr, size * nmemb);
 }
@@ -1067,10 +1094,29 @@ PullThreadData::~PullThreadData() {
     if (started) {
         SCOPED_MUTEX(&mutex);
 
+        // for now, always wait until the dat is flushed.
+        // may enable a timeout later on, however i don't want to risk
+        // data loss for users that have slow hdd / connections.
+        #if 1
         while (!finished && !error && !buffer.empty()) {
             condvarWakeOne(&can_pull);
-            condvarWaitTimeout(&can_push, &mutex, 5e+9);
+            condvarWait(&can_push, &mutex);
         }
+        #else
+        u64 timeout = 5e+9;
+        const auto deadline = armGetSystemTick() + armNsToTicks(timeout);
+
+        while (!finished && !error && !buffer.empty()) {
+            const s64 remaining = deadline - armGetSystemTick();
+            timeout = remaining > 0 ? armTicksToNs(remaining) : 0;
+
+            condvarWakeOne(&can_pull);
+            if (R_FAILED(condvarWaitTimeout(&can_push, &mutex, timeout))) {
+                log_write("[PullThreadData] condvarWaitTimeout() timed out flushing data: %zu\n", buffer.size());
+                break;
+            }
+        }
+        #endif
     }
 }
 
@@ -1276,11 +1322,6 @@ void MountCurlDevice::curl_set_common_options(CURL* curl, const std::string& url
     // NOTE: port, user and pass are set in the curl_url.
     curl_easy_reset(curl);
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    // cancel if speed is less than 1 bytes/sec for timeout seconds.
-    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
-    // todo: change config to accept seconds rather than ms.
-    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, config.timeout / 1000L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, config.timeout);
     curl_easy_setopt(curl, CURLOPT_AUTOREFERER, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 15L);
@@ -1290,6 +1331,14 @@ void MountCurlDevice::curl_set_common_options(CURL* curl, const std::string& url
     curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 1024L * 64L);
     curl_easy_setopt(curl, CURLOPT_UPLOAD_BUFFERSIZE, 1024L * 64L);
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
+
+    if (config.timeout > 0) {
+        // cancel if speed is less than 1 bytes/sec for timeout seconds.
+        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+        // todo: change config to accept seconds rather than ms.
+        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, config.timeout / 1000L);
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, config.timeout);
+    }
 
     if (m_curl_share) {
         curl_easy_setopt(curl, CURLOPT_SHARE, m_curl_share);

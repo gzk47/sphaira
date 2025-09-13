@@ -82,6 +82,14 @@ struct ThreadData {
         return read_running || decompress_running || write_running;
     }
 
+    auto GetReadOffset() volatile const -> s64 {
+        return read_offset;
+    }
+
+    auto GetDecompressOffset() volatile const -> s64 {
+        return decompress_offset;
+    }
+
     auto GetWriteOffset() volatile const -> s64 {
         return write_offset;
     }
@@ -94,8 +102,16 @@ struct ThreadData {
         return &m_uevent_done;
     }
 
-    auto GetProgressEvent() {
-        return &m_uevent_progres;
+    auto GetReadProgressEvent() {
+        return &m_uevent_read_progress;
+    }
+
+    auto GetDecompressProgressEvent() {
+        return &m_uevent_decompress_progress;
+    }
+
+    auto GetWriteProgressEvent() {
+        return &m_uevent_write_progress;
     }
 
     void SetReadResult(Result result) {
@@ -174,7 +190,9 @@ private:
     CondVar can_pull_write{};
 
     UEvent m_uevent_done{};
-    UEvent m_uevent_progres{};
+    UEvent m_uevent_read_progress{};
+    UEvent m_uevent_decompress_progress{};
+    UEvent m_uevent_write_progress{};
 
     RingBuf<2> read_buffers{};
     RingBuf<2> write_buffers{};
@@ -219,8 +237,10 @@ ThreadData::ThreadData(ui::ProgressBox* _pbox, s64 size, const ReadCallback& _rf
     condvarInit(std::addressof(can_pull));
     condvarInit(std::addressof(can_pull_write));
 
-    ueventCreate(&m_uevent_done, false);
-    ueventCreate(&m_uevent_progres, true);
+    ueventCreate(GetDoneEvent(), false);
+    ueventCreate(GetReadProgressEvent(), true);
+    ueventCreate(GetDecompressProgressEvent(), true);
+    ueventCreate(GetWriteProgressEvent(), true);
 }
 
 auto ThreadData::GetResults() volatile -> Result {
@@ -379,6 +399,7 @@ Result ThreadData::readFuncInternal() {
             break;
         }
 
+        ueventSignal(GetReadProgressEvent());
         auto buf_size = bytes_read;
         R_TRY(this->SetDecompressBuf(buf, buffer_offset, buf_size));
     }
@@ -423,25 +444,17 @@ Result ThreadData::decompressFuncInternal() {
                     }
 
                     size -= rsize;
-                    this->decompress_offset += rsize;
                     data += rsize;
-
-                    // const auto buf_off = temp_buf.size();
-                    // temp_buf.resize(buf_off + size);
-                    // std::memcpy(temp_buf.data() + buf_off, data, size);
-                    // this->decompress_offset += size;
-
-                    // if (temp_buf.size() >= temp_buf_flush_max) {
-                    //     // log_write("flushing data: %zu %.2f MiB\n", temp_buf.size(), temp_buf.size() / 1024.0 / 1024.0);
-                    //     R_TRY(this->SetWriteBuf(temp_buf, temp_buf.size()));
-                    //     temp_buf.resize(0);
-                    // }
+                    this->decompress_offset += rsize;
+                    ueventSignal(GetDecompressProgressEvent());
                 }
 
                 R_SUCCEED();
             }));
         } else {
             this->decompress_offset += buf.size();
+            ueventSignal(GetDecompressProgressEvent());
+
             R_TRY(this->SetWriteBuf(buf, buf.size()));
         }
     }
@@ -479,7 +492,7 @@ Result ThreadData::writeFuncInternal() {
         }
 
         this->write_offset += size;
-        ueventSignal(GetProgressEvent());
+        ueventSignal(GetWriteProgressEvent());
     }
 
     log_write("finished write thread success!\n");
@@ -586,7 +599,11 @@ Result TransferInternal(ui::ProgressBox* pbox, s64 size, const ReadCallback& rfu
             R_TRY(start_threads());
             log_write("[THREAD] started threads\n");
 
-            const auto waiter_progress = waiterForUEvent(t_data.GetProgressEvent());
+            // use the read progress as the write output may be smaller due to compressing
+            // so read will show a more accurate progress.
+            // TODO: show progress bar for all 3 threads.
+            // NOTE: went back to using write progress for now.
+            const auto waiter_progress = waiterForUEvent(t_data.GetWriteProgressEvent());
             const auto waiter_cancel = waiterForUEvent(pbox->GetCancelEvent());
             const auto waiter_done = waiterForUEvent(t_data.GetDoneEvent());
 

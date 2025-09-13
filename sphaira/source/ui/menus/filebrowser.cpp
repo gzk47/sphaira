@@ -81,8 +81,7 @@ constexpr FsEntry FS_ENTRY_DEFAULT{
 
 constexpr FsEntry FS_ENTRIES[]{
     FS_ENTRY_DEFAULT,
-    { "Image System memory", "/", FsType::ImageNand },
-    { "Image microSD card", "/", FsType::ImageSd},
+    { "Album", "/", FsType::ImageSd},
 };
 
 constexpr std::string_view AUDIO_EXTENSIONS[] = {

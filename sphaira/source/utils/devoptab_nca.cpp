@@ -159,7 +159,7 @@ private:
     int devoptab_open(void *fileStruct, const char *path, int flags, int mode) override;
     int devoptab_close(void *fd) override;
     ssize_t devoptab_read(void *fd, char *ptr, size_t len) override;
-    off_t devoptab_seek(void *fd, off_t pos, int dir) override;
+    ssize_t devoptab_seek(void *fd, off_t pos, int dir) override;
     int devoptab_fstat(void *fd, struct stat *st) override;
     int devoptab_diropen(void* fd, const char *path) override;
     int devoptab_dirreset(void* fd) override;
@@ -207,7 +207,7 @@ ssize_t Device::devoptab_read(void *fd, char *ptr, size_t len) {
     return bytes_read;
 }
 
-off_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
+ssize_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
     auto file = static_cast<File*>(fd);
     const auto& entry = file->entry;
 
@@ -343,9 +343,11 @@ Result MountNcaInternal(fs::Fs* fs, const std::shared_ptr<yati::source::Base>& s
 
     // check if this is a ncz.
     ncz::Header ncz_header{};
-    R_TRY(source->Read2(&ncz_header, NCZ_NORMAL_SIZE, sizeof(ncz_header)));
+    if (size >= NCZ_NORMAL_SIZE) {
+        R_TRY(source->Read2(&ncz_header, NCZ_NORMAL_SIZE, sizeof(ncz_header)));
+    }
 
-    if (ncz_header.magic == NCZ_SECTION_MAGIC) {
+    if (size >= NCZ_NORMAL_SIZE && ncz_header.magic == NCZ_SECTION_MAGIC) {
         // read all the sections.
         s64 ncz_offset = NCZ_SECTION_OFFSET;
         ncz::Sections ncz_sections(ncz_header.total_sections);

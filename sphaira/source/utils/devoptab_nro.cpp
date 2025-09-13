@@ -118,7 +118,7 @@ private:
     int devoptab_open(void *fileStruct, const char *path, int flags, int mode) override;
     int devoptab_close(void *fd) override;
     ssize_t devoptab_read(void *fd, char *ptr, size_t len) override;
-    off_t devoptab_seek(void *fd, off_t pos, int dir) override;
+    ssize_t devoptab_seek(void *fd, off_t pos, int dir) override;
     int devoptab_fstat(void *fd, struct stat *st) override;
     int devoptab_diropen(void* fd, const char *path) override;
     int devoptab_dirreset(void* fd) override;
@@ -166,7 +166,7 @@ ssize_t Device::devoptab_read(void *fd, char *ptr, size_t len) {
     return bytes_read;
 }
 
-off_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
+ssize_t Device::devoptab_seek(void *fd, off_t pos, int dir) {
     auto file = static_cast<File*>(fd);
     const auto& entry = file->entry;
 
