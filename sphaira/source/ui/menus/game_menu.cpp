@@ -36,6 +36,8 @@
 namespace sphaira::ui::menu::game {
 namespace {
 
+constinit UEvent g_change_uevent;
+
 struct NspSource final : dump::BaseSource {
     NspSource(const std::vector<NspEntry>& entries) : m_entries{entries} {
         m_is_file_based_emummc = App::IsFileBaseEmummc();
@@ -270,6 +272,10 @@ Result NspEntry::Read(void* buf, s64 off, s64 size, u64* bytes_read) {
     return 0x1;
 }
 
+void SignalChange() {
+    ueventSignal(&g_change_uevent);
+}
+
 Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
     this->SetActions(
         std::make_pair(Button::L3, Action{[this](){
@@ -455,6 +461,7 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
 
     fsOpenGameCardDetectionEventNotifier(std::addressof(m_gc_event_notifier));
     fsEventNotifierGetEventHandle(std::addressof(m_gc_event_notifier), std::addressof(m_gc_event), true);
+    ueventCreate(&g_change_uevent, true);
 }
 
 Menu::~Menu() {
@@ -469,8 +476,10 @@ Menu::~Menu() {
 }
 
 void Menu::Update(Controller* controller, TouchInfo* touch) {
-    // force update if gamecard state changed.
-    m_dirty |= R_SUCCEEDED(eventWait(&m_gc_event, 0));
+    s32 wait_dummy_idx;
+    if (R_SUCCEEDED(waitMulti(&wait_dummy_idx, 0, waiterForEvent(&m_gc_event), waiterForUEvent(&g_change_uevent)))) {
+        m_dirty = true;
+    }
 
     if (m_dirty) {
         App::Notify("Updating application record list"_i18n);
