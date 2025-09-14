@@ -296,18 +296,22 @@ MainMenu::MainMenu() {
             language_items.push_back("Vietnamese"_i18n);
             language_items.push_back("Ukrainian"_i18n);
 
+            // build menus info.
+            std::string menus_info = "Launch one of Sphaira's menus:\n"_i18n;
+            for (auto& e : GetMenuMenuEntries()) {
+                if (e.name == App::GetApp()->m_left_menu.Get()) {
+                    continue;
+                } else if (e.name == App::GetApp()->m_right_menu.Get()) {
+                    continue;
+                }
+
+                menus_info += "- " + i18n::get(e.title) + "\n";
+            }
+            menus_info += "\nYou can change the left/right menu in the Advanced Options."_i18n;
+
             options->Add<SidebarEntryCallback>("Menus"_i18n, [](){
                 App::DisplayMenuOptions();
-            },  "Launch one of Sphaira's menus:\n"
-                "- Appstore\n"
-                "- Saves\n"
-                "- GitHub\n"
-                "- FTP Install\n"
-                "- MTP Install\n"
-                "- USB Install\n"
-                "- IRS (Infrared Joycon Camera)\n"
-                "- Web\n\n"
-                "You can change the left/right menu in the Advanced Options."_i18n);
+            },  menus_info);
 
             options->Add<SidebarEntryCallback>("Network"_i18n, [this](){
                 auto options = std::make_unique<Sidebar>("Network Options"_i18n, Sidebar::Side::LEFT);
