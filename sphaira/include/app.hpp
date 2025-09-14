@@ -338,6 +338,10 @@ public:
     // todo: move this into it's own menu
     option::OptionLong m_text_scroll_speed{"accessibility", "text_scroll_speed", 1}; // normal
 
+    // mtp options.
+    option::OptionLong m_mtp_vid{"mtp", "vid", 0x057e}; // nintendo
+    option::OptionLong m_mtp_pid{"mtp", "pid", 0x201d}; // switch
+
     std::shared_ptr<fs::FsNativeSd> m_fs{};
     audio::SongID m_background_music{};
 

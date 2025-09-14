@@ -1427,7 +1427,7 @@ App::App(const char* argv0) {
     // init fs for app use.
     m_fs = std::make_shared<fs::FsNativeSd>(true);
 
-    auto cb = [](const mTCHAR *Section, const mTCHAR *Key, const mTCHAR *Value, void *UserData) -> int {
+    static const auto cb = [](const mTCHAR *Section, const mTCHAR *Key, const mTCHAR *Value, void *UserData) -> int {
         auto app = static_cast<App*>(UserData);
 
         if (!std::strcmp(Section, INI_SECTION)) {
@@ -1478,6 +1478,9 @@ App::App(const char* argv0) {
             else if (app->m_nsz_compress_ldm.LoadFrom(Key, Value)) {}
             else if (app->m_nsz_compress_block.LoadFrom(Key, Value)) {}
             else if (app->m_nsz_compress_block_exponent.LoadFrom(Key, Value)) {}
+        } else if (!std::strcmp(Section, "mtp")) {
+            if (app->m_mtp_vid.LoadFrom(Key, Value)) {}
+            else if (app->m_mtp_pid.LoadFrom(Key, Value)) {}
         }
 
         return 1;

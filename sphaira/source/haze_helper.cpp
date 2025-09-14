@@ -579,7 +579,7 @@ bool Init() {
     g_fs_entries.emplace_back(std::make_shared<FsInstallProxy>("install", "Install (NSP, XCI, NSZ, XCZ)"));
 
     g_should_exit = false;
-    if (!::haze::Initialize(haze_callback, THREAD_PRIO, THREAD_CORE, g_fs_entries)) {
+    if (!::haze::Initialize(haze_callback, THREAD_PRIO, THREAD_CORE, g_fs_entries, App::GetApp()->m_mtp_vid.Get(), App::GetApp()->m_mtp_pid.Get())) {
         return false;
     }
 
