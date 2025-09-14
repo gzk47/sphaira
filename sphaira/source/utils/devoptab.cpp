@@ -258,6 +258,11 @@ void DisplayDevoptabSideBar() {
             items.emplace_back(GetTypeName(e));
         }
 
+        if (items.empty()) {
+            App::Notify("No mount entries found."_i18n);
+            return;
+        }
+
         App::Push<PopupList>("Modify Entry"_i18n, items, [configs](std::optional<s64> index){
             if (!index.has_value()) {
                 return;
@@ -276,6 +281,11 @@ void DisplayDevoptabSideBar() {
 
         for (const auto& e : configs) {
             items.emplace_back(GetTypeName(e));
+        }
+
+        if (items.empty()) {
+            App::Notify("No mount entries found."_i18n);
+            return;
         }
 
         App::Push<PopupList>("Delete Entry"_i18n, items, [configs](std::optional<s64> index){

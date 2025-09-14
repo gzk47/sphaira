@@ -1188,7 +1188,7 @@ bool MountCurlDevice::Mount() {
             log_write("[CURL] updated host: %s\n", url.c_str());
         }
 
-        const auto flags = CURLU_DEFAULT_SCHEME|CURLU_URLENCODE;
+        const auto flags = CURLU_GUESS_SCHEME|CURLU_URLENCODE;
         CURLUcode rc = curl_url_set(curlu, CURLUPART_URL, url.c_str(), flags);
         if (rc != CURLUE_OK) {
             log_write("[CURL] curl_url_set() failed: %s\n", curl_url_strerror_wrap(rc));
