@@ -175,7 +175,10 @@ private:
 
 class SidebarEntryTextInput final : public SidebarEntryTextBase {
 public:
+    // uses normal keyboard.
     explicit SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide = {}, s64 len_min = -1, s64 len_max = PATH_MAX, const std::string& info = "");
+    // uses numpad.
+    explicit SidebarEntryTextInput(const std::string& title, s64 value, const std::string& guide = {}, s64 len_min = -1, s64 len_max = PATH_MAX, const std::string& info = "");
 
 private:
     const std::string m_guide;
@@ -202,10 +205,8 @@ public:
     using Items = std::vector<std::unique_ptr<SidebarEntryBase>>;
 
 public:
-    explicit Sidebar(const std::string& title, Side side, Items&& items);
-    explicit Sidebar(const std::string& title, Side side);
-    explicit Sidebar(const std::string& title, const std::string& sub, Side side, Items&& items);
-    explicit Sidebar(const std::string& title, const std::string& sub, Side side);
+    explicit Sidebar(const std::string& title, Side side, float width = 450.f);
+    explicit Sidebar(const std::string& title, const std::string& sub, Side side, float width = 450.f);
 
     auto Update(Controller* controller, TouchInfo* touch) -> void override;
     auto Draw(NVGcontext* vg, Theme* theme) -> void override;
@@ -240,6 +241,13 @@ private:
     static constexpr float m_title_size{28.f};
     // static constexpr Vec2 box_size{380.f, 70.f};
     static constexpr Vec2 m_box_size{400.f, 70.f};
+};
+
+class FormSidebar : public Sidebar {
+public:
+    // explicit FormSidebar(const std::string& title) : Sidebar{title, Side::RIGHT, 540.f} {
+    explicit FormSidebar(const std::string& title) : Sidebar{title, Side::RIGHT} {
+    }
 };
 
 } // namespace sphaira::ui

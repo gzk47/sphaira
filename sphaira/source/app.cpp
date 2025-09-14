@@ -1953,6 +1953,12 @@ void App::DisplayAdvancedOptions(bool left_side) {
     }, "When enabled, it replaces /hbmenu.nro with Sphaira, creating a backup of hbmenu to /switch/hbmenu.nro\n\n" \
        "Disabling will give you the option to restore hbmenu."_i18n);
 
+    options->Add<ui::SidebarEntryCallback>("Add / modify mounts"_i18n, [](){
+        devoptab::DisplayDevoptabSideBar();
+    },  "Create, modify, delete network mounts (HTTP, FTP, SFTP, SMB, NFS).\n"
+        "Mount options only require a URL and Name be set, with other fields being optional, such as port, user, pass etc.\n\n"
+        "Any changes made will require restarting Sphaira to take effect."_i18n);
+
     options->Add<ui::SidebarEntryBool>("Boost CPU during transfer"_i18n, App::GetApp()->m_progress_boost_mode,
         "Enables boost mode during transfers which can improve transfer speed. "
         "This sets the CPU to 1785mhz and lowers the GPU 76mhz"_i18n);

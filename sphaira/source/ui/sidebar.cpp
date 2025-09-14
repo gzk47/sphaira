@@ -314,6 +314,16 @@ SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, const std
     });
 }
 
+SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, s64 value, const std::string& guide, s64 len_min, s64 len_max, const std::string& info)
+: SidebarEntryTextInput{title, std::to_string(value), guide, len_min, len_max, info} {
+    SetCallback([this](){
+        s64 out = std::stoul(GetValue());
+        if (R_SUCCEEDED(swkbd::ShowNumPad(out, m_guide.c_str(), GetValue().c_str(), m_len_min, m_len_max))) {
+            SetValue(std::to_string(out));
+        }
+    });
+}
+
 SidebarEntryFilePicker::SidebarEntryFilePicker(const std::string& title, const std::string& value, const std::vector<std::string>& filter, const std::string& info)
 : SidebarEntryTextBase{title, value, {}, info}, m_filter{filter} {
 
@@ -328,26 +338,21 @@ SidebarEntryFilePicker::SidebarEntryFilePicker(const std::string& title, const s
     });
 }
 
-Sidebar::Sidebar(const std::string& title, Side side, Items&& items)
-: Sidebar{title, "", side, std::forward<decltype(items)>(items)} {
+Sidebar::Sidebar(const std::string& title, Side side, float width)
+: Sidebar{title, "", side, width} {
 }
 
-Sidebar::Sidebar(const std::string& title, Side side)
-: Sidebar{title, "", side, {}} {
-}
-
-Sidebar::Sidebar(const std::string& title, const std::string& sub, Side side, Items&& items)
+Sidebar::Sidebar(const std::string& title, const std::string& sub, Side side, float width)
 : m_title{title}
 , m_sub{sub}
-, m_side{side}
-, m_items{std::forward<decltype(items)>(items)} {
+, m_side{side} {
     switch (m_side) {
         case Side::LEFT:
-            SetPos(Vec4{0.f, 0.f, 450.f, SCREEN_HEIGHT});
+            SetPos(Vec4{0.f, 0.f, width, SCREEN_HEIGHT});
             break;
 
         case Side::RIGHT:
-            SetPos(Vec4{SCREEN_WIDTH - 450.f, 0.f, 450.f, SCREEN_HEIGHT});
+            SetPos(Vec4{SCREEN_WIDTH - width, 0.f, width, SCREEN_HEIGHT});
             break;
     }
 
@@ -364,11 +369,6 @@ Sidebar::Sidebar(const std::string& title, const std::string& sub, Side side, It
     m_list = std::make_unique<List>(1, 6, pos, m_base_pos);
     m_list->SetScrollBarPos(GetX() + GetW() - 20, m_base_pos.y - 10, pos.h - m_base_pos.y + 48);
 }
-
-Sidebar::Sidebar(const std::string& title, const std::string& sub, Side side)
-: Sidebar{title, sub, side, {}} {
-}
-
 
 auto Sidebar::Update(Controller* controller, TouchInfo* touch) -> void {
     Widget::Update(controller, touch);

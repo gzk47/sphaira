@@ -53,7 +53,7 @@ namespace {
 
 using RomDatabaseIndexs = std::vector<size_t>;
 
-struct ForwarderForm final : public Sidebar {
+struct ForwarderForm final : public FormSidebar {
     explicit ForwarderForm(const FileAssocEntry& assoc, const RomDatabaseIndexs& db_indexs, const FileEntry& entry, const fs::FsPath& arg_path);
 
 private:
@@ -288,7 +288,7 @@ auto GetRomIcon(std::string filename, const RomDatabaseIndexs& db_indexs, const 
 }
 
 ForwarderForm::ForwarderForm(const FileAssocEntry& assoc, const RomDatabaseIndexs& db_indexs, const FileEntry& entry, const fs::FsPath& arg_path)
-: Sidebar{"Forwarder Creation", Side::RIGHT}
+: FormSidebar{"Forwarder Creation"}
 , m_assoc{assoc}
 , m_db_indexs{db_indexs}
 , m_arg_path{arg_path} {

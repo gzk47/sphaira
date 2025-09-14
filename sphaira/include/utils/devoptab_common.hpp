@@ -131,7 +131,7 @@ struct MountConfig {
     std::string user{};
     std::string pass{};
     std::string dump_path{};
-    std::optional<long> port{};
+    long port{};
     long timeout{};
     bool read_only{};
     bool no_stat_file{true};
@@ -141,6 +141,7 @@ struct MountConfig {
 
     std::unordered_map<std::string, std::string> extra{};
 };
+using MountConfigs = std::vector<MountConfig>;
 
 struct PullThreadData final : PushPullThreadData {
     using PushPullThreadData::PushPullThreadData;
@@ -213,6 +214,8 @@ private:
     RwLock m_rwlocks[CURL_LOCK_DATA_LAST]{};
     bool m_mounted{};
 };
+
+void LoadConfigsFromIni(const fs::FsPath& path, MountConfigs& out_configs);
 
 using CreateDeviceCallback = std::function<std::unique_ptr<MountDevice>(const MountConfig& config)>;
 Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file_size, size_t dir_size, const char* name, bool force_read_only = false);

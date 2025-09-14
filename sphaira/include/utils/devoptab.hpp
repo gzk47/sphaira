@@ -36,4 +36,6 @@ void UmountNeworkDevice(const fs::FsPath& mount);
 // SEE: https://github.com/devkitPro/newlib/issues/35
 void FixDkpBug();
 
+void DisplayDevoptabSideBar();
+
 } // namespace sphaira::devoptab

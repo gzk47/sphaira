@@ -193,7 +193,7 @@ bool Device::Mount() {
         hints.ai_socktype = SOCK_STREAM;
 
         addrinfo* res{};
-        const auto port = this->config.port.value_or(22);
+        const auto port = this->config.port > 0 ? this->config.port : 22;
         const auto port_str = std::to_string(port);
         auto ret = getaddrinfo(this->config.url.c_str(), port_str.c_str(), &hints, &res);
         if (ret != 0) {

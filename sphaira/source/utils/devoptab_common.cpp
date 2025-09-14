@@ -769,6 +769,58 @@ void update_devoptab_for_read_only(devoptab_t* devoptab, bool read_only) {
     }
 }
 
+void LoadConfigsFromIni(const fs::FsPath& path, MountConfigs& out_configs) {
+    static const auto cb = [](const mTCHAR *Section, const mTCHAR *Key, const mTCHAR *Value, void *UserData) -> int {
+        auto e = static_cast<MountConfigs*>(UserData);
+        if (!Section || !Key || !Value) {
+            return 1;
+        }
+
+        // add new entry if use section changed.
+        if (e->empty() || std::strcmp(Section, e->back().name.c_str())) {
+            e->emplace_back(Section);
+        }
+
+        if (!std::strcmp(Key, "url")) {
+            e->back().url = Value;
+        } else if (!std::strcmp(Key, "user")) {
+            e->back().user = Value;
+        } else if (!std::strcmp(Key, "pass")) {
+            e->back().pass = Value;
+        } else if (!std::strcmp(Key, "dump_path")) {
+            e->back().dump_path = Value;
+        } else if (!std::strcmp(Key, "port")) {
+            const auto port = ini_parse_getl(Value, -1);
+            if (port < 0 || port > 65535) {
+                log_write("[DEVOPTAB] INI: invalid port %s\n", Value);
+            } else {
+                e->back().port = port;
+            }
+        } else if (!std::strcmp(Key, "timeout")) {
+            e->back().timeout = ini_parse_getl(Value, e->back().timeout);
+        } else if (!std::strcmp(Key, "read_only")) {
+            e->back().read_only = ini_parse_getbool(Value, e->back().read_only);
+        } else if (!std::strcmp(Key, "no_stat_file")) {
+            e->back().no_stat_file = ini_parse_getbool(Value, e->back().no_stat_file);
+        } else if (!std::strcmp(Key, "no_stat_dir")) {
+            e->back().no_stat_dir = ini_parse_getbool(Value, e->back().no_stat_dir);
+        } else if (!std::strcmp(Key, "fs_hidden")) {
+            e->back().fs_hidden = ini_parse_getbool(Value, e->back().fs_hidden);
+        } else if (!std::strcmp(Key, "dump_hidden")) {
+            e->back().dump_hidden = ini_parse_getbool(Value, e->back().dump_hidden);
+        } else {
+            log_write("[DEVOPTAB] INI: extra key %s=%s\n", Key, Value);
+            e->back().extra.emplace(Key, Value);
+        }
+
+        return 1;
+    };
+
+    out_configs.resize(0);
+    ini_browse(cb, &out_configs, path);
+    log_write("[DEVOPTAB] Found %zu mount configs\n", out_configs.size());
+}
+
 bool MountNetworkDevice2(std::unique_ptr<MountDevice>&& device, const MountConfig& config, size_t file_size, size_t dir_size, const char* name, const char* mount_name) {
     if (!device) {
         log_write("[DEVOPTAB] No device for %s\n", mount_name);
@@ -877,60 +929,11 @@ Result MountNetworkDevice(const CreateDeviceCallback& create_device, size_t file
 
     SCOPED_RWLOCK(&g_rwlock, true);
 
-    using MountConfigs = std::vector<MountConfig>;
-
-    static const auto cb = [](const mTCHAR *Section, const mTCHAR *Key, const mTCHAR *Value, void *UserData) -> int {
-        auto e = static_cast<MountConfigs*>(UserData);
-        if (!Section || !Key || !Value) {
-            return 1;
-        }
-
-        // add new entry if use section changed.
-        if (e->empty() || std::strcmp(Section, e->back().name.c_str())) {
-            e->emplace_back(Section);
-        }
-
-        if (!std::strcmp(Key, "url")) {
-            e->back().url = Value;
-        } else if (!std::strcmp(Key, "user")) {
-            e->back().user = Value;
-        } else if (!std::strcmp(Key, "pass")) {
-            e->back().pass = Value;
-        } else if (!std::strcmp(Key, "dump_path")) {
-            e->back().dump_path = Value;
-        } else if (!std::strcmp(Key, "port")) {
-            const auto port = ini_parse_getl(Value, -1);
-            if (port < 0 || port > 65535) {
-                log_write("[DEVOPTAB] INI: invalid port %s\n", Value);
-            } else {
-                e->back().port = port;
-            }
-        } else if (!std::strcmp(Key, "timeout")) {
-            e->back().timeout = ini_parse_getl(Value, e->back().timeout);
-        } else if (!std::strcmp(Key, "read_only")) {
-            e->back().read_only = ini_parse_getbool(Value, e->back().read_only);
-        } else if (!std::strcmp(Key, "no_stat_file")) {
-            e->back().no_stat_file = ini_parse_getbool(Value, e->back().no_stat_file);
-        } else if (!std::strcmp(Key, "no_stat_dir")) {
-            e->back().no_stat_dir = ini_parse_getbool(Value, e->back().no_stat_dir);
-        } else if (!std::strcmp(Key, "fs_hidden")) {
-            e->back().fs_hidden = ini_parse_getbool(Value, e->back().fs_hidden);
-        } else if (!std::strcmp(Key, "dump_hidden")) {
-            e->back().dump_hidden = ini_parse_getbool(Value, e->back().dump_hidden);
-        } else {
-            log_write("[DEVOPTAB] INI: extra key %s=%s\n", Key, Value);
-            e->back().extra.emplace(Key, Value);
-        }
-
-        return 1;
-    };
-
     fs::FsPath config_path{};
     std::snprintf(config_path, sizeof(config_path), "/config/sphaira/mount/%s.ini", name);
 
     MountConfigs configs{};
-    ini_browse(cb, &configs, config_path);
-    log_write("[DEVOPTAB] Found %zu mount configs\n", configs.size());
+    LoadConfigsFromIni(config_path, configs);
 
     for (auto& config : configs) {
         if (config.name.empty()) {
@@ -1192,8 +1195,8 @@ bool MountCurlDevice::Mount() {
             return false;
         }
 
-        if (config.port.has_value()) {
-            rc = curl_url_set(curlu, CURLUPART_PORT, std::to_string(config.port.value()).c_str(), flags);
+        if (config.port > 0) {
+            rc = curl_url_set(curlu, CURLUPART_PORT, std::to_string(config.port).c_str(), flags);
             if (rc != CURLUE_OK) {
                 log_write("[CURL] curl_url_set() port failed: %s\n", curl_url_strerror_wrap(rc));
             }

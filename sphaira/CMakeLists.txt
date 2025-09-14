@@ -128,6 +128,7 @@ add_executable(sphaira
     source/utils/devoptab_bfsar.cpp
     source/utils/devoptab_vfs.cpp
     source/utils/devoptab_fatfs.cpp
+    source/utils/devoptab.cpp
 
     source/usb/base.cpp
     source/usb/usbds.cpp
