@@ -50,58 +50,52 @@ auto MiscMenuFuncGenerator(u32 flags) {
 
 const MiscMenuEntry MISC_MENU_ENTRIES[] = {
     { .name = "Appstore", .title = "Appstore", .func = MiscMenuFuncGenerator<ui::menu::appstore::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
-        "Download and update apps.\n\n"\
+        "Download and update apps.\n\n"
         "Internet connection required." },
 
     { .name = "Games", .title = "Games", .func = MiscMenuFuncGenerator<ui::menu::game::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
-        "View all installed games. "\
+        "View all installed games. "
         "In this menu you can launch, backup, create savedata and much more." },
 
     { .name = "FileBrowser", .title = "FileBrowser", .func = MiscMenuFuncGenerator<ui::menu::filebrowser::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
-        "Browse files on you SD Card. "\
-        "You can move, copy, delete, extract zip, create zip, upload and much more.\n\n"\
+        "Browse files on you SD Card. "
+        "You can move, copy, delete, extract zip, create zip, upload and much more.\n\n"
         "A connected USB/HDD can be opened by mounting it in the advanced options." },
 
     { .name = "Saves", .title = "Saves", .func = MiscMenuFuncGenerator<ui::menu::save::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
-        "View save data for each user. "\
-        "You can backup and restore saves.\n\n"\
+        "View save data for each user. "
+        "You can backup and restore saves.\n\n"
         "Experimental support for backing up system saves is possible." },
 
 #if 0
     { .name = "Themezer", .title = "Themezer", .func = MiscMenuFuncGenerator<ui::menu::themezer::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
-        "Download themes from themezer.net. "\
-        "Themes are downloaded to /themes/sphaira\n"\
+        "Download themes from themezer.net. "
+        "Themes are downloaded to /themes/sphaira\n"
         "To install the themes, NXThemesInstaller needs to be installed (can be downloaded via the AppStore)." },
 #endif
 
     { .name = "GitHub", .title = "GitHub", .func = MiscMenuFuncGenerator<ui::menu::gh::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
-        "Download releases directly from GitHub. "\
+        "Download releases directly from GitHub. "
         "Custom entries can be added to /config/sphaira/github" },
 
 #ifdef ENABLE_FTPSRV
     { .name = "FTP", .title = "FTP Install", .func = MiscMenuFuncGenerator<ui::menu::ftp::Menu>, .flag = MiscMenuFlag_Install, .info =
-        "Install apps via FTP.\n\n"\
-        "NOTE: This feature does not always work, use at your own risk. "\
-        "If you encounter an issue, do not open an issue, it will not be fixed." },
+        "Install apps via FTP." },
 #endif // ENABLE_FTPSRV
 
 #ifdef ENABLE_LIBHAZE
     { .name = "MTP", .title = "MTP Install", .func = MiscMenuFuncGenerator<ui::menu::mtp::Menu>, .flag = MiscMenuFlag_Install, .info =
-        "Install apps via MTP.\n\n"\
-        "NOTE: This feature does not always work, use at your own risk. "\
-        "If you encounter an issue, do not open an issue, it will not be fixed." },
+        "Install apps via MTP." },
 #endif // ENABLE_LIBHAZE
 
     { .name = "USB", .title = "USB Install", .func = MiscMenuFuncGenerator<ui::menu::usb::Menu>, .flag = MiscMenuFlag_Install, .info =
-        "Install apps via USB.\n\n"\
-        "A USB client is required on PC, such as ns-usbloader and fluffy.\n\n"\
-        "NOTE: This feature does not always work, use at your own risk. "\
-        "If you encounter an issue, do not open an issue, it will not be fixed." },
+        "Install apps via USB.\n\n"
+        "A USB client is required on PC." },
 
     { .name = "GameCard", .title = "GameCard", .func = MiscMenuFuncGenerator<ui::menu::gc::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
-        "View info on the inserted Game Card (GC). "\
-        "You can backup and install the inserted GC. "\
-        "To swap GC's, simply remove the old GC and insert the new one. "\
+        "View info on the inserted Game Card (GC). "
+        "You can backup and install the inserted GC. "
+        "To swap GC's, simply remove the old GC and insert the new one. "
         "You do not need to exit the menu." },
 
     { .name = "IRS", .title = "IRS (Infrared Joycon Camera)", .func = MiscMenuFuncGenerator<ui::menu::irs::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
@@ -172,7 +166,7 @@ auto InstallUpdate(ProgressBox* pbox, const std::string url, const std::string v
 auto CreateLeftSideMenu(std::string& name_out) -> std::unique_ptr<MenuBase> {
     const auto name = App::GetApp()->m_left_menu.Get();
 
-    for (auto& e : GetMiscMenuEntries()) {
+    for (auto& e : GetMenuMenuEntries()) {
         if (e.name == name) {
             name_out = name;
             return e.func(MenuFlag_Tab);
@@ -197,7 +191,7 @@ auto CreateRightSideMenu(std::string_view left_name) -> std::unique_ptr<MenuBase
         }
     }
 
-    for (auto& e : GetMiscMenuEntries()) {
+    for (auto& e : GetMenuMenuEntries()) {
         if (e.name == name) {
             return e.func(MenuFlag_Tab);
         }
@@ -208,7 +202,7 @@ auto CreateRightSideMenu(std::string_view left_name) -> std::unique_ptr<MenuBase
 
 } // namespace
 
-auto GetMiscMenuEntries() -> std::span<const MiscMenuEntry> {
+auto GetMenuMenuEntries() -> std::span<const MiscMenuEntry> {
     return MISC_MENU_ENTRIES;
 }
 
@@ -280,7 +274,7 @@ MainMenu::MainMenu() {
 
     this->SetActions(
         std::make_pair(Button::START, Action{App::Exit}),
-        std::make_pair(Button::SELECT, Action{App::DisplayMiscOptions}),
+        std::make_pair(Button::SELECT, Action{App::DisplayMenuOptions}),
         std::make_pair(Button::Y, Action{"Menu"_i18n, [this](){
             auto options = std::make_unique<Sidebar>("Menu Options"_i18n, "v" APP_VERSION_HASH, Sidebar::Side::LEFT);
             ON_SCOPE_EXIT(App::Push(std::move(options)));
@@ -302,9 +296,18 @@ MainMenu::MainMenu() {
             language_items.push_back("Vietnamese"_i18n);
             language_items.push_back("Ukrainian"_i18n);
 
-            options->Add<SidebarEntryCallback>("Theme"_i18n, [](){
-                App::DisplayThemeOptions();
-            }, "Customise the look of Sphaira by changing the theme"_i18n);
+            options->Add<SidebarEntryCallback>("Menus"_i18n, [](){
+                App::DisplayMenuOptions();
+            },  "Launch one of Sphaira's menus:\n"
+                "- Appstore\n"
+                "- Saves\n"
+                "- GitHub\n"
+                "- FTP Install\n"
+                "- MTP Install\n"
+                "- USB Install\n"
+                "- IRS (Infrared Joycon Camera)\n"
+                "- Web\n\n"
+                "You can change the left/right menu in the Advanced Options."_i18n);
 
             options->Add<SidebarEntryCallback>("Network"_i18n, [this](){
                 auto options = std::make_unique<Sidebar>("Network Options"_i18n, Sidebar::Side::LEFT);
@@ -330,47 +333,47 @@ MainMenu::MainMenu() {
                     });
                 }
 
-                options->Add<SidebarEntryBool>("Ftp"_i18n, App::GetFtpEnable(), [](bool& enable){
+                options->Add<SidebarEntryBool>("FTP"_i18n, App::GetFtpEnable(), [](bool& enable){
                     App::SetFtpEnable(enable);
-                },  "Enable FTP server to run in the background.\n\n"\
-                    "The default port is 5000 with no user/pass set. "\
+                },  "Enable FTP server to run in the background.\n\n"
+                    "The default port is 5000 with no user/pass set. "
                     "You can change this behaviour in /config/ftpsrv/config.ini"_i18n);
 
-                options->Add<SidebarEntryBool>("Mtp"_i18n, App::GetMtpEnable(), [](bool& enable){
+                options->Add<SidebarEntryBool>("MTP"_i18n, App::GetMtpEnable(), [](bool& enable){
                     App::SetMtpEnable(enable);
                 },  "Enable MTP server to run in the background."_i18n);
 
-                options->Add<SidebarEntryBool>("Nxlink"_i18n, App::GetNxlinkEnable(), [](bool& enable){
+                options->Add<SidebarEntryBool>("NXlink"_i18n, App::GetNxlinkEnable(), [](bool& enable){
                     App::SetNxlinkEnable(enable);
-                },  "Enable NXlink server to run in the background. "\
-                    "NXlink is used to send .nro's from PC to the switch\n\n"\
+                },  "Enable NXlink server to run in the background. "
+                    "NXlink is used to send .nro's from PC to the switch\n\n"
                     "If you are not a developer, you can disable this option."_i18n);
 
-                options->Add<SidebarEntryBool>("Hdd"_i18n, App::GetHddEnable(), [](bool& enable){
+                options->Add<SidebarEntryBool>("HDD"_i18n, App::GetHddEnable(), [](bool& enable){
                     App::SetHddEnable(enable);
-                },  "Enable mounting of connected USB/HDD devices. "\
+                },  "Enable mounting of connected USB/HDD devices. "
                     "Connected devices can be used in the FileBrowser, as well as a backup location when dumping games and saves."_i18n);
 
-                options->Add<SidebarEntryBool>("Hdd write protect"_i18n, App::GetWriteProtect(), [](bool& enable){
+                options->Add<SidebarEntryBool>("HDD write protect"_i18n, App::GetWriteProtect(), [](bool& enable){
                     App::SetWriteProtect(enable);
                 },  "Makes the connected HDD read-only."_i18n);
-            }, "Toggle FTP, MTP, HDD and NXlink\n\n" \
+            }, "Toggle FTP, MTP, HDD and NXlink\n\n"
                "If Sphaira has a update available, you can download it from this menu"_i18n);
+
+            options->Add<SidebarEntryCallback>("Theme"_i18n, [](){
+                App::DisplayThemeOptions();
+            }, "Customise the look of Sphaira by changing the theme"_i18n);
 
             options->Add<SidebarEntryArray>("Language"_i18n, language_items, [](s64& index_out){
                 App::SetLanguage(index_out);
             }, (s64)App::GetLanguage(),
                 "Change the language.\n\n"
-                "If your language isn't found, or translations are missing, please consider opening a PR at "\
+                "If your language isn't found, or translations are missing, please consider opening a PR at "
                 "github.com/ITotalJustice/sphaira"_i18n);
 
-            options->Add<SidebarEntryCallback>("Misc"_i18n, [](){
-                App::DisplayMiscOptions();
-            }, "View and launch one of Sphaira's menus"_i18n);
-
-            options->Add<SidebarEntryCallback>("Advanced"_i18n, [](){
+            options->Add<SidebarEntryCallback>("Advanced Options"_i18n, [](){
                 App::DisplayAdvancedOptions();
-            },  "Change the advanced options. "\
+            },  "Change the advanced options. "
                 "Please view the info boxes to better understand each option."_i18n);
         }}
     ));

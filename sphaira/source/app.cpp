@@ -1873,11 +1873,11 @@ void App::DisplayNetworkOptions(bool left_side) {
 
 }
 
-void App::DisplayMiscOptions(bool left_side) {
-    auto options = std::make_unique<ui::Sidebar>("Misc Options"_i18n, left_side ? ui::Sidebar::Side::LEFT : ui::Sidebar::Side::RIGHT);
+void App::DisplayMenuOptions(bool left_side) {
+    auto options = std::make_unique<ui::Sidebar>("Menus"_i18n, left_side ? ui::Sidebar::Side::LEFT : ui::Sidebar::Side::RIGHT);
     ON_SCOPE_EXIT(App::Push(std::move(options)));
 
-    for (auto& e : ui::menu::main::GetMiscMenuEntries()) {
+    for (auto& e : ui::menu::main::GetMenuMenuEntries()) {
         if (e.name == g_app->m_left_menu.Get()) {
             continue;
         } else if (e.name == g_app->m_right_menu.Get()) {
@@ -1935,7 +1935,7 @@ void App::DisplayAdvancedOptions(bool left_side) {
 
     std::vector<std::string> menu_names;
     ui::SidebarEntryArray::Items menu_items;
-    for (auto& e : ui::menu::main::GetMiscMenuEntries()) {
+    for (auto& e : ui::menu::main::GetMenuMenuEntries()) {
         if (!e.IsShortcut()) {
             continue;
         }

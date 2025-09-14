@@ -127,7 +127,7 @@ public:
     static void DisplayThemeOptions(bool left_side = true);
     // todo:
     static void DisplayNetworkOptions(bool left_side = true);
-    static void DisplayMiscOptions(bool left_side = true);
+    static void DisplayMenuOptions(bool left_side = true);
     static void DisplayAdvancedOptions(bool left_side = true);
     static void DisplayInstallOptions(bool left_side = true);
     static void DisplayDumpOptions(bool left_side = true);
