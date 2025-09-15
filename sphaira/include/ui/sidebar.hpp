@@ -180,6 +180,13 @@ public:
     // uses numpad.
     explicit SidebarEntryTextInput(const std::string& title, s64 value, const std::string& guide = {}, s64 len_min = -1, s64 len_max = PATH_MAX, const std::string& info = "");
 
+    auto GetNumValue() const -> s64 {
+        return std::stoul(GetValue());
+    }
+
+    void SetNumValue(s64 value) {
+        SetValue(std::to_string(value));
+    }
 private:
     const std::string m_guide;
     const s64 m_len_min;
@@ -245,8 +252,8 @@ private:
 
 class FormSidebar : public Sidebar {
 public:
-    // explicit FormSidebar(const std::string& title) : Sidebar{title, Side::RIGHT, 540.f} {
-    explicit FormSidebar(const std::string& title) : Sidebar{title, Side::RIGHT} {
+    explicit FormSidebar(const std::string& title) : Sidebar{title, Side::LEFT, 540.f} {
+    // explicit FormSidebar(const std::string& title) : Sidebar{title, Side::LEFT} {
     }
 };
 

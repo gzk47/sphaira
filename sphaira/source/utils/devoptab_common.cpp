@@ -1188,6 +1188,12 @@ bool MountCurlDevice::Mount() {
             log_write("[CURL] updated host: %s\n", url.c_str());
         }
 
+        // if (url.starts_with("sftp://")) {
+        //     log_write("[CURL] updating host: %s\n", url.c_str());
+        //     url.replace(0, std::strlen("sftp"), ""); // what should this be?
+        //     log_write("[CURL] updated host: %s\n", url.c_str());
+        // }
+
         const auto flags = CURLU_GUESS_SCHEME|CURLU_URLENCODE;
         CURLUcode rc = curl_url_set(curlu, CURLUPART_URL, url.c_str(), flags);
         if (rc != CURLUE_OK) {

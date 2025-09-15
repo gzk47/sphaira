@@ -34,16 +34,18 @@ enum class DevoptabType {
 
 struct TypeEntry {
     const char* name;
+    const char* scheme;
+    long port;
     DevoptabType type;
 };
 
 const TypeEntry TYPE_ENTRIES[] = {
-    {"HTTP", DevoptabType::HTTP},
-    {"FTP", DevoptabType::FTP},
-    {"SFTP", DevoptabType::SFTP},
-    {"NFS", DevoptabType::NFS},
-    {"SMB", DevoptabType::SMB},
-    {"WEBDAV", DevoptabType::WEBDAV},
+    {"HTTP", "http://", 80, DevoptabType::HTTP},
+    {"FTP", "ftp://", 21, DevoptabType::FTP},
+    {"SFTP", "sftp://", 22, DevoptabType::SFTP},
+    {"NFS", "nfs://", 2049, DevoptabType::NFS},
+    {"SMB", "smb://", 445, DevoptabType::SMB},
+    {"WEBDAV", "webdav://", 80, DevoptabType::WEBDAV},
 };
 
 struct TypeConfig {
@@ -94,6 +96,7 @@ struct DevoptabForm final : public FormSidebar {
 
 private:
     void SetupButtons(bool type_change);
+    void UpdateSchemeURL();
 
 private:
     DevoptabType m_type{};
@@ -119,6 +122,24 @@ DevoptabForm::DevoptabForm() : FormSidebar{"Mount Creator"} {
     SetupButtons(true);
 }
 
+void DevoptabForm::UpdateSchemeURL() {
+    for (const auto& e : TYPE_ENTRIES) {
+        if (e.type == m_type) {
+            const auto scheme_start = m_url->GetValue().find("://");
+            if (scheme_start != std::string::npos) {
+                m_url->SetValue(e.scheme + m_url->GetValue().substr(scheme_start + 3));
+            } else if (m_url->GetValue().starts_with("://")) {
+                m_url->SetValue(e.scheme + m_url->GetValue().substr(3));
+            } else if (m_url->GetValue().empty()) {
+                m_url->SetValue(e.scheme);
+            }
+
+            m_port->SetNumValue(e.port);
+            break;
+        }
+    }
+}
+
 void DevoptabForm::SetupButtons(bool type_change) {
     if (type_change) {
         SidebarEntryArray::Items items;
@@ -129,6 +150,7 @@ void DevoptabForm::SetupButtons(bool type_change) {
         this->Add<SidebarEntryArray>(
             "Type", items, [this](s64& index) {
                 m_type = TYPE_ENTRIES[index].type;
+                UpdateSchemeURL();
             },
             (s64)m_type,
             "Select the type of the forwarder."_i18n
@@ -200,6 +222,9 @@ void DevoptabForm::SetupButtons(bool type_change) {
         "Hide the mount from being visible as a export option for games and saves."_i18n
     );
 
+    // set default scheme if needed.
+    UpdateSchemeURL();
+
     const auto callback = this->Add<SidebarEntryCallback>("Save", [this](){
         m_config.name = m_name->GetValue();
         m_config.url = m_url->GetValue();
@@ -234,14 +259,15 @@ void DevoptabForm::SetupButtons(bool type_change) {
     callback->Depends([this](){
         return
             !m_name->GetValue().empty() &&
-            !m_url->GetValue().empty();
+            !m_url->GetValue().empty() &&
+            !m_url->GetValue().ends_with("://");
     }, "Name and URL must be set!"_i18n);
 }
 
 } // namespace
 
 void DisplayDevoptabSideBar() {
-    auto options = std::make_unique<Sidebar>("Devoptab Options"_i18n, Sidebar::Side::RIGHT);
+    auto options = std::make_unique<Sidebar>("Devoptab Options"_i18n, Sidebar::Side::LEFT);
     ON_SCOPE_EXIT(App::Push(std::move(options)));
 
     options->Add<SidebarEntryCallback>("Create New Entry"_i18n, [](){
