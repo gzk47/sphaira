@@ -61,17 +61,18 @@ struct FsProxyBase : ::haze::FileSystemProxyImpl {
 
     }
 
-    auto FixPath(const char* path) const {
+    auto FixPath(const char* base, const char* path) const {
         fs::FsPath buf;
         const auto len = std::strlen(GetName());
 
         if (len && !strncasecmp(path + 1, GetName(), len)) {
-            std::snprintf(buf, sizeof(buf), "/%s", path + 1 + len);
+            std::snprintf(buf, sizeof(buf), "%s/%s", base, path + 1 + len);
         } else {
-            std::strcpy(buf, path);
+            std::snprintf(buf, sizeof(buf), "%s/%s", base, path);
+            // std::strcpy(buf, path);
         }
 
-        // log_write("[FixPath] %s -> %s\n", path, buf.s);
+        log_write("[FixPath] %s -> %s\n", path, buf.s);
         return buf;
     }
 
@@ -98,6 +99,10 @@ struct FsProxy final : FsProxyBase {
             auto fs = (fs::FsNative*)m_fs.get();
             fsFsCommit(&fs->m_fs);
         }
+    }
+
+    auto FixPath(const char* path) const {
+        return FsProxyBase::FixPath(m_fs->Root(), path);
     }
 
     // TODO: impl this for stdio
@@ -242,6 +247,10 @@ private:
 struct FsProxyVfs : FsProxyBase {
     using FsProxyBase::FsProxyBase;
     virtual ~FsProxyVfs() = default;
+
+    auto FixPath(const char* path) const {
+        return FsProxyBase::FixPath("", path);
+    }
 
     auto GetFileName(const char* s) -> const char* {
         const auto file_name = std::strrchr(s, '/');
@@ -573,8 +582,8 @@ bool Init() {
     }
 
     g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeSd>(), "", "microSD card"));
-    g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeImage>(FsImageDirectoryId_Nand), "image_nand", "Image nand"));
-    g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeImage>(FsImageDirectoryId_Sd), "image_sd", "Image sd"));
+    g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeImage>(FsImageDirectoryId_Sd), "Album", "Album (Image SD)"));
+    g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsStdio>(true, "games:/"), "Games", "Games"));
     g_fs_entries.emplace_back(std::make_shared<FsDevNullProxy>("DevNull", "DevNull (Speed Test)"));
     g_fs_entries.emplace_back(std::make_shared<FsInstallProxy>("install", "Install (NSP, XCI, NSZ, XCZ)"));
 

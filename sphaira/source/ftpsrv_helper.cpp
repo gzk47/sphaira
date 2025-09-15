@@ -11,6 +11,8 @@
 #include <ftpsrv_vfs.h>
 #include <nx/vfs_nx.h>
 #include <nx/utils.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 namespace sphaira::ftpsrv {
 namespace {
@@ -36,6 +38,7 @@ Thread g_thread;
 Mutex g_mutex{};
 
 void ftp_log_callback(enum FTP_API_LOG_TYPE type, const char* msg) {
+    log_write("[FTPSRV] %s\n", msg);
     sphaira::App::NotifyFlashLed();
 }
 
@@ -274,6 +277,183 @@ FtpVfs g_vfs_install = {
     .rename = vfs_install_rename,
 };
 
+struct FtpVfsFile {
+    int fd;
+    int valid;
+};
+
+struct FtpVfsDir {
+    DIR* fd;
+};
+
+struct FtpVfsDirEntry {
+    struct dirent* buf;
+};
+
+auto vfs_stdio_fix_path(const char* str) -> fs::FsPath {
+    while (*str == '/') {
+        str++;
+    }
+
+    fs::FsPath out = str;
+    if (out.ends_with(":")) {
+        out += '/';
+    }
+
+    return out;
+}
+
+int vfs_stdio_open(void* user, const char* _path, enum FtpVfsOpenMode mode) {
+    auto f = static_cast<FtpVfsFile*>(user);
+    const auto path = vfs_stdio_fix_path(_path);
+
+    int flags = 0, args = 0;
+    switch (mode) {
+        case FtpVfsOpenMode_READ:
+            flags = O_RDONLY;
+            args = 0;
+            break;
+        case FtpVfsOpenMode_WRITE:
+            flags = O_WRONLY | O_CREAT | O_TRUNC;
+            args = 0666;
+            break;
+        case FtpVfsOpenMode_APPEND:
+            flags = O_WRONLY | O_CREAT | O_APPEND;
+            args = 0666;
+            break;
+    }
+
+    f->fd = open(path, flags, args);
+    if (f->fd >= 0) {
+        f->valid = 1;
+    }
+
+    return f->fd;
+}
+
+int vfs_stdio_read(void* user, void* buf, size_t size) {
+    auto f = static_cast<FtpVfsFile*>(user);
+    return read(f->fd, buf, size);
+}
+
+int vfs_stdio_write(void* user, const void* buf, size_t size) {
+    auto f = static_cast<FtpVfsFile*>(user);
+    return write(f->fd, buf, size);
+}
+
+int vfs_stdio_seek(void* user, const void* buf, size_t size, size_t off) {
+    auto f = static_cast<FtpVfsFile*>(user);
+    const auto pos = lseek(f->fd, off, SEEK_SET);
+    if (pos < 0) {
+        return -1;
+    }
+    return 0;
+}
+
+int vfs_stdio_isfile_open(void* user) {
+    auto f = static_cast<FtpVfsFile*>(user);
+    return f->valid && f->fd >= 0;
+}
+
+int vfs_stdio_close(void* user) {
+    auto f = static_cast<FtpVfsFile*>(user);
+    int rc = 0;
+    if (vfs_stdio_isfile_open(f)) {
+        rc = close(f->fd);
+        f->fd = -1;
+        f->valid = 0;
+    }
+    return rc;
+}
+
+int vfs_stdio_opendir(void* user, const char* _path) {
+    auto f = static_cast<FtpVfsDir*>(user);
+    const auto path = vfs_stdio_fix_path(_path);
+
+    f->fd = opendir(path);
+    if (!f->fd) {
+        return -1;
+    }
+    return 0;
+}
+
+const char* vfs_stdio_readdir(void* user, void* user_entry) {
+    auto f = static_cast<FtpVfsDir*>(user);
+    auto entry = static_cast<FtpVfsDirEntry*>(user_entry);
+
+    entry->buf = readdir(f->fd);
+    if (!entry->buf) {
+        return NULL;
+    }
+    return entry->buf->d_name;
+}
+
+int vfs_stdio_dirlstat(void* user, const void* user_entry, const char* _path, struct stat* st) {
+    const auto path = vfs_stdio_fix_path(_path);
+    return lstat(path, st);
+}
+
+int vfs_stdio_isdir_open(void* user) {
+    auto f = static_cast<FtpVfsDir*>(user);
+    return f->fd != NULL;
+}
+
+int vfs_stdio_closedir(void* user) {
+    auto f = static_cast<FtpVfsDir*>(user);
+    int rc = 0;
+    if (vfs_stdio_isdir_open(f)) {
+        rc = closedir(f->fd);
+        f->fd = NULL;
+    }
+    return rc;
+}
+
+int vfs_stdio_stat(const char* _path, struct stat* st) {
+    const auto path = vfs_stdio_fix_path(_path);
+    return stat(path, st);
+}
+
+int vfs_stdio_mkdir(const char* _path) {
+    const auto path = vfs_stdio_fix_path(_path);
+    return mkdir(path, 0777);
+}
+
+int vfs_stdio_unlink(const char* _path) {
+    const auto path = vfs_stdio_fix_path(_path);
+    return unlink(path);
+}
+
+int vfs_stdio_rmdir(const char* _path) {
+    const auto path = vfs_stdio_fix_path(_path);
+    return rmdir(path);
+}
+
+int vfs_stdio_rename(const char* _src, const char* _dst) {
+    const auto src = vfs_stdio_fix_path(_src);
+    const auto dst = vfs_stdio_fix_path(_dst);
+    return rename(src, dst);
+}
+
+FtpVfs g_vfs_stdio = {
+    .open = vfs_stdio_open,
+    .read = vfs_stdio_read,
+    .write = vfs_stdio_write,
+    .seek = vfs_stdio_seek,
+    .close = vfs_stdio_close,
+    .isfile_open = vfs_stdio_isfile_open,
+    .opendir = vfs_stdio_opendir,
+    .readdir = vfs_stdio_readdir,
+    .dirlstat = vfs_stdio_dirlstat,
+    .closedir = vfs_stdio_closedir,
+    .isdir_open = vfs_stdio_isdir_open,
+    .stat = vfs_stdio_stat,
+    .lstat = vfs_stdio_stat,
+    .mkdir = vfs_stdio_mkdir,
+    .unlink = vfs_stdio_unlink,
+    .rmdir = vfs_stdio_rmdir,
+    .rename = vfs_stdio_rename,
+};
+
 void loop(void* arg) {
     log_write("[FTP] loop entered\n");
 
@@ -326,13 +506,20 @@ void loop(void* arg) {
 
         fsdev_wrapMountSdmc();
 
-        const VfsNxCustomPath custom = {
-            .name = "install",
-            .user = NULL,
-            .func = &g_vfs_install,
+        static const VfsNxCustomPath custom_vfs[] = {
+            {
+                .name = "games",
+                .user = NULL,
+                .func = &g_vfs_stdio,
+            },
+            {
+                .name = "install",
+                .user = NULL,
+                .func = &g_vfs_install,
+            },
         };
 
-        vfs_nx_init(&custom, mount_devices, save_writable, mount_bis, false);
+        vfs_nx_init(custom_vfs, std::size(custom_vfs), mount_devices, save_writable, mount_bis, false);
     }
 
     ON_SCOPE_EXIT(

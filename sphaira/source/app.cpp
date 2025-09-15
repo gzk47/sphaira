@@ -1665,6 +1665,11 @@ App::App(const char* argv0) {
         #endif // ENABLE_DEVOPTAB_SMB2
 
         {
+            SCOPED_TIMESTAMP("game init");
+            devoptab::MountGameAll();
+        }
+
+        {
             SCOPED_TIMESTAMP("fatfs init");
             devoptab::MountFatfsAll();
         }

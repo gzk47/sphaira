@@ -28,6 +28,7 @@ struct ThreadData {
     void Clear();
 
     void PushAsync(u64 id);
+    void PushAsync(const std::span<const NsApplicationRecord> app_ids);
     auto GetAsync(u64 app_id) -> ThreadResultData*;
     auto Get(u64 app_id, bool* cached = nullptr) -> ThreadResultData*;
 
@@ -204,6 +205,30 @@ void ThreadData::PushAsync(u64 id) {
 
     if (it_id == m_ids.end() && it_result == m_result.end()) {
         m_ids.emplace_back(id);
+        ueventSignal(&m_uevent);
+    }
+}
+
+void ThreadData::PushAsync(const std::span<const NsApplicationRecord> app_ids) {
+    SCOPED_MUTEX(&m_mutex_id);
+    SCOPED_MUTEX(&m_mutex_result);
+    bool added_at_least_one = false;
+
+    for (auto& record : app_ids) {
+        const auto id = record.application_id;
+
+        const auto it_id = std::ranges::find(m_ids, id);
+        const auto it_result = std::ranges::find_if(m_result, [id](auto& e){
+            return id == e->id;
+        });
+
+        if (it_id == m_ids.end() && it_result == m_result.end()) {
+            m_ids.emplace_back(id);
+            added_at_least_one = true;
+        }
+    }
+
+    if (added_at_least_one) {
         ueventSignal(&m_uevent);
     }
 }
@@ -425,6 +450,13 @@ void PushAsync(u64 app_id) {
     SCOPED_MUTEX(&g_mutex);
     if (g_thread_data) {
         g_thread_data->PushAsync(app_id);
+    }
+}
+
+void PushAsync(const std::span<const NsApplicationRecord> app_ids) {
+    SCOPED_MUTEX(&g_mutex);
+    if (g_thread_data) {
+        g_thread_data->PushAsync(app_ids);
     }
 }
 

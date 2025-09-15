@@ -1,6 +1,7 @@
 #include "utils/devoptab_common.hpp"
 #include "utils/profile.hpp"
 
+#include "fs.hpp"
 #include "log.hpp"
 #include "defines.hpp"
 #include <fcntl.h>
@@ -130,10 +131,10 @@ bool Device::ftp_parse_mlst_line(std::string_view line, struct stat* st, std::st
         const auto key = fact.substr(0, eq);
         const auto val = fact.substr(eq + 1);
 
-        if (key == "type") {
-            if (val == "file") {
+        if (fs::FsPath::path_equal(key, "type")) {
+            if (fs::FsPath::path_equal(val, "file")) {
                 st->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
-            } else if (val == "dir") {
+            } else if (fs::FsPath::path_equal(val, "dir")) {
                 st->st_mode = S_IFDIR | S_IRUSR | S_IRGRP | S_IROTH;
             } else {
                 log_write("[FTP] Unknown type fact value: %.*s\n", (int)val.size(), val.data());
@@ -142,9 +143,9 @@ bool Device::ftp_parse_mlst_line(std::string_view line, struct stat* st, std::st
 
             found_type = true;
         } else if (!type_only) {
-            if (key == "size") {
+            if (fs::FsPath::path_equal(key, "size")) {
                 st->st_size = std::stoull(std::string(val));
-            } else if (key == "modify") {
+            } else if (fs::FsPath::path_equal(key, "modify")) {
                 if (val.size() >= 14) {
                     struct tm tm{};
                     tm.tm_year = std::stoi(std::string(val.substr(0, 4))) - 1900;

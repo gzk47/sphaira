@@ -128,6 +128,7 @@ add_executable(sphaira
     source/utils/devoptab_bfsar.cpp
     source/utils/devoptab_vfs.cpp
     source/utils/devoptab_fatfs.cpp
+    source/utils/devoptab_game.cpp
     source/utils/devoptab.cpp
 
     source/usb/base.cpp
@@ -335,7 +336,7 @@ endif()
 if (ENABLE_FTPSRV)
     FetchContent_Declare(ftpsrv
         GIT_REPOSITORY https://github.com/ITotalJustice/ftpsrv.git
-        GIT_TAG 85b3cf0
+        GIT_TAG a7c2283
         SOURCE_SUBDIR NONE
     )
 

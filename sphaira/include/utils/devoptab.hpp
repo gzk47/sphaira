@@ -27,6 +27,7 @@ Result MountSftpAll();
 Result MountNfsAll();
 Result MountSmb2All();
 Result MountFatfsAll();
+Result MountGameAll();
 
 Result GetNetworkDevices(location::StdioEntries& out);
 void UmountAllNeworkDevices();

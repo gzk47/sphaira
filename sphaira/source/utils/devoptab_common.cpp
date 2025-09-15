@@ -710,7 +710,7 @@ Result LruBufferedData::Read(void *_buffer, s64 file_off, s64 read_size, u64* by
 }
 
 bool fix_path(const char* str, char* out, bool strip_leading_slash) {
-    str = std::strrchr(str, ':');
+    str = std::strchr(str, ':');
     if (!str) {
         return false;
     }
