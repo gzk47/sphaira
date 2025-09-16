@@ -93,18 +93,18 @@ void update_devoptab_for_read_only(devoptab_t* devoptab, bool read_only);
 struct PushPullThreadData {
     static constexpr size_t MAX_BUFFER_SIZE = 1024 * 64; // 64KB max buffer
 
-    PushPullThreadData(CURL* _curl);
+    explicit PushPullThreadData(CURL* _curl);
     virtual ~PushPullThreadData();
-    Result CreateAndStart();
 
+    Result CreateAndStart();
     void Cancel();
     bool IsRunning();
 
-    size_t PullData(char* data, size_t total_size);
-    size_t PushData(const char* data, size_t total_size);
+    // only set curl=true if called from a curl callback.
+    size_t PullData(char* data, size_t total_size, bool curl = false);
+    size_t PushData(const char* data, size_t total_size, bool curl = false);
 
-    static size_t push_thread_callback(const char *ptr, size_t size, size_t nmemb, void *userdata);
-    static size_t pull_thread_callback(char *ptr, size_t size, size_t nmemb, void *userdata);
+    static size_t progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow);
 
 private:
     static void thread_func(void* arg);
@@ -145,13 +145,12 @@ using MountConfigs = std::vector<MountConfig>;
 
 struct PullThreadData final : PushPullThreadData {
     using PushPullThreadData::PushPullThreadData;
-    ~PullThreadData();
+    static size_t pull_thread_callback(char *ptr, size_t size, size_t nmemb, void *userdata);
 };
-
 
 struct PushThreadData final : PushPullThreadData {
     using PushPullThreadData::PushPullThreadData;
-    ~PushThreadData();
+    static size_t push_thread_callback(const char *ptr, size_t size, size_t nmemb, void *userdata);
 };
 
 struct MountDevice {
