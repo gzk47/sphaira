@@ -73,7 +73,7 @@ private:
     SidebarEntryFilePicker* m_icon{};
 };
 
-constinit UEvent g_change_uevent;
+std::atomic_bool g_change_signalled{};
 
 constexpr FsEntry FS_ENTRY_DEFAULT{
     "microSD card", "/", FsType::Sd, FsEntryFlag_Assoc | FsEntryFlag_IsSd,
@@ -418,7 +418,7 @@ auto IsExtension(std::string_view ext, std::span<const std::string_view> list) -
 }
 
 void SignalChange() {
-    ueventSignal(&g_change_uevent);
+    g_change_signalled = true;
 }
 
 FsView::FsView(Base* menu, const std::shared_ptr<fs::Fs>& fs, const fs::FsPath& path, const FsEntry& entry, ViewSide side) : m_menu{menu}, m_side{side} {
@@ -1026,6 +1026,7 @@ auto FsView::Scan(fs::FsPath new_path, bool is_walk_up) -> Result {
         m_previous_highlighted_file.emplace_back(f);
     }
 
+    g_change_signalled = false;
     m_path = new_path;
     m_entries.clear();
     m_entries_index.clear();
@@ -1937,7 +1938,8 @@ Base::Base(const std::shared_ptr<fs::Fs>& fs, const FsEntry& fs_entry, const fs:
 }
 
 void Base::Update(Controller* controller, TouchInfo* touch) {
-    if (R_SUCCEEDED(waitSingle(waiterForUEvent(&g_change_uevent), 0))) {
+    if (g_change_signalled.exchange(false)) {
+
         if (IsSplitScreen()) {
             view_left->SortAndFindLastFile(true);
             view_right->SortAndFindLastFile(true);
@@ -2278,7 +2280,6 @@ void Base::Init(const std::shared_ptr<fs::Fs>& fs, const FsEntry& fs_entry, cons
 
     view_left = std::make_unique<FsView>(this, fs, path, fs_entry, ViewSide::Left);
     view = view_left.get();
-    ueventCreate(&g_change_uevent, true);
 }
 
 void MountFsHelper(const std::shared_ptr<fs::Fs>& fs, const fs::FsPath& name) {

@@ -27,7 +27,7 @@ namespace sphaira::ui::menu::homebrew {
 namespace {
 
 Menu* g_menu{};
-constinit UEvent g_change_uevent;
+std::atomic_bool g_change_signalled{};
 
 auto GenerateStarPath(const fs::FsPath& nro_path) -> fs::FsPath {
     fs::FsPath out{};
@@ -44,7 +44,7 @@ void FreeEntry(NVGcontext* vg, NroEntry& e) {
 } // namespace
 
 void SignalChange() {
-    ueventSignal(&g_change_uevent);
+    g_change_signalled = true;
 }
 
 auto GetNroEntries() -> std::span<const NroEntry> {
@@ -68,7 +68,6 @@ Menu::Menu() : grid::Menu{"Homebrew"_i18n, MenuFlag_Tab} {
     );
 
     OnLayoutChange();
-    ueventCreate(&g_change_uevent, true);
 }
 
 Menu::~Menu() {
@@ -77,7 +76,7 @@ Menu::~Menu() {
 }
 
 void Menu::Update(Controller* controller, TouchInfo* touch) {
-    if (R_SUCCEEDED(waitSingle(waiterForUEvent(&g_change_uevent), 0))) {
+    if (g_change_signalled.exchange(false)) {
         m_dirty = true;
     }
 
@@ -198,7 +197,9 @@ void Menu::InstallHomebrew() {
 }
 
 void Menu::ScanHomebrew() {
+    g_change_signalled = false;
     FreeEntries();
+
     {
         SCOPED_TIMESTAMP("nro scan");
         nro_scan("/switch", m_entries);

@@ -40,7 +40,7 @@ constexpr u32 NX_SAVE_META_MAGIC = 0x4A4B5356; // JKSV
 constexpr u32 NX_SAVE_META_VERSION = 1;
 constexpr const char* NX_SAVE_META_NAME = ".nx_save_meta.bin";
 
-constinit UEvent g_change_uevent;
+std::atomic_bool g_change_signalled{};
 
 struct DumpSource final : dump::BaseSource {
     DumpSource(std::span<const std::reference_wrapper<Entry>> entries, std::span<const fs::FsPath> paths)
@@ -319,7 +319,7 @@ void FreeEntry(NVGcontext* vg, Entry& e) {
 } // namespace
 
 void SignalChange() {
-    ueventSignal(&g_change_uevent);
+    g_change_signalled = true;
 }
 
 Menu::Menu(u32 flags) : grid::Menu{"Saves"_i18n, flags} {
@@ -388,7 +388,6 @@ Menu::Menu(u32 flags) : grid::Menu{"Saves"_i18n, flags} {
     }
 
     title::Init();
-    ueventCreate(&g_change_uevent, true);
 }
 
 Menu::~Menu() {
@@ -399,7 +398,7 @@ Menu::~Menu() {
 }
 
 void Menu::Update(Controller* controller, TouchInfo* touch) {
-    if (R_SUCCEEDED(waitSingle(waiterForUEvent(&g_change_uevent), 0))) {
+    if (g_change_signalled.exchange(false)) {
         m_dirty = true;
     }
 
@@ -508,9 +507,9 @@ void Menu::ScanHomebrew() {
     constexpr auto ENTRY_CHUNK_COUNT = 1000;
     TimeStamp ts;
 
+    g_change_signalled = false;
     FreeEntries();
     ClearSelection();
-    ueventClear(&g_change_uevent);
     m_entries.reserve(ENTRY_CHUNK_COUNT);
     m_is_reversed = false;
     m_dirty = false;

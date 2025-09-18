@@ -36,7 +36,7 @@
 namespace sphaira::ui::menu::game {
 namespace {
 
-constinit UEvent g_change_uevent;
+std::atomic_bool g_change_signalled{};
 
 struct NspSource final : dump::BaseSource {
     NspSource(const std::vector<NspEntry>& entries) : m_entries{entries} {
@@ -273,7 +273,7 @@ Result NspEntry::Read(void* buf, s64 off, s64 size, u64* bytes_read) {
 }
 
 void SignalChange() {
-    ueventSignal(&g_change_uevent);
+    g_change_signalled = true;
 }
 
 Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
@@ -461,7 +461,6 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
 
     fsOpenGameCardDetectionEventNotifier(std::addressof(m_gc_event_notifier));
     fsEventNotifierGetEventHandle(std::addressof(m_gc_event_notifier), std::addressof(m_gc_event), true);
-    ueventCreate(&g_change_uevent, true);
 }
 
 Menu::~Menu() {
@@ -476,8 +475,11 @@ Menu::~Menu() {
 }
 
 void Menu::Update(Controller* controller, TouchInfo* touch) {
-    s32 wait_dummy_idx;
-    if (R_SUCCEEDED(waitMulti(&wait_dummy_idx, 0, waiterForEvent(&m_gc_event), waiterForUEvent(&g_change_uevent)))) {
+    if (g_change_signalled.exchange(false)) {
+        m_dirty = true;
+    }
+
+    if (R_SUCCEEDED(eventWait(&m_gc_event, 0))) {
         m_dirty = true;
     }
 
@@ -569,6 +571,7 @@ void Menu::ScanHomebrew() {
 
     FreeEntries();
     m_entries.reserve(ENTRY_CHUNK_COUNT);
+    g_change_signalled = false;
 
     std::vector<NsApplicationRecord> record_list(ENTRY_CHUNK_COUNT);
     s32 offset{};
