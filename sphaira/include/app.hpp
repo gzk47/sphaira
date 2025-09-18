@@ -267,6 +267,7 @@ public:
     PadState m_pad{};
     TouchInfo m_touch_info{};
     Controller m_controller{};
+    KeyboardState m_keyboard{};
     std::vector<ThemeMeta> m_theme_meta_entries;
 
     Vec2 m_scale{1, 1};

@@ -366,6 +366,81 @@ struct Action final {
     std::string m_hint{};
 };
 
+struct GenericHidState {
+    GenericHidState() {
+        Reset();
+    }
+
+    void Reset() {
+        buttons_cur = 0;
+        buttons_old = 0;
+    }
+
+    u64 GetButtons() const {
+        return buttons_cur;
+    }
+
+    u64 GetButtonsDown() const {
+        return buttons_cur & ~buttons_old;
+    }
+
+    u64 GetButtonsUp() const {
+        return ~buttons_cur & buttons_old;
+    }
+
+    virtual void Update() = 0;
+
+protected:
+    u64 buttons_cur;
+    u64 buttons_old;
+};
+
+struct KeyboardState final : GenericHidState {
+    struct MapEntry {
+        HidKeyboardKey key;
+        u64 button;
+    };
+    using Map = std::span<const MapEntry>;
+
+    void Init(Map map) {
+        m_map = map;
+        Reset();
+    }
+
+    void Update() override {
+        buttons_old = buttons_cur;
+        buttons_cur = 0;
+
+        if (!hidGetKeyboardStates(&m_state, 1)) {
+            return;
+        }
+
+        const auto ctrl = m_state.modifiers & HidKeyboardModifier_Control;
+        const auto shift = m_state.modifiers & HidKeyboardModifier_Shift;
+
+        for (const auto& map : m_map) {
+            if (hidKeyboardStateGetKey(&m_state, map.key)) {
+                if (shift && map.button == static_cast<u64>(Button::L)) {
+                    buttons_cur |= static_cast<u64>(Button::L2);
+                } else if (shift && map.button == static_cast<u64>(Button::R)) {
+                    buttons_cur |= static_cast<u64>(Button::R2);
+                } else if (ctrl && map.button == static_cast<u64>(Button::L)) {
+                    buttons_cur |= static_cast<u64>(Button::L3);
+                } else if (ctrl && map.button == static_cast<u64>(Button::R)) {
+                    buttons_cur |= static_cast<u64>(Button::R3);
+                } else {
+                    buttons_cur |= map.button;
+                }
+
+            }
+        }
+    }
+
+private:
+    Map m_map{};
+    HidKeyboardState m_state{};
+};
+
 struct Controller {
     u64 m_kdown{};
     u64 m_kheld{};

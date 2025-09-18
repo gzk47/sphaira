@@ -74,6 +74,37 @@ struct NszOption {
     const char* name;
 };
 
+constexpr KeyboardState::MapEntry KEYBOARD_BUTTON_MAP[] = {
+    {HidKeyboardKey_UpArrow,        static_cast<u64>(Button::DPAD_UP)},
+    {HidKeyboardKey_DownArrow,      static_cast<u64>(Button::DPAD_DOWN)},
+    {HidKeyboardKey_LeftArrow,      static_cast<u64>(Button::DPAD_LEFT)},
+    {HidKeyboardKey_RightArrow,     static_cast<u64>(Button::DPAD_RIGHT)},
+
+    {HidKeyboardKey_W,              static_cast<u64>(Button::DPAD_UP)},
+    {HidKeyboardKey_S,              static_cast<u64>(Button::DPAD_DOWN)},
+    {HidKeyboardKey_A,              static_cast<u64>(Button::DPAD_LEFT)},
+    {HidKeyboardKey_D,              static_cast<u64>(Button::DPAD_RIGHT)},
+
+    // options (may swap).
+    {HidKeyboardKey_X,              static_cast<u64>(Button::Y)},
+    {HidKeyboardKey_Z,              static_cast<u64>(Button::X)},
+
+    // menus.
+    {HidKeyboardKey_Q,              static_cast<u64>(Button::L)},
+    {HidKeyboardKey_E,              static_cast<u64>(Button::R)},
+
+    // select and back.
+    {HidKeyboardKey_Return,         static_cast<u64>(Button::A)},
+    {HidKeyboardKey_Space,          static_cast<u64>(Button::A)},
+    {HidKeyboardKey_Backspace,      static_cast<u64>(Button::B)},
+
+    // exit.
+    {HidKeyboardKey_Escape,         static_cast<u64>(Button::START)},
+
+    // idk what this should map to.
+    {HidKeyboardKey_R,              static_cast<u64>(Button::SELECT)},
+};
+
 constexpr NszOption NSZ_COMPRESS_LEVEL_OPTIONS[] = {
     { .value = 0, .name = "Level 0 (no compression)" },
     { .value = 1, .name = "Level 1" },
@@ -1026,6 +1057,16 @@ void App::Poll() {
     hidGetTouchScreenStates(&state, 1);
     m_touch_info.is_clicked = false;
 
+    // todo:
+    #if 0
+    HidMouseState mouse_state{};
+    hidGetMouseStates(&mouse_state, 1);
+
+    if (mouse_state.buttons) {
+        log_write("[MOUSE] buttons: 0x%X x: %d y: %d dx: %d dy: %d wx: %d wy: %d\n", mouse_state.buttons, mouse_state.x, mouse_state.y, mouse_state.delta_x, mouse_state.delta_y, mouse_state.wheel_delta_x, mouse_state.wheel_delta_y);
+    }
+    #endif
+
 // todo: replace old touch code with gestures from below
 #if 0
     static HidGestureState prev_gestures[17]{};
@@ -1071,6 +1112,7 @@ void App::Poll() {
     memcpy(prev_gestures, gestures, sizeof(gestures));
 #endif
 
+    // todo: support mouse scroll / touch.
     if (state.count == 1 && !m_touch_info.is_touching) {
         m_touch_info.initial = m_touch_info.cur = state.touches[0];
         m_touch_info.is_touching = true;
@@ -1094,14 +1136,29 @@ void App::Poll() {
         }
     }
 
+    u64 kdown = 0;
+    u64 kup = 0;
+    u64 kheld = 0;
+
     // todo: better implement this to match hos
     if (!m_touch_info.is_touching && !m_touch_info.is_clicked) {
+        // controller.
         padUpdate(&m_pad);
-        m_controller.m_kdown = padGetButtonsDown(&m_pad);
-        m_controller.m_kheld = padGetButtons(&m_pad);
-        m_controller.m_kup = padGetButtonsUp(&m_pad);
-        m_controller.UpdateButtonHeld(static_cast<u64>(Button::ANY_DIRECTION), m_delta_time);
+        kdown |= padGetButtonsDown(&m_pad);
+        kheld |= padGetButtons(&m_pad);
+        kup |= padGetButtonsUp(&m_pad);
+
+        // keyboard.
+        m_keyboard.Update();
+        kdown |= m_keyboard.GetButtonsDown();
+        kheld |= m_keyboard.GetButtons();
+        kup |= m_keyboard.GetButtonsUp();
     }
+
+    m_controller.m_kdown = kdown;
+    m_controller.m_kheld = kheld;
+    m_controller.m_kup = kup;
+    m_controller.UpdateButtonHeld(static_cast<u64>(Button::ANY_DIRECTION), m_delta_time);
 }
 
 void App::Update() {
@@ -1683,9 +1740,14 @@ App::App(const char* argv0) {
             SCOPED_TIMESTAMP("HID init");
             hidInitializeTouchScreen();
             hidInitializeGesture();
+            hidInitializeKeyboard();
+            hidInitializeMouse();
+
             padConfigureInput(8, HidNpadStyleSet_NpadStandard);
             // padInitializeDefault(&m_pad);
             padInitializeAny(&m_pad);
+
+            m_keyboard.Init(KEYBOARD_BUTTON_MAP);
         }
 
         {
