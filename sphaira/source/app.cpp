@@ -86,8 +86,8 @@ constexpr KeyboardState::MapEntry KEYBOARD_BUTTON_MAP[] = {
     {HidKeyboardKey_D,              static_cast<u64>(Button::DPAD_RIGHT)},
 
     // options (may swap).
-    {HidKeyboardKey_X,              static_cast<u64>(Button::Y)},
-    {HidKeyboardKey_Z,              static_cast<u64>(Button::X)},
+    {HidKeyboardKey_Z,              static_cast<u64>(Button::Y)},
+    {HidKeyboardKey_X,              static_cast<u64>(Button::X)},
 
     // menus.
     {HidKeyboardKey_Q,              static_cast<u64>(Button::L)},
