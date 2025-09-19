@@ -1552,7 +1552,7 @@ App::App(const char* argv0) {
 
     if (App::GetLogEnable()) {
         log_file_init();
-        log_write("hello world v%s\n", APP_VERSION_HASH);
+        log_write("hello world v%s\n", APP_DISPLAY_VERSION);
     }
 
     // anything that can be async loaded should be placed in here in order

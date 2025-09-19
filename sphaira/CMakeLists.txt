@@ -58,7 +58,11 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-set(sphaira_VERSION_HASH "${sphaira_VERSION} [${GIT_COMMIT}]")
+if (DEFINED sphaira_VERSION_OVERRIDE)
+    set(sphaira_DISPLAY_VERSION "${sphaira_VERSION_OVERRIDE} [${GIT_COMMIT}]")
+else()
+    set(sphaira_DISPLAY_VERSION "${sphaira_VERSION} [${GIT_COMMIT}]")
+endif()
 
 add_executable(sphaira
     source/ui/menus/appstore.cpp
@@ -158,7 +162,7 @@ add_executable(sphaira
 
 target_compile_definitions(sphaira PRIVATE
     -DAPP_VERSION="${sphaira_VERSION}"
-    -DAPP_VERSION_HASH="${sphaira_VERSION_HASH}"
+    -DAPP_DISPLAY_VERSION="${sphaira_DISPLAY_VERSION}"
     -DCURL_NO_OLDIES=1
     -DDEV_BUILD=$<BOOL:${DEV_BUILD}>
     -DZSTD_STATIC_LINKING_ONLY=1

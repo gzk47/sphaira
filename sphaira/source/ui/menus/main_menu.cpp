@@ -276,7 +276,7 @@ MainMenu::MainMenu() {
         std::make_pair(Button::START, Action{App::Exit}),
         std::make_pair(Button::SELECT, Action{App::DisplayMenuOptions}),
         std::make_pair(Button::Y, Action{"Menu"_i18n, [this](){
-            auto options = std::make_unique<Sidebar>("Menu Options"_i18n, "v" APP_VERSION_HASH, Sidebar::Side::LEFT);
+            auto options = std::make_unique<Sidebar>("Menu Options"_i18n, "v" APP_DISPLAY_VERSION, Sidebar::Side::LEFT);
             ON_SCOPE_EXIT(App::Push(std::move(options)));
 
             SidebarEntryArray::Items language_items;

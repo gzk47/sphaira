@@ -953,7 +953,7 @@ void FsView::ZipFiles(fs::FsPath zip_out) {
 
         auto zfile = zipOpen2_64(zip_out, APPEND_STATUS_CREATE, nullptr, &file_func);
         R_UNLESS(zfile, Result_ZipOpen2_64);
-        ON_SCOPE_EXIT(zipClose(zfile, "sphaira v" APP_VERSION_HASH));
+        ON_SCOPE_EXIT(zipClose(zfile, "sphaira v" APP_DISPLAY_VERSION));
 
         const auto zip_add = [&](const fs::FsPath& file_path) -> Result {
             // the file name needs to be relative to the current directory.

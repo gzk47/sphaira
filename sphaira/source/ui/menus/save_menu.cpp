@@ -1037,7 +1037,7 @@ Result Menu::BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& loc
         {
             auto zfile = zipOpen2_64(path, APPEND_STATUS_CREATE, nullptr, &file_func);
             R_UNLESS(zfile, Result_ZipOpen2_64);
-            ON_SCOPE_EXIT(zipClose(zfile, "sphaira v" APP_VERSION_HASH));
+            ON_SCOPE_EXIT(zipClose(zfile, "sphaira v" APP_DISPLAY_VERSION));
 
             // add save meta.
             {

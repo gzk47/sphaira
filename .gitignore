@@ -27,3 +27,6 @@ out
 usb_test/
 __pycache__
 usb_*.spec
+
+CMakeUserPresets.json
+build_patreon.sh
