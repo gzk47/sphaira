@@ -10,13 +10,13 @@
 namespace sphaira::ui::menu::mtp {
 
 Menu::Menu(u32 flags) : stream::Menu{"MTP Install"_i18n, flags} {
-    m_was_mtp_enabled = haze::IsInit();
+    m_was_mtp_enabled = libhaze::IsInit();
     if (!m_was_mtp_enabled) {
         log_write("[MTP] wasn't enabled, forcefully enabling\n");
-        haze::Init();
+        libhaze::Init();
     }
 
-    haze::InitInstallMode(
+    libhaze::InitInstallMode(
         [this](const char* path){ return OnInstallStart(path); },
         [this](const void *buf, size_t size){ return OnInstallWrite(buf, size); },
         [this](){ return OnInstallClose(); }
@@ -25,11 +25,11 @@ Menu::Menu(u32 flags) : stream::Menu{"MTP Install"_i18n, flags} {
 
 Menu::~Menu() {
     // signal for thread to exit and wait.
-    haze::DisableInstallMode();
+    libhaze::DisableInstallMode();
 
     if (!m_was_mtp_enabled) {
         log_write("[MTP] disabling on exit\n");
-        haze::Exit();
+        libhaze::Exit();
     }
 }
 
@@ -53,7 +53,7 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
 }
 
 void Menu::OnDisableInstallMode() {
-    haze::DisableInstallMode();
+    libhaze::DisableInstallMode();
 }
 
 } // namespace sphaira::ui::menu::mtp

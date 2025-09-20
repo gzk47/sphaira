@@ -2,7 +2,7 @@
 
 #include <functional>
 
-namespace sphaira::haze {
+namespace sphaira::libhaze {
 
 bool Init();
 bool IsInit();
@@ -15,4 +15,4 @@ using OnInstallClose = std::function<void()>;
 void InitInstallMode(const OnInstallStart& on_start, const OnInstallWrite& on_write, const OnInstallClose& on_close);
 void DisableInstallMode();
 
-} // namespace sphaira::haze
+} // namespace sphaira::libhaze

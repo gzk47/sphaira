@@ -952,9 +952,9 @@ void App::SetMtpEnable(bool enable) {
 
 #ifdef ENABLE_LIBHAZE
         if (enable) {
-            haze::Init();
+            libhaze::Init();
         } else {
-            haze::Exit();
+            libhaze::Exit();
         }
 #endif // ENABLE_LIBHAZE
     }
@@ -1632,7 +1632,7 @@ App::App(const char* argv0) {
 #ifdef ENABLE_LIBHAZE
         if (App::GetMtpEnable()) {
             SCOPED_TIMESTAMP("mtp init");
-            haze::Init();
+            libhaze::Init();
         }
 #endif // ENABLE_LIBHAZE
 
@@ -2336,7 +2336,7 @@ App::~App() {
 #ifdef ENABLE_LIBHAZE
             {
                 SCOPED_TIMESTAMP("mtp exit");
-                haze::Exit();
+                libhaze::Exit();
             }
 #endif // ENABLE_LIBHAZE
 

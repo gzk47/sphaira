@@ -399,7 +399,7 @@ endif()
 if (ENABLE_LIBHAZE)
     FetchContent_Declare(libhaze
         GIT_REPOSITORY https://github.com/ITotalJustice/libhaze.git
-        GIT_TAG d60ba60
+        GIT_TAG 6e24502
     )
 
     FetchContent_MakeAvailable(libhaze)
