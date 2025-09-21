@@ -10,6 +10,7 @@
 #include "ui/error_box.hpp"
 #include "ui/music_player.hpp"
 
+#include "utils/utils.hpp"
 #include "utils/devoptab.hpp"
 
 #include "log.hpp"
@@ -603,10 +604,10 @@ void FsView::Draw(NVGcontext* vg, Theme* theme) {
             }
 
             if (e.file_count != -1) {
-                gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(text_id), "%zd files"_i18n.c_str(), e.file_count);
+                gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(ThemeEntryID_TEXT_INFO), "%zd files"_i18n.c_str(), e.file_count);
             }
             if (e.dir_count != -1) {
-                gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) + 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP, theme->GetColour(text_id), "%zd dirs"_i18n.c_str(), e.dir_count);
+                gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) + 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT_INFO), "%zd dirs"_i18n.c_str(), e.dir_count);
             }
         } else if (e.IsFile() && !m_fs_entry.IsNoStatFile() && (e.file_size != -1 || !e.time_stamp.is_valid)) {
             if (!e.time_stamp.is_valid && !e.done_stat) {
@@ -622,14 +623,9 @@ void FsView::Draw(NVGcontext* vg, Theme* theme) {
             const auto t = (time_t)(e.time_stamp.modified);
             struct tm tm{};
             localtime_r(&t, &tm);
-            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) + 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP, theme->GetColour(text_id), "%02u/%02u/%u", tm.tm_mday, tm.tm_mon + 1, tm.tm_year + 1900);
-            if ((double)e.file_size / 1024.0 / 1024.0 <= 0.009) {
-                gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(text_id), "%.2f KiB", (double)e.file_size / 1024.0);
-            } else if ((double)e.file_size / 1024.0 / 1024.0 / 1024.0 <= 0.009) {
-                gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(text_id), "%.2f MiB", (double)e.file_size / 1024.0 / 1024.0);
-            } else {
-                gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(text_id), "%.2f GiB", (double)e.file_size / 1024.0 / 1024.0 / 1024.0);
-            }
+
+            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) + 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT_INFO), "%02u/%02u/%u", tm.tm_mday, tm.tm_mon + 1, tm.tm_year + 1900);
+            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(ThemeEntryID_TEXT_INFO), "%s", utils::formatSizeStorage(e.file_size).c_str());
         }
     });
 }

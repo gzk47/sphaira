@@ -7,6 +7,7 @@
 #include "threaded_file_transfer.hpp"
 #include "i18n.hpp"
 
+#include "utils/utils.hpp"
 #include "utils/thread.hpp"
 
 #include <cstring>
@@ -152,16 +153,6 @@ auto ProgressBox::Draw(NVGcontext* vg, Theme* theme) -> void {
         const auto rad = 15;
         gfx::drawSpinner(vg, theme, prog_bar.x - pad - rad, prog_bar.y + prog_bar.h / 2, rad, armTicksToNs(armGetSystemTick()) / 1e+9);
 
-        const double speed_mb = (double)speed / (1024.0 * 1024.0);
-        const double speed_kb = (double)speed / (1024.0);
-
-        char speed_str[32];
-        if (speed_mb >= 0.01) {
-            std::snprintf(speed_str, sizeof(speed_str), "%.2f MiB/s", speed_mb);
-        } else {
-            std::snprintf(speed_str, sizeof(speed_str), "%.2f KiB/s", speed_kb);
-        }
-
         const auto left = size - last_offset;
         const auto left_seconds = left / speed;
         const auto hours = left_seconds / (60 * 60);
@@ -177,7 +168,7 @@ auto ProgressBox::Draw(NVGcontext* vg, Theme* theme) -> void {
             std::snprintf(time_str, sizeof(time_str), "%zu seconds remaining"_i18n.c_str(), seconds);
         }
 
-        gfx::drawTextArgs(vg, center_x, prog_bar.y + prog_bar.h + 30, 18, NVG_ALIGN_CENTER | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "%s (%s)", time_str, speed_str);
+        gfx::drawTextArgs(vg, center_x, prog_bar.y + prog_bar.h + 30, 18, NVG_ALIGN_CENTER | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "%s (%s)", time_str, utils::formatSizeNetwork(speed).c_str());
     }
 
     gfx::drawTextArgs(vg, center_x, m_pos.y + 40, 24, NVG_ALIGN_CENTER | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), action.c_str());

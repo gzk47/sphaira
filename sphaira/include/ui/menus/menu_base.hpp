@@ -13,12 +13,14 @@ enum MenuFlag {
 
 struct PolledData {
     struct tm tm{};
-    u32 battery_percetange{};
-    PsmChargerType charger_type{};
     NifmInternetConnectionType type{};
     NifmInternetConnectionStatus status{};
     u32 strength{};
     u32 ip{};
+    s64 sd_free{1};
+    s64 sd_total{1};
+    s64 emmc_free{1};
+    s64 emmc_total{1};
 };
 
 struct MenuBase : Widget {

@@ -155,6 +155,9 @@ public:
     static Result SetDefaultBackgroundMusic(fs::Fs* fs, const fs::FsPath& path);
     static void SetBackgroundMusicPause(bool pause);
 
+    static Result GetSdSize(s64* free, s64* total);
+    static Result GetEmmcSize(s64* free, s64* total);
+
     // helper that converts 1.2.3 to a u32 used for comparisons.
     static auto GetVersionFromString(const char* str) -> u32;
     static auto IsVersionNewer(const char* current, const char* new_version) -> u32;

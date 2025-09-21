@@ -233,7 +233,7 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
         nvgRestore(vg);
 
         if (!e.tag.empty()) {
-            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f), 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "version: %s", e.tag.c_str());
+            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f), 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE, theme->GetColour(ThemeEntryID_TEXT_INFO), "version: %s", e.tag.c_str());
         }
     });
 }

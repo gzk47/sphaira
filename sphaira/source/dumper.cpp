@@ -336,7 +336,7 @@ Result DumpToFile(ui::ProgressBox* pbox, fs::Fs* fs, const fs::FsPath& root, Bas
 
         {
             fs::File file;
-            R_TRY(fs->OpenFile(temp_path, FsOpenMode_Write, &file));
+            R_TRY(fs->OpenFile(temp_path, FsOpenMode_Write|FsOpenMode_Append, &file));
             auto write_source = std::make_unique<WriteFileSource>(&file);
 
             if (custom_transfer) {

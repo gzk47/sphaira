@@ -344,15 +344,8 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
         }
 
         gfx::drawTextArgs(vg, x + text_xoffset, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%s", ncm::GetContentTypeStr(e.content_type));
-        gfx::drawTextArgs(vg, x + text_xoffset + 185, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%s", utils::hexIdToStr(e.content_id).str);
-
-        if ((double)e.size / 1024.0 / 1024.0 <= 0.009) {
-            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f), 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%.2f KiB", (double)e.size / 1024.0);
-        } else if ((double)e.size / 1024.0 / 1024.0 / 1024.0 <= 0.009) {
-            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f), 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%.2f MiB", (double)e.size / 1024.0 / 1024.0);
-        } else {
-            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f), 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%.2f GiB", (double)e.size / 1024.0 / 1024.0 / 1024.0);
-        }
+        gfx::drawTextArgs(vg, x + text_xoffset + 150, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%s", utils::hexIdToStr(e.content_id).str);
+        gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f), 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE, theme->GetColour(ThemeEntryID_TEXT_INFO), "%s", utils::formatSizeStorage(e.size).c_str());
 
         if (e.missing) {
             gfx::drawText(vg, x + text_xoffset - 80 / 2, y + (h / 2.f) - (24.f / 2), 24.f, "\uE140", nullptr, NVG_ALIGN_CENTER | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_ERROR));

@@ -34,9 +34,9 @@ auto GetContentTypeStr(u8 content_type) -> const char* {
         case NcmContentType_Program: return "Program";
         case NcmContentType_Data: return "Data";
         case NcmContentType_Control: return "Control";
-        case NcmContentType_HtmlDocument: return "HtmlDocument";
-        case NcmContentType_LegalInformation: return "LegalInformation";
-        case NcmContentType_DeltaFragment: return "DeltaFragment";
+        case NcmContentType_HtmlDocument: return "Html";
+        case NcmContentType_LegalInformation: return "Legal";
+        case NcmContentType_DeltaFragment: return "Delta";
     }
 
     return "Unknown";

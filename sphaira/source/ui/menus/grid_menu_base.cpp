@@ -18,8 +18,9 @@ Vec4 Menu::DrawEntry(NVGcontext* vg, Theme* theme, bool draw_image, int layout, 
     const auto& [x, y, w, h] = v;
 
     auto text_id = ThemeEntryID_TEXT;
+    auto info_id = ThemeEntryID_TEXT_INFO;
     if (selected) {
-        text_id = ThemeEntryID_TEXT_SELECTED;
+        text_id = info_id = ThemeEntryID_TEXT_SELECTED;
         gfx::drawRectOutline(vg, theme, 4.f, v);
     } else {
         DrawElement(v, ThemeEntryID_GRID);
@@ -38,8 +39,8 @@ Vec4 Menu::DrawEntry(NVGcontext* vg, Theme* theme, bool draw_image, int layout, 
         const auto text_clip_w = w - 30.f - text_off;
         const float font_size = 18;
         m_scroll_name.Draw(vg, selected, text_x, y + 45, text_clip_w, font_size, NVG_ALIGN_LEFT, theme->GetColour(text_id), name);
-        m_scroll_author.Draw(vg, selected, text_x, y + 80, text_clip_w, font_size, NVG_ALIGN_LEFT, theme->GetColour(text_id), author);
-        m_scroll_version.Draw(vg, selected, text_x, y + 115, text_clip_w, font_size, NVG_ALIGN_LEFT, theme->GetColour(text_id), version);
+        m_scroll_author.Draw(vg, selected, text_x, y + 80, text_clip_w, font_size, NVG_ALIGN_LEFT, theme->GetColour(info_id), author);
+        m_scroll_version.Draw(vg, selected, text_x, y + 115, text_clip_w, font_size, NVG_ALIGN_LEFT, theme->GetColour(info_id), version);
     } else {
         if (selected) {
             gfx::drawAppLable(vg, theme, m_scroll_name, x, y, w, name);

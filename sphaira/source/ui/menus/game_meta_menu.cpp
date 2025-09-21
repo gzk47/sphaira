@@ -10,6 +10,8 @@
 #include "yati/nx/ncm.hpp"
 #include "yati/nx/es.hpp"
 
+#include "utils/utils.hpp"
+
 #include "title_info.hpp"
 #include "app.hpp"
 #include "defines.hpp"
@@ -231,14 +233,8 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
             GetNcmSizeOfMetaStatus(e);
         }
 
-        gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) + 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP, theme->GetColour(text_id), "%s", ncm::GetReadableStorageIdStr(e.status.storageID));
-        if ((double)e.size / 1024.0 / 1024.0 <= 0.009) {
-            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(text_id), "%.2f KiB", (double)e.size / 1024.0);
-        } else if ((double)e.size / 1024.0 / 1024.0 / 1024.0 <= 0.009) {
-            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(text_id), "%.2f MiB", (double)e.size / 1024.0 / 1024.0);
-        } else {
-            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(text_id), "%.2f GiB", (double)e.size / 1024.0 / 1024.0 / 1024.0);
-        }
+        gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) + 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT_INFO), "%s", ncm::GetReadableStorageIdStr(e.status.storageID));
+        gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(ThemeEntryID_TEXT_INFO), "%s", utils::formatSizeStorage(e.size).c_str());
 
         if (e.selected) {
             gfx::drawText(vg, x + text_xoffset - 80 / 2, y + (h / 2.f) - (24.f / 2), 24.f, "\uE14B", nullptr, NVG_ALIGN_CENTER | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT_SELECTED));

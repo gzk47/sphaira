@@ -1462,6 +1462,20 @@ void App::SetBackgroundMusicPause(bool pause) {
     }
 }
 
+Result App::GetSdSize(s64* free, s64* total) {
+    fs::FsNativeContentStorage fs{FsContentStorageId_SdCard};
+    R_TRY(fs.GetFreeSpace("/", free));
+    R_TRY(fs.GetTotalSpace("/", total));
+    R_SUCCEED();
+}
+
+Result App::GetEmmcSize(s64* free, s64* total) {
+    fs::FsNativeContentStorage fs{FsContentStorageId_User};
+    R_TRY(fs.GetFreeSpace("/", free));
+    R_TRY(fs.GetTotalSpace("/", total));
+    R_SUCCEED();
+}
+
 App::App(const char* argv0) {
     // boost mode is enabled in userAppInit().
     ON_SCOPE_EXIT(App::SetBoostMode(false));

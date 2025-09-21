@@ -56,8 +56,6 @@ void userAppInit(void) {
         diagAbortWithResult(rc);
     if (R_FAILED(rc = plInitialize(PlServiceType_User)))
         diagAbortWithResult(rc);
-    if (R_FAILED(rc = psmInitialize()))
-        diagAbortWithResult(rc);
     if (R_FAILED(rc = nifmInitialize(NifmServiceType_User)))
         diagAbortWithResult(rc);
     if (R_FAILED(rc = accountInitialize(is_application ? AccountServiceType_Application : AccountServiceType_System)))
@@ -83,7 +81,6 @@ void userAppExit(void) {
     setExit();
     accountExit();
     nifmExit();
-    psmExit();
     plExit();
     socketExit();
     // NOTE (DMC): prevents exfat corruption.

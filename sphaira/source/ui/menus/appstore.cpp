@@ -20,6 +20,8 @@
 #include "web.hpp"
 #include "minizip_helper.hpp"
 
+#include "utils/utils.hpp"
+
 #include <minIni.h>
 #include <string>
 #include <cstring>
@@ -738,7 +740,7 @@ void EntryMenu::Draw(NVGcontext* vg, Theme* theme) {
     text_start_y += text_inc_y;
     gfx::drawTextArgs(vg, text_start_x, text_start_y, font_size, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "category: %s"_i18n.c_str(), m_entry.category.c_str());
     text_start_y += text_inc_y;
-    gfx::drawTextArgs(vg, text_start_x, text_start_y, font_size, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "extracted: %.2f MiB"_i18n.c_str(), (double)m_entry.extracted / 1024.0);
+    gfx::drawTextArgs(vg, text_start_x, text_start_y, font_size, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "extracted: %s"_i18n.c_str(), utils::formatSizeStorage(m_entry.extracted).c_str());
     text_start_y += text_inc_y;
     gfx::drawTextArgs(vg, text_start_x, text_start_y, font_size, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "app_dls: %s"_i18n.c_str(), AppDlToStr(m_entry.app_dls).c_str());
     text_start_y += text_inc_y;

@@ -22,4 +22,11 @@ constexpr inline T AlignDown(T value, T align) {
     return value &~ (align - 1);
 }
 
+// formats size to 1.23 MB in 1024 base.
+// only uses 32 bytes so its SSO optimised, not need to cache.
+std::string formatSizeStorage(u64 size);
+
+// formats size to 1.23 MB in 1000 base (used for progress bars).
+std::string formatSizeNetwork(u64 size);
+
 } // namespace sphaira::utils

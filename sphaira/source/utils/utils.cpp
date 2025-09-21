@@ -14,6 +14,25 @@ HashStr hexIdToStrInternal(auto id) {
     return str;
 }
 
+std::string formatSizeInetrnal(double size, double base) {
+    static const char* const suffixes[] = { "B", "KB", "MB", "GB", "TB", "PB", "EB" };
+    size_t suffix_index = 0;
+
+    while (size >= base && suffix_index < std::size(suffixes) - 1) {
+        size /= base;
+        suffix_index++;
+    }
+
+    char buffer[32];
+    if (suffix_index == 0) {
+        std::snprintf(buffer, sizeof(buffer), "%.0f %s", size, suffixes[suffix_index]);
+    } else {
+        std::snprintf(buffer, sizeof(buffer), "%.2f %s", size, suffixes[suffix_index]);
+    }
+
+    return buffer;
+}
+
 } // namespace
 
 HashStr hexIdToStr(FsRightsId id) {
@@ -26,6 +45,14 @@ HashStr hexIdToStr(NcmRightsId id) {
 
 HashStr hexIdToStr(NcmContentId id) {
     return hexIdToStrInternal(id);
+}
+
+std::string formatSizeStorage(u64 size) {
+    return formatSizeInetrnal(size, 1024.0);
+}
+
+std::string formatSizeNetwork(u64 size) {
+    return formatSizeInetrnal(size, 1000.0);
 }
 
 } // namespace sphaira::utils
