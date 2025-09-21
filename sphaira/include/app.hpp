@@ -95,7 +95,6 @@ public:
     static auto GetInstallEmummcEnable() -> bool;
     static auto GetInstallSdEnable() -> bool;
     static auto GetThemeMusicEnable() -> bool;
-    static auto Get12HourTimeEnable() -> bool;
     static auto GetLanguage() -> long;
     static auto GetTextScrollSpeed() -> long;
 
@@ -303,7 +302,7 @@ public:
     option::OptionString m_default_music{INI_SECTION, "default_music", "/config/sphaira/themes/default_music.bfstm"};
     option::OptionString m_theme_path{INI_SECTION, "theme", DEFAULT_THEME_PATH};
     option::OptionBool m_theme_music{INI_SECTION, "theme_music", true};
-    option::OptionBool m_12hour_time{INI_SECTION, "12hour_time", false};
+    option::OptionBool m_show_ip_addr{INI_SECTION, "show_ip_addr", true};
     option::OptionLong m_language{INI_SECTION, "language", 0}; // auto
     option::OptionString m_left_menu{INI_SECTION, "left_side_menu", "FileBrowser"};
     option::OptionString m_right_menu{INI_SECTION, "right_side_menu", "Appstore"};

@@ -752,10 +752,6 @@ auto App::GetTextScrollSpeed() -> long {
     return g_app->m_text_scroll_speed.Get();
 }
 
-auto App::Get12HourTimeEnable() -> bool {
-    return g_app->m_12hour_time.Get();
-}
-
 auto App::GetNszCompressLevel() -> u8 {
     return NSZ_COMPRESS_LEVEL_OPTIONS[App::GetApp()->m_nsz_compress_level.Get()].value;
 }
@@ -940,10 +936,6 @@ void App::SetThemeMusicEnable(bool enable) {
             g_app->CloseThemeBackgroundMusic();
         }
     }
-}
-
-void App::Set12HourTimeEnable(bool enable) {
-    g_app->m_12hour_time.Set(enable);
 }
 
 void App::SetMtpEnable(bool enable) {
@@ -1512,7 +1504,7 @@ App::App(const char* argv0) {
             else if (app->m_default_music.LoadFrom(Key, Value)) {}
             else if (app->m_theme_path.LoadFrom(Key, Value)) {}
             else if (app->m_theme_music.LoadFrom(Key, Value)) {}
-            else if (app->m_12hour_time.LoadFrom(Key, Value)) {}
+            else if (app->m_show_ip_addr.LoadFrom(Key, Value)) {}
             else if (app->m_language.LoadFrom(Key, Value)) {}
             else if (app->m_left_menu.LoadFrom(Key, Value)) {}
             else if (app->m_right_menu.LoadFrom(Key, Value)) {}
@@ -1970,9 +1962,10 @@ void App::DisplayThemeOptions(bool left_side) {
         "Each theme can have it's own music file. "
         "If a theme does not set a music file, the default music is loaded instead (if it exists)."_i18n);
 
-    options->Add<ui::SidebarEntryBool>("12 Hour Time"_i18n, App::Get12HourTimeEnable(), [](bool& enable){
-        App::Set12HourTimeEnable(enable);
-    }, "Changes the clock to 12 hour"_i18n);
+    options->Add<ui::SidebarEntryBool>("Show IP address"_i18n, App::GetApp()->m_show_ip_addr,
+        "Shows the IP address in all menus, including the WiFi strength.\n\n"
+        "NOTE: The IP address will be hidden in applet mode due to the applet warning being displayed in it's place."_i18n
+    );
 
     // todo: add file picker for music here.
     // todo: add array to audio which has the list of supported extensions.

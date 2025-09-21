@@ -111,7 +111,7 @@ void MenuBase::Draw(NVGcontext* vg, Theme* theme) {
     // ran out of space, its one or the other.
     if (!App::IsApplication()) {
         draw(ThemeEntryID_ERROR, 0, ("[Applet Mode]"_i18n).c_str());
-    } else {
+    } else if (App::GetApp()->m_show_ip_addr.Get()) {
         if (pdata.ip) {
             char ip_buf[32];
             std::snprintf(ip_buf, sizeof(ip_buf), "%u.%u.%u.%u", pdata.ip & 0xFF, (pdata.ip >> 8) & 0xFF, (pdata.ip >> 16) & 0xFF, (pdata.ip >> 24) & 0xFF);
