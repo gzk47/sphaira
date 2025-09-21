@@ -131,6 +131,9 @@ public:
     static void DisplayAdvancedOptions(bool left_side = true);
     static void DisplayInstallOptions(bool left_side = true);
     static void DisplayDumpOptions(bool left_side = true);
+    static void DisplayFtpOptions(bool left_side = true);
+    static void DisplayMtpOptions(bool left_side = true);
+    static void DisplayHddOptions(bool left_side = true);
 
     // helper for sidebar options to toggle install on/off
     static void ShowEnableInstallPromptOption(option::OptionBool& option, bool& enable);
@@ -342,9 +345,38 @@ public:
     // todo: move this into it's own menu
     option::OptionLong m_text_scroll_speed{"accessibility", "text_scroll_speed", 1}; // normal
 
+    // ftp options.
+    option::OptionLong m_ftp_port{"ftp", "port", 5000};
+    option::OptionBool m_ftp_anon{"ftp", "anon", true};
+    option::OptionString m_ftp_user{"ftp", "user", ""};
+    option::OptionString m_ftp_pass{"ftp", "pass", ""};
+    option::OptionBool m_ftp_show_album{"ftp", "show_album", true};
+    option::OptionBool m_ftp_show_ams_contents{"ftp", "show_ams_contents", false};
+    option::OptionBool m_ftp_show_bis_storage{"ftp", "show_bis_storage", false};
+    option::OptionBool m_ftp_show_bis_fs{"ftp", "show_bis_fs", false};
+    option::OptionBool m_ftp_show_content_system{"ftp", "show_content_system", false};
+    option::OptionBool m_ftp_show_content_user{"ftp", "show_content_user", false};
+    option::OptionBool m_ftp_show_content_sd{"ftp", "show_content_sd", false};
+    // option::OptionBool m_ftp_show_content_sd0{"ftp", "show_content_sd0", false};
+    // option::OptionBool m_ftp_show_custom_system{"ftp", "show_custom_system", false};
+    // option::OptionBool m_ftp_show_custom_sd{"ftp", "show_custom_sd", false};
+    option::OptionBool m_ftp_show_games{"ftp", "show_games", true};
+    option::OptionBool m_ftp_show_install{"ftp", "show_install", true};
+    option::OptionBool m_ftp_show_mounts{"ftp", "show_mounts", false};
+    option::OptionBool m_ftp_show_switch{"ftp", "show_switch", false};
+
     // mtp options.
-    option::OptionLong m_mtp_vid{"mtp", "vid", 0x057e}; // nintendo
-    option::OptionLong m_mtp_pid{"mtp", "pid", 0x201d}; // switch
+    option::OptionLong m_mtp_vid{"mtp", "vid", 0x057e}; // nintendo (hidden from ui)
+    option::OptionLong m_mtp_pid{"mtp", "pid", 0x201d}; // switch (hidden from ui)
+    option::OptionBool m_mtp_allocate_file{"mtp", "allocate_file", true};
+    option::OptionBool m_mtp_show_album{"mtp", "show_album", true};
+    option::OptionBool m_mtp_show_content_sd{"mtp", "show_content_sd", false};
+    option::OptionBool m_mtp_show_content_system{"mtp", "show_content_system", false};
+    option::OptionBool m_mtp_show_content_user{"mtp", "show_content_user", false};
+    option::OptionBool m_mtp_show_games{"mtp", "show_games", true};
+    option::OptionBool m_mtp_show_install{"mtp", "show_install", true};
+    option::OptionBool m_mtp_show_mounts{"mtp", "show_mounts", false};
+    option::OptionBool m_mtp_show_speedtest{"mtp", "show_speedtest", false};
 
     std::shared_ptr<fs::FsNativeSd> m_fs{};
     audio::SongID m_background_music{};

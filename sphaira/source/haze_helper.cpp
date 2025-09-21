@@ -669,12 +669,40 @@ bool Init() {
         return false;
     }
 
+    // add default mount of the sd card.
     g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeSd>(), "", "microSD card"));
-    g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeImage>(FsImageDirectoryId_Sd), "Album", "Album (Image SD)"));
-    g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsStdio>(true, "games:/"), "Games", "Games"));
-    g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsStdio>(true, "mounts:/"), "Mounts", "Mounts"));
-    g_fs_entries.emplace_back(std::make_shared<FsDevNullProxy>("DevNull", "DevNull (Speed Test)"));
-    g_fs_entries.emplace_back(std::make_shared<FsInstallProxy>("install", "Install (NSP, XCI, NSZ, XCZ)"));
+
+    if (App::GetApp()->m_mtp_show_album.Get()) {
+        g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeImage>(FsImageDirectoryId_Sd), "Album", "Album (Image SD)"));
+    }
+
+    if (App::GetApp()->m_mtp_show_content_sd.Get()) {
+        g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeContentStorage>(FsContentStorageId_SdCard), "ContentsM", "Contents (microSD card)"));
+    }
+
+    if (App::GetApp()->m_mtp_show_content_system.Get()) {
+        g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeContentStorage>(FsContentStorageId_System), "ContentsS", "Contents (System)"));
+    }
+
+    if (App::GetApp()->m_mtp_show_content_user.Get()) {
+        g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeContentStorage>(FsContentStorageId_User), "ContentsU", "Contents (User)"));
+    }
+
+    if (App::GetApp()->m_mtp_show_games.Get()) {
+        g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsStdio>(true, "games:/"), "Games", "Games"));
+    }
+
+    if (App::GetApp()->m_mtp_show_install.Get()) {
+        g_fs_entries.emplace_back(std::make_shared<FsInstallProxy>("install", "Install (NSP, XCI, NSZ, XCZ)"));
+    }
+
+    if (App::GetApp()->m_mtp_show_mounts.Get()) {
+        g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsStdio>(true, "mounts:/"), "Mounts", "Mounts"));
+    }
+
+    if (App::GetApp()->m_mtp_show_speedtest.Get()) {
+        g_fs_entries.emplace_back(std::make_shared<FsDevNullProxy>("DevNull", "DevNull (Speed Test)"));
+    }
 
     g_should_exit = false;
     if (!haze::Initialize(haze_callback, g_fs_entries, App::GetApp()->m_mtp_vid.Get(), App::GetApp()->m_mtp_pid.Get())) {

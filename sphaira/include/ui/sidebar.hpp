@@ -44,6 +44,14 @@ public:
         m_depends_click = depends_click;
     }
 
+    void SetDirty(bool dirty = true) {
+        m_dirty = dirty;
+    }
+
+    auto IsDirty() const -> bool {
+        return m_dirty;
+    }
+
 protected:
     auto IsEnabled() const -> bool {
         if (m_depends_callback) {
@@ -69,6 +77,7 @@ private:
     DependsClickCallback m_depends_click{};
     ScrollingText m_scolling_title{};
     ScrollingText m_scolling_value{};
+    bool m_dirty{};
 };
 
 template<typename T>
@@ -175,10 +184,13 @@ private:
 
 class SidebarEntryTextInput final : public SidebarEntryTextBase {
 public:
+    using Callback = std::function<void(SidebarEntryTextInput* input)>;
+
+public:
     // uses normal keyboard.
-    explicit SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide = {}, s64 len_min = -1, s64 len_max = PATH_MAX, const std::string& info = "");
+    explicit SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide = {}, s64 len_min = -1, s64 len_max = PATH_MAX, const std::string& info = "", const Callback& callback = nullptr);
     // uses numpad.
-    explicit SidebarEntryTextInput(const std::string& title, s64 value, const std::string& guide = {}, s64 len_min = -1, s64 len_max = PATH_MAX, const std::string& info = "");
+    explicit SidebarEntryTextInput(const std::string& title, s64 value, const std::string& guide = {}, s64 len_min = -1, s64 len_max = PATH_MAX, const std::string& info = "", const Callback& callback = nullptr);
 
     auto GetNumValue() const -> s64 {
         return std::stoul(GetValue());
@@ -191,6 +203,7 @@ private:
     const std::string m_guide;
     const s64 m_len_min;
     const s64 m_len_max;
+    const Callback m_callback;
 };
 
 class SidebarEntryFilePicker final : public SidebarEntryTextBase {
@@ -210,10 +223,12 @@ class Sidebar : public Widget {
 public:
     enum class Side { LEFT, RIGHT };
     using Items = std::vector<std::unique_ptr<SidebarEntryBase>>;
+    using OnExitWhenChangedCallback = std::function<void()>;
 
 public:
     explicit Sidebar(const std::string& title, Side side, float width = 450.f);
     explicit Sidebar(const std::string& title, const std::string& sub, Side side, float width = 450.f);
+    ~Sidebar();
 
     auto Update(Controller* controller, TouchInfo* touch) -> void override;
     auto Draw(NVGcontext* vg, Theme* theme) -> void override;
@@ -227,6 +242,12 @@ public:
         return (T*)Add(std::make_unique<T>(std::forward<Args>(args)...));
     }
 
+    // sets a callback that is called on exit when the any options were changed.
+    // the change detection isn't perfect, it just checks if the A button was pressed...
+    void SetOnExitWhenChanged(const OnExitWhenChangedCallback& cb) {
+        m_on_exit_when_changed = cb;
+    }
+
 private:
     void SetIndex(s64 index);
     void SetupButtons();
@@ -235,15 +256,17 @@ private:
     const std::string m_title;
     const std::string m_sub;
     const Side m_side;
-    Items m_items;
+    Items m_items{};
     s64 m_index{};
 
-    std::unique_ptr<List> m_list;
+    std::unique_ptr<List> m_list{};
 
     Vec4 m_top_bar{};
     Vec4 m_bottom_bar{};
     Vec2 m_title_pos{};
     Vec4 m_base_pos{};
+
+    OnExitWhenChangedCallback m_on_exit_when_changed{};
 
     static constexpr float m_title_size{28.f};
     // static constexpr Vec2 box_size{380.f, 70.f};

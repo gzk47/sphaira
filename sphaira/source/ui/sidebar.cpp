@@ -124,24 +124,27 @@ SidebarEntryBool::SidebarEntryBool(const std::string& title, bool option, const 
         } else {
             m_option ^= 1;
             m_callback(m_option);
+            SetDirty();
         } }
     });
 }
 
 SidebarEntryBool::SidebarEntryBool(const std::string& title, bool& option, const std::string& info, const std::string& true_str, const std::string& false_str)
 : SidebarEntryBool{title, option, Callback{}, info, true_str, false_str} {
-    m_callback = [&option](bool&){
+    m_callback = [this, &option](bool&){
         option ^= 1;
+        SetDirty();
     };
 }
 
 SidebarEntryBool::SidebarEntryBool(const std::string& title, option::OptionBool& option, const Callback& cb, const std::string& info, const std::string& true_str, const std::string& false_str)
 : SidebarEntryBool{title, option.Get(), Callback{}, info, true_str, false_str} {
-    m_callback = [&option, cb](bool& v_out){
+    m_callback = [this, &option, cb](bool& v_out){
         if (cb) {
             cb(v_out);
         }
         option.Set(v_out);
+        SetDirty();
     };
 }
 
@@ -166,6 +169,7 @@ SidebarEntrySlider::SidebarEntrySlider(const std::string& title, float value, fl
             DependsClick();
         } else {
             m_value = std::clamp(m_value - m_inc, m_min, m_max);
+            SetDirty();
             // m_callback(m_option);
         } }
     });
@@ -174,6 +178,7 @@ SidebarEntrySlider::SidebarEntrySlider(const std::string& title, float value, fl
             DependsClick();
         } else {
             m_value = std::clamp(m_value + m_inc, m_min, m_max);
+            SetDirty();
             // m_callback(m_option);
         } }
     });
@@ -240,6 +245,8 @@ SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& item
         App::Push<PopupList>(
             m_title, m_items, index, m_index
         );
+
+        SetDirty();
     };
 }
 
@@ -275,6 +282,7 @@ SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& item
         } else {
             // m_callback(m_index);
             m_list_callback();
+            SetDirty();
         }}
     });
 }
@@ -291,6 +299,7 @@ SidebarEntryTextBase::SidebarEntryTextBase(const std::string& title, const std::
     SetAction(Button::A, Action{"OK"_i18n, [this](){
         if (m_callback) {
             m_callback();
+            SetDirty();
         }
     }});
 }
@@ -300,26 +309,35 @@ void SidebarEntryTextBase::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_p
     SidebarEntryBase::DrawEntry(vg, theme, m_title, m_value, true);
 }
 
-SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide, s64 len_min, s64 len_max, const std::string& info)
+SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide, s64 len_min, s64 len_max, const std::string& info, const Callback& callback)
 : SidebarEntryTextBase{title, value, {}, info}
 , m_guide{guide}
 , m_len_min{len_min}
-, m_len_max{len_max} {
+, m_len_max{len_max}
+, m_callback{callback} {
 
     SetCallback([this](){
         std::string out;
         if (R_SUCCEEDED(swkbd::ShowText(out, m_guide.c_str(), GetValue().c_str(), m_len_min, m_len_max))) {
             SetValue(out);
+
+            if (m_callback) {
+                m_callback(this);
+            }
         }
     });
 }
 
-SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, s64 value, const std::string& guide, s64 len_min, s64 len_max, const std::string& info)
-: SidebarEntryTextInput{title, std::to_string(value), guide, len_min, len_max, info} {
+SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, s64 value, const std::string& guide, s64 len_min, s64 len_max, const std::string& info, const Callback& callback)
+: SidebarEntryTextInput{title, std::to_string(value), guide, len_min, len_max, info, callback} {
     SetCallback([this](){
         s64 out = std::stoul(GetValue());
         if (R_SUCCEEDED(swkbd::ShowNumPad(out, m_guide.c_str(), GetValue().c_str(), m_len_min, m_len_max))) {
             SetValue(std::to_string(out));
+
+            if (m_callback) {
+                m_callback(this);
+            }
         }
     });
 }
@@ -331,6 +349,7 @@ SidebarEntryFilePicker::SidebarEntryFilePicker(const std::string& title, const s
         App::Push<menu::filebrowser::picker::Menu>(
             [this](const fs::FsPath& path) {
                 SetValue(path);
+                SetDirty();
                 return true;
             },
             m_filter
@@ -368,6 +387,17 @@ Sidebar::Sidebar(const std::string& title, const std::string& sub, Side side, fl
     const Vec4 pos = DistanceBetweenY(m_top_bar, m_bottom_bar);
     m_list = std::make_unique<List>(1, 6, pos, m_base_pos);
     m_list->SetScrollBarPos(GetX() + GetW() - 20, m_base_pos.y - 10, pos.h - m_base_pos.y + 48);
+}
+
+Sidebar::~Sidebar() {
+    if (m_on_exit_when_changed) {
+        for (const auto& item : m_items) {
+            if (item->IsDirty()) {
+                m_on_exit_when_changed();
+                break;
+            }
+        }
+    }
 }
 
 auto Sidebar::Update(Controller* controller, TouchInfo* touch) -> void {

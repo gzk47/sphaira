@@ -6,7 +6,6 @@
 #include "utils/thread.hpp"
 
 #include <algorithm>
-#include <minIni.h>
 #include <ftpsrv.h>
 #include <ftpsrv_vfs.h>
 #include <nx/vfs_nx.h>
@@ -30,11 +29,12 @@ struct InstallSharedData {
     bool enabled;
 };
 
-const char* INI_PATH = "/config/ftpsrv/config.ini";
-FtpSrvConfig g_ftpsrv_config = {0};
-std::atomic_bool g_should_exit = false;
-bool g_is_running{false};
-Thread g_thread;
+FtpSrvConfig g_ftpsrv_config{};
+int g_ftpsrv_mount_flags{};
+std::vector<VfsNxCustomPath> g_custom_vfs{};
+std::atomic_bool g_should_exit{};
+bool g_is_running{};
+Thread g_thread{};
 Mutex g_mutex{};
 
 void ftp_log_callback(enum FTP_API_LOG_TYPE type, const char* msg) {
@@ -468,74 +468,12 @@ FtpVfs g_vfs_stdio = {
 void loop(void* arg) {
     log_write("[FTP] loop entered\n");
 
-    // load config.
     {
         SCOPED_MUTEX(&g_mutex);
-
-        g_ftpsrv_config.log_callback = ftp_log_callback;
-        g_ftpsrv_config.progress_callback = ftp_progress_callback;
-        g_ftpsrv_config.anon = ini_getbool("Login", "anon", 0, INI_PATH);
-        int user_len = ini_gets("Login", "user", "", g_ftpsrv_config.user, sizeof(g_ftpsrv_config.user), INI_PATH);
-        int pass_len = ini_gets("Login", "pass", "", g_ftpsrv_config.pass, sizeof(g_ftpsrv_config.pass), INI_PATH);
-        g_ftpsrv_config.port = ini_getl("Network", "port", 5000, INI_PATH); // 5000 to keep compat with older sphaira
-        g_ftpsrv_config.timeout = ini_getl("Network", "timeout", 0, INI_PATH);
-        g_ftpsrv_config.use_localtime = ini_getbool("Misc", "use_localtime", 0, INI_PATH);
-        bool log_enabled = ini_getbool("Log", "log", 0, INI_PATH);
-
-        // get nx config
-        bool mount_devices = ini_getbool("Nx", "mount_devices", 1, INI_PATH);
-        bool mount_bis = ini_getbool("Nx", "mount_bis", 0, INI_PATH);
-        bool save_writable = ini_getbool("Nx", "save_writable", 0, INI_PATH);
-        g_ftpsrv_config.port = ini_getl("Nx", "app_port", g_ftpsrv_config.port, INI_PATH); // compat
-
-        // get Nx-App overrides
-        g_ftpsrv_config.anon = ini_getbool("Nx-App", "anon", g_ftpsrv_config.anon, INI_PATH);
-        user_len = ini_gets("Nx-App", "user", g_ftpsrv_config.user, g_ftpsrv_config.user, sizeof(g_ftpsrv_config.user), INI_PATH);
-        pass_len = ini_gets("Nx-App", "pass", g_ftpsrv_config.pass, g_ftpsrv_config.pass, sizeof(g_ftpsrv_config.pass), INI_PATH);
-        g_ftpsrv_config.port = ini_getl("Nx-App", "port", g_ftpsrv_config.port, INI_PATH);
-        g_ftpsrv_config.timeout = ini_getl("Nx-App", "timeout", g_ftpsrv_config.timeout, INI_PATH);
-        g_ftpsrv_config.use_localtime = ini_getbool("Nx-App", "use_localtime", g_ftpsrv_config.use_localtime, INI_PATH);
-        log_enabled = ini_getbool("Nx-App", "log", log_enabled, INI_PATH);
-        mount_devices = ini_getbool("Nx-App", "mount_devices", mount_devices, INI_PATH);
-        mount_bis = ini_getbool("Nx-App", "mount_bis", mount_bis, INI_PATH);
-        save_writable = ini_getbool("Nx-App", "save_writable", save_writable, INI_PATH);
-
         g_should_exit = false;
-        mount_devices = true;
-        g_ftpsrv_config.timeout = 0;
-
-        if (!g_ftpsrv_config.port) {
-            g_ftpsrv_config.port = 5000;
-            log_write("[FTP] no port config, defaulting to 5000\n");
-        }
-
-        // keep compat with older sphaira
-        if (!user_len && !pass_len) {
-            g_ftpsrv_config.anon = true;
-            log_write("[FTP] no user pass, defaulting to anon\n");
-        }
 
         fsdev_wrapMountSdmc();
-
-        static const VfsNxCustomPath custom_vfs[] = {
-            {
-                .name = "games",
-                .user = NULL,
-                .func = &g_vfs_stdio,
-            },
-            {
-                .name = "mounts",
-                .user = NULL,
-                .func = &g_vfs_stdio,
-            },
-            {
-                .name = "install",
-                .user = NULL,
-                .func = &g_vfs_install,
-            },
-        };
-
-        vfs_nx_init(custom_vfs, std::size(custom_vfs), mount_devices, save_writable, mount_bis, false);
+        vfs_nx_init(g_custom_vfs.data(), std::size(g_custom_vfs), g_ftpsrv_mount_flags, false);
     }
 
     ON_SCOPE_EXIT(
@@ -566,13 +504,90 @@ bool Init() {
         return false;
     }
 
-    // if (R_FAILED(fsdev_wrapMountSdmc())) {
-    //     log_write("[FTP] cannot mount sdmc\n");
-    //     return false;
-    // }
+    g_ftpsrv_mount_flags = 0;
+    g_ftpsrv_config = {};
+    g_custom_vfs.clear();
 
-    // todo: replace everything with ini_browse for faster loading.
-    // or load everything in the init thread.
+    auto app = App::GetApp();
+    g_ftpsrv_config.log_callback = ftp_log_callback;
+    g_ftpsrv_config.progress_callback = ftp_progress_callback;
+    g_ftpsrv_config.anon = app->m_ftp_anon.Get();
+    std::strncpy(g_ftpsrv_config.user, app->m_ftp_user.Get().c_str(), sizeof(g_ftpsrv_config.user) - 1);
+    std::strncpy(g_ftpsrv_config.pass, app->m_ftp_pass.Get().c_str(), sizeof(g_ftpsrv_config.pass) - 1);
+    g_ftpsrv_config.port = app->m_ftp_port.Get();
+
+    if (app->m_ftp_show_album.Get()) {
+        g_ftpsrv_mount_flags |= VfsNxMountFlag_ALBUM;
+    }
+    if (app->m_ftp_show_ams_contents.Get()) {
+        g_ftpsrv_mount_flags |= VfsNxMountFlag_AMS_CONTENTS;
+    }
+    if (app->m_ftp_show_bis_storage.Get()) {
+        g_ftpsrv_mount_flags |= VfsNxMountFlag_BIS_STORAGE;
+    }
+    if (app->m_ftp_show_bis_fs.Get()) {
+        g_ftpsrv_mount_flags |= VfsNxMountFlag_BIS_FS;
+    }
+    if (app->m_ftp_show_content_system.Get()) {
+        g_ftpsrv_mount_flags |= VfsNxMountFlag_CONTENT_SYSTEM;
+    }
+    if (app->m_ftp_show_content_user.Get()) {
+        g_ftpsrv_mount_flags |= VfsNxMountFlag_CONTENT_USER;
+    }
+    if (app->m_ftp_show_content_sd.Get()) {
+        g_ftpsrv_mount_flags |= VfsNxMountFlag_CONTENT_SDCARD;
+    }
+    #if 0
+    if (app->m_ftp_show_content_sd0.Get()) {
+        g_ftpsrv_mount_flags |= VfsNxMountFlag_CONTENT_SDCARD0;
+    }
+    if (app->m_ftp_show_custom_system.Get()) {
+        g_ftpsrv_mount_flags |= VfsNxMountFlag_CUSTOM_SYSTEM;
+    }
+    if (app->m_ftp_show_custom_sd.Get()) {
+        g_ftpsrv_mount_flags |= VfsNxMountFlag_CUSTOM_SDCARD;
+    }
+    #endif
+    if (app->m_ftp_show_switch.Get()) {
+        g_ftpsrv_mount_flags |= VfsNxMountFlag_SWITCH;
+    }
+
+    if (app->m_ftp_show_install.Get()) {
+        g_custom_vfs.push_back({
+            .name = "install",
+            .user = &g_shared_data,
+            .func = &g_vfs_install,
+        });
+    }
+
+    if (app->m_ftp_show_games.Get()) {
+        g_custom_vfs.push_back({
+            .name = "games",
+            .user = NULL,
+            .func = &g_vfs_stdio,
+        });
+    }
+
+    if (app->m_ftp_show_mounts.Get()) {
+        g_custom_vfs.push_back({
+            .name = "mounts",
+            .user = NULL,
+            .func = &g_vfs_stdio,
+        });
+    }
+
+    g_ftpsrv_config.timeout = 0;
+
+    if (!g_ftpsrv_config.port) {
+        g_ftpsrv_config.port = 5000;
+        log_write("[FTP] no port config, defaulting to 5000\n");
+    }
+
+    // keep compat with older sphaira
+    if (!std::strlen(g_ftpsrv_config.user) && !std::strlen(g_ftpsrv_config.pass)) {
+        g_ftpsrv_config.anon = true;
+        log_write("[FTP] no user pass, defaulting to anon\n");
+    }
 
     Result rc;
     if (R_FAILED(rc = utils::CreateThread(&g_thread, loop, nullptr))) {
@@ -602,7 +617,9 @@ void Exit() {
     threadWaitForExit(&g_thread);
     threadClose(&g_thread);
 
-    memset(&g_ftpsrv_config, 0, sizeof(g_ftpsrv_config));
+    std::memset(&g_ftpsrv_config, 0, sizeof(g_ftpsrv_config));
+    g_custom_vfs.clear();
+    g_ftpsrv_mount_flags = 0;
 
     log_write("[FTP] exitied\n");
 }

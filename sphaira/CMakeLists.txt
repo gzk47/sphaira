@@ -341,7 +341,7 @@ endif()
 if (ENABLE_FTPSRV)
     FetchContent_Declare(ftpsrv
         GIT_REPOSITORY https://github.com/ITotalJustice/ftpsrv.git
-        GIT_TAG a7c2283
+        GIT_TAG 7770dab
         SOURCE_SUBDIR NONE
     )
 
@@ -358,7 +358,7 @@ if (ENABLE_FTPSRV)
         USE_VFS_STORAGE=$<BOOL:TRUE>
         # disabled as it may conflict with the gamecard menu.
         USE_VFS_GC=$<BOOL:FALSE>
-        USE_VFS_USBHSFS=$<BOOL:${ENABLE_LIBUSBHSFS}>
+        USE_VFS_USBHSFS=$<BOOL:FALSE>
         VFS_NX_BUFFER_IO=$<BOOL:TRUE>
         # let sphaira handle init / closing of the hdd.
         USE_VFS_USBHSFS_INIT=$<BOOL:FALSE>
@@ -378,14 +378,7 @@ if (ENABLE_FTPSRV)
         ${ftpsrv_SOURCE_DIR}/src/platform/nx/utils.c
     )
 
-    if (ENABLE_LIBUSBHSFS)
-        target_sources(ftpsrv_helper PRIVATE
-            ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_stdio.c
-            ${ftpsrv_SOURCE_DIR}/src/platform/nx/vfs/vfs_nx_hdd.c
-        )
-    endif()
-
-    target_link_libraries(ftpsrv_helper PUBLIC ftpsrv libusbhsfs)
+    target_link_libraries(ftpsrv_helper PUBLIC ftpsrv)
     target_include_directories(ftpsrv_helper PUBLIC ${ftpsrv_SOURCE_DIR}/src/platform)
 
     target_compile_definitions(sphaira PRIVATE ENABLE_FTPSRV)

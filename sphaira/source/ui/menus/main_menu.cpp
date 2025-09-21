@@ -337,15 +337,19 @@ MainMenu::MainMenu() {
                     });
                 }
 
-                options->Add<SidebarEntryBool>("FTP"_i18n, App::GetFtpEnable(), [](bool& enable){
-                    App::SetFtpEnable(enable);
-                },  "Enable FTP server to run in the background.\n\n"
-                    "The default port is 5000 with no user/pass set. "
-                    "You can change this behaviour in /config/ftpsrv/config.ini"_i18n);
+                options->Add<SidebarEntryCallback>("FTP"_i18n, [](){ App::DisplayFtpOptions(); },
+                    "Enable / modify the FTP server settings such as port, user/pass and the folders that are shown.\n\n"
+                    "NOTE: Changing any of the options will automatically restart the FTP server when exiting the options menu."_i18n
+                );
 
-                options->Add<SidebarEntryBool>("MTP"_i18n, App::GetMtpEnable(), [](bool& enable){
-                    App::SetMtpEnable(enable);
-                },  "Enable MTP server to run in the background."_i18n);
+                options->Add<SidebarEntryCallback>("MTP"_i18n, [](){ App::DisplayMtpOptions(); },
+                    "Enable / modify the MTP responder settings such as the folders that are shown.\n\n"
+                    "NOTE: Changing any of the options will automatically restart the MTP server when exiting the options menu."_i18n
+                );
+
+                options->Add<SidebarEntryCallback>("HDD"_i18n, [](){
+                    App::DisplayHddOptions();
+                },  "Enable / modify the HDD mount options."_i18n);
 
                 options->Add<SidebarEntryBool>("NXlink"_i18n, App::GetNxlinkEnable(), [](bool& enable){
                     App::SetNxlinkEnable(enable);
@@ -353,14 +357,6 @@ MainMenu::MainMenu() {
                     "NXlink is used to send .nro's from PC to the switch\n\n"
                     "If you are not a developer, you can disable this option."_i18n);
 
-                options->Add<SidebarEntryBool>("HDD"_i18n, App::GetHddEnable(), [](bool& enable){
-                    App::SetHddEnable(enable);
-                },  "Enable mounting of connected USB/HDD devices. "
-                    "Connected devices can be used in the FileBrowser, as well as a backup location when dumping games and saves."_i18n);
-
-                options->Add<SidebarEntryBool>("HDD write protect"_i18n, App::GetWriteProtect(), [](bool& enable){
-                    App::SetWriteProtect(enable);
-                },  "Makes the connected HDD read-only."_i18n);
             }, "Toggle FTP, MTP, HDD and NXlink\n\n"
                "If Sphaira has a update available, you can download it from this menu"_i18n);
 

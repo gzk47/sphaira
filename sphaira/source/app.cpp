@@ -1549,9 +1549,37 @@ App::App(const char* argv0) {
             else if (app->m_nsz_compress_ldm.LoadFrom(Key, Value)) {}
             else if (app->m_nsz_compress_block.LoadFrom(Key, Value)) {}
             else if (app->m_nsz_compress_block_exponent.LoadFrom(Key, Value)) {}
+        } else if (!std::strcmp(Section, "ftp")) {
+            if (app->m_ftp_port.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_anon.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_user.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_pass.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_show_album.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_show_ams_contents.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_show_bis_storage.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_show_bis_fs.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_show_content_system.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_show_content_user.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_show_content_sd.LoadFrom(Key, Value)) {}
+            // else if (app->m_ftp_show_content_sd0.LoadFrom(Key, Value)) {}
+            // else if (app->m_ftp_show_custom_system.LoadFrom(Key, Value)) {}
+            // else if (app->m_ftp_show_custom_sd.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_show_games.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_show_install.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_show_mounts.LoadFrom(Key, Value)) {}
+            else if (app->m_ftp_show_switch.LoadFrom(Key, Value)) {}
         } else if (!std::strcmp(Section, "mtp")) {
             if (app->m_mtp_vid.LoadFrom(Key, Value)) {}
             else if (app->m_mtp_pid.LoadFrom(Key, Value)) {}
+            else if (app->m_mtp_allocate_file.LoadFrom(Key, Value)) {}
+            else if (app->m_mtp_show_album.LoadFrom(Key, Value)) {}
+            else if (app->m_mtp_show_content_sd.LoadFrom(Key, Value)) {}
+            else if (app->m_mtp_show_content_system.LoadFrom(Key, Value)) {}
+            else if (app->m_mtp_show_content_user.LoadFrom(Key, Value)) {}
+            else if (app->m_mtp_show_games.LoadFrom(Key, Value)) {}
+            else if (app->m_mtp_show_install.LoadFrom(Key, Value)) {}
+            else if (app->m_mtp_show_mounts.LoadFrom(Key, Value)) {}
+            else if (app->m_mtp_show_speedtest.LoadFrom(Key, Value)) {}
         }
 
         return 1;
@@ -2269,6 +2297,236 @@ void App::DisplayDumpOptions(bool left_side) {
         "Sets the size of each block. The smaller the size, the faster the random access is at the cost of compression ratio."_i18n
     );
     block_size_option->Depends(App::GetApp()->m_nsz_compress_block, "NSZ block compression is disabled."_i18n);
+}
+
+void App::DisplayFtpOptions(bool left_side) {
+    // todo: prompt on exit to restart ftp server if options were changed.
+    auto options = std::make_unique<ui::Sidebar>("FTP Options"_i18n, left_side ? ui::Sidebar::Side::LEFT : ui::Sidebar::Side::RIGHT);
+    ON_SCOPE_EXIT(App::Push(std::move(options)));
+
+    options->SetOnExitWhenChanged([](){
+        if (App::GetFtpEnable()) {
+            App::Notify("Restarting FTP server..."_i18n);
+            App::SetFtpEnable(false);
+            App::SetFtpEnable(true);
+        }
+    });
+
+    options->Add<ui::SidebarEntryBool>("Enable"_i18n, App::GetFtpEnable(), [](bool& enable){
+        App::SetFtpEnable(enable);
+    },  "Enable FTP server to run in the background."_i18n);
+
+    options->Add<ui::SidebarEntryTextInput>(
+        "Port", App::GetApp()->m_ftp_port.Get(), "Port number", 1, 5,
+        "Opens the FTP server on this port."_i18n,
+        [](auto* input){
+            App::GetApp()->m_ftp_port.Set(input->GetNumValue());
+        }
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Anon"_i18n, App::GetApp()->m_ftp_anon,
+        "Allows you to login without setting a username and password.\n"
+        "If disabled, you must set a user name and password below!"_i18n
+    );
+
+    options->Add<ui::SidebarEntryTextInput>(
+        "User", App::GetApp()->m_ftp_user.Get(), "Username", -1, 64,
+        "Sets the username, must be set if anon is disabled."_i18n,
+        [](auto* input){
+            App::GetApp()->m_ftp_user.Set(input->GetValue());
+        }
+    );
+
+    options->Add<ui::SidebarEntryTextInput>(
+        "Pass", App::GetApp()->m_ftp_pass.Get(), "Password", -1, 64,
+        "Sets the password, must be set if anon is disabled."_i18n,
+        [](auto* input){
+            App::GetApp()->m_ftp_pass.Set(input->GetValue());
+        }
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show album"_i18n, App::GetApp()->m_ftp_show_album,
+        "Shows the microSD card album folder."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show Atmosphere contents"_i18n, App::GetApp()->m_ftp_show_ams_contents,
+        "Shows the shortcut for the /atmosphere/contents folder."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show bis storage"_i18n, App::GetApp()->m_ftp_show_bis_storage,
+        "Shows the bis folder which contains the following:\n"
+        "- BootPartition1Root.bin\n"
+        "- BootPartition2Root.bin\n"
+        "- UserDataRoot.bin\n"
+        "- BootConfigAndPackage2Part1.bin\n"
+        "- BootConfigAndPackage2Part2.bin\n"
+        "- BootConfigAndPackage2Part3.bin\n"
+        "- BootConfigAndPackage2Part4.bin\n"
+        "- BootConfigAndPackage2Part5.bin\n"
+        "- BootConfigAndPackage2Part6.bin\n"
+        "- CalibrationFile.bin\n"
+        "- SafeMode.bin\n"
+        "- User.bin\n"
+        "- System.bin\n"
+        "- SystemProperEncryption.bin"_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show bis file systems"_i18n, App::GetApp()->m_ftp_show_bis_fs,
+        "Shows the following bis file systems:\n"
+        "- bis_calibration_file\n"
+        "- bis_safe_mode\n"
+        "- bis_user\n"
+        "- bis_system"_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show system contents"_i18n, App::GetApp()->m_ftp_show_content_system,
+        "Shows the system contents folder."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show user contents"_i18n, App::GetApp()->m_ftp_show_content_user,
+        "Shows the user contents folder."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show microSD contents"_i18n, App::GetApp()->m_ftp_show_content_sd,
+        "Shows the microSD contents folder.\n\n"
+        "NOTE: This is not the normal microSD card storage, it is instead "
+        "the location where NCA's are stored. The normal microSD card is always mounted."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show games"_i18n, App::GetApp()->m_ftp_show_games,
+        "Shows the games folder.\n\n"
+        "This folder contains all of your installed games, allowing you to create "
+        "backups over FTP!\n\n"
+        "NOTE: This folder is read-only. You cannot delete games over FTP."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show install"_i18n, App::GetApp()->m_ftp_show_install,
+        "Shows the install folder.\n\n"
+        "This folder is used for installing games via FTP.\n\n"
+        "NOTE: You must open the \"FTP Install\" menu when trying to install a game!"_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show mounts"_i18n, App::GetApp()->m_ftp_show_mounts,
+        "Shows the mounts folder.\n\n"
+        "This folder is contains all of the mounts added to Sphaira, allowing you to acces them over FTP!\n"
+        "For example, you can access your SMB, WebDav or other FTP mounts over FTP."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show switch"_i18n, App::GetApp()->m_ftp_show_switch,
+        "Shows the shortcut for the /switch folder."
+        "This is the folder that contains all your homebrew (NRO's)."_i18n
+    );
+}
+
+void App::DisplayMtpOptions(bool left_side) {
+    // todo: prompt on exit to restart ftp server if options were changed.
+    auto options = std::make_unique<ui::Sidebar>("MTP Options"_i18n, left_side ? ui::Sidebar::Side::LEFT : ui::Sidebar::Side::RIGHT);
+    ON_SCOPE_EXIT(App::Push(std::move(options)));
+
+    options->SetOnExitWhenChanged([](){
+        if (App::GetMtpEnable()) {
+            App::Notify("Restarting MTP server..."_i18n);
+            App::SetMtpEnable(false);
+            App::SetMtpEnable(true);
+        }
+    });
+
+    options->Add<ui::SidebarEntryBool>("Enable"_i18n, App::GetMtpEnable(), [](bool& enable){
+        App::SetMtpEnable(enable);
+    },  "Enable MTP server to run in the background."_i18n);
+
+    // not sure if i want to expose this to users yet.
+    // its also stubbed currently.
+    #if 0
+    options->Add<ui::SidebarEntryBool>(
+        "Pre-allocate file"_i18n, App::GetApp()->m_mtp_allocate_file,
+        "Enables pre-allocating the file size before writing.\n"
+        "This speeds up file writes, however, this can cause timeouts if all these conditions are met:\n"
+        "- using Windows\n"
+        "- using emuMMC\n"
+        "- transferring a large file (>1GB)\n\n"
+        "This option should be left enabled, however if you use the above and experience timeouts, "
+        "then try again with this option disabled."_i18n
+    );
+    #endif
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show album"_i18n, App::GetApp()->m_mtp_show_album,
+        "Shows the microSD card album folder."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show microSD contents"_i18n, App::GetApp()->m_mtp_show_content_sd,
+        "Shows the microSD contents folder.\n\n"
+        "NOTE: This is not the normal microSD card storage, it is instead "
+        "the location where NCA's are stored. The normal microSD card is always mounted."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show system contents"_i18n, App::GetApp()->m_mtp_show_content_system,
+        "Shows the system contents folder."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show user contents"_i18n, App::GetApp()->m_mtp_show_content_user,
+        "Shows the user contents folder."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show games"_i18n, App::GetApp()->m_mtp_show_games,
+        "Shows the games folder.\n\n"
+        "This folder contains all of your installed games, allowing you to create "
+        "backups over MTP!\n\n"
+        "NOTE: This folder is read-only. You cannot delete games over MTP."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show install"_i18n, App::GetApp()->m_mtp_show_install,
+        "Shows the install folder.\n\n"
+        "This folder is used for installing games via MTP.\n\n"
+        "NOTE: You must open the \"MTP Install\" menu when trying to install a game!"_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show mounts"_i18n, App::GetApp()->m_mtp_show_mounts,
+        "Shows the mounts folder.\n\n"
+        "This folder is contains all of the mounts added to Sphaira, allowing you to acces them over MTP!\n"
+        "For example, you can access your SMB, WebDav and FTP mounts over MTP."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>(
+        "Show DevNull"_i18n, App::GetApp()->m_mtp_show_speedtest,
+        "Shows the DevNull (Speed Test) folder.\n\n"
+        "This folder is used for benchmarking USB uploads. "
+        "This ia virtual folder, nothing is actally written to disk."_i18n
+    );
+}
+
+void App::DisplayHddOptions(bool left_side) {
+    auto options = std::make_unique<ui::Sidebar>("HDD Options"_i18n, left_side ? ui::Sidebar::Side::LEFT : ui::Sidebar::Side::RIGHT);
+    ON_SCOPE_EXIT(App::Push(std::move(options)));
+
+    options->Add<ui::SidebarEntryBool>("Enable"_i18n, App::GetHddEnable(), [](bool& enable){
+        App::SetHddEnable(enable);
+    },  "Enable mounting of connected USB/HDD devices. "
+        "Connected devices can be used in the FileBrowser, as well as a backup location when dumping games and saves."_i18n
+    );
+
+    options->Add<ui::SidebarEntryBool>("HDD write protect"_i18n, App::GetWriteProtect(), [](bool& enable){
+        App::SetWriteProtect(enable);
+    },  "Makes the connected HDD read-only."_i18n);
 }
 
 void App::ShowEnableInstallPrompt() {
