@@ -39,11 +39,11 @@ Mutex g_mutex{};
 
 void ftp_log_callback(enum FTP_API_LOG_TYPE type, const char* msg) {
     log_write("[FTPSRV] %s\n", msg);
-    sphaira::App::NotifyFlashLed();
+    App::NotifyFlashLed();
 }
 
 void ftp_progress_callback(void) {
-    sphaira::App::NotifyFlashLed();
+    App::NotifyFlashLed();
 }
 
 InstallSharedData g_shared_data{};
@@ -389,6 +389,17 @@ const char* vfs_stdio_readdir(void* user, void* user_entry) {
 }
 
 int vfs_stdio_dirlstat(void* user, const void* user_entry, const char* _path, struct stat* st) {
+    // could probably be optimised to th below, but we won't know its r/w perms.
+    #if 0
+    auto entry = static_cast<FtpVfsDirEntry*>(user_entry);
+    if (entry->buf->d_type == DT_DIR) {
+        st->st_mode = S_IFDIR | S_IRUSR | S_IRGRP | S_IROTH;
+        st->st_nlink = 1;
+        return 0;
+    }
+    #else
+    #endif
+
     const auto path = vfs_stdio_fix_path(_path);
     return lstat(path, st);
 }
@@ -513,6 +524,11 @@ void loop(void* arg) {
                 .func = &g_vfs_stdio,
             },
             {
+                .name = "mounts",
+                .user = NULL,
+                .func = &g_vfs_stdio,
+            },
+            {
                 .name = "install",
                 .user = NULL,
                 .func = &g_vfs_install,
@@ -559,7 +575,7 @@ bool Init() {
     // or load everything in the init thread.
 
     Result rc;
-    if (R_FAILED(rc = utils::CreateThread(&g_thread, loop, nullptr, 1024*16))) {
+    if (R_FAILED(rc = utils::CreateThread(&g_thread, loop, nullptr))) {
         log_write("[FTP] failed to create nxlink thread: 0x%X\n", rc);
         return false;
     }

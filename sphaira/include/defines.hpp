@@ -882,9 +882,52 @@ private:
     Mutex* const m_mutex;
 };
 
+struct ScopedRMutex {
+    ScopedRMutex(RMutex* _mutex) : mutex{_mutex} {
+        rmutexLock(mutex);
+    }
+
+    ~ScopedRMutex() {
+        rmutexUnlock(mutex);
+    }
+
+    ScopedRMutex(const ScopedRMutex&) = delete;
+    void operator=(const ScopedRMutex&) = delete;
+
+private:
+    RMutex* const mutex;
+};
+
+struct ScopedRwLock {
+    ScopedRwLock(RwLock* _lock, bool _write) : lock{_lock}, write{_write} {
+        if (write) {
+            rwlockWriteLock(lock);
+        } else {
+            rwlockReadLock(lock);
+        }
+    }
+
+    ~ScopedRwLock() {
+        if (write) {
+            rwlockWriteUnlock(lock);
+        } else {
+            rwlockReadUnlock(lock);
+        }
+    }
+
+    ScopedRwLock(const ScopedRwLock&) = delete;
+    void operator=(const ScopedRwLock&) = delete;
+
+private:
+    RwLock* const lock;
+    bool const write;
+};
+
 // #define ON_SCOPE_EXIT(_f) std::experimental::scope_exit ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){[&] { _f; }};
 #define ON_SCOPE_EXIT(_f) ScopeGuard ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){[&] { _f; }};
 #define SCOPED_MUTEX(_m) ScopedMutex ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){_m}
+#define SCOPED_RMUTEX(_m) ScopedRMutex ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){_m}
+#define SCOPED_RWLOCK(_m, _write) ScopedRwLock ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){_m, _write}
 
 // #define ON_SCOPE_FAIL(_f) std::experimental::scope_exit ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){[&] { if (R_FAILED(rc)) { _f; } }};
 // #define ON_SCOPE_SUCCESS(_f) std::experimental::scope_exit ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){[&] { if (R_SUCCEEDED(rc)) { _f; } }};

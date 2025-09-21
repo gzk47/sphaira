@@ -234,6 +234,12 @@ Result CreateSave(u64 app_id, AccountUid uid) {
 } // namespace
 
 Result NspEntry::Read(void* buf, s64 off, s64 size, u64* bytes_read) {
+    if (off == nsp_size) {
+        log_write("[NspEntry::Read] read at eof...\n");
+        *bytes_read = 0;
+        R_SUCCEED();
+    }
+
     if (off < nsp_data.size()) {
         *bytes_read = size = ClipSize(off, size, nsp_data.size());
         std::memcpy(buf, nsp_data.data() + off, size);

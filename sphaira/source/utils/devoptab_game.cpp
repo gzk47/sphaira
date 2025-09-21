@@ -299,9 +299,13 @@ ssize_t Device::devoptab_read(void *fd, char *ptr, size_t len) {
 
     const auto& nsp = file->nsp;
     len = std::min<u64>(len, nsp->nsp_size - file->off);
+    if (!len) {
+        return 0;
+    }
 
     u64 bytes_read;
     if (R_FAILED(nsp->Read(ptr, file->off, len, &bytes_read))) {
+        log_write("[GAME] failed to read from nsp %s off: %zu len: %zu size: %zu\n", nsp->path.s, file->off, len, nsp->nsp_size);
         return -EIO;
     }
 
@@ -398,28 +402,32 @@ int Device::devoptab_dirnext(void* fd, char *filename, struct stat *filestat) {
         filestat->st_nlink = 1;
         filestat->st_mode = S_IFDIR | S_IRUSR | S_IRGRP | S_IROTH;
         std::strcpy(filename, entry.name.c_str());
+        dir->index++;
     } else {
         auto& entry = dir->entry;
-        if (dir->index >= entry->contents.size()) {
-            log_write("[GAME] dirnext: no more entries\n");
-            return -ENOENT;
-        }
-
-        const auto& content = entry->contents[dir->index];
-        if (!content.nsp) {
-            if (!FindNspFromEntry(*entry, content.status.application_id)) {
-                log_write("[GAME] failed to find nsp for content id: %016lx\n", content.status.application_id);
+        do {
+            if (dir->index >= entry->contents.size()) {
+                log_write("[GAME] dirnext: no more entries\n");
                 return -ENOENT;
             }
-        }
 
-        filestat->st_nlink = 1;
-        filestat->st_size = content.nsp->nsp_size;
-        filestat->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
-        std::snprintf(filename, NAME_MAX, "%s", content.nsp->path.s);
+            const auto& content = entry->contents[dir->index];
+            if (!content.nsp) {
+                if (!FindNspFromEntry(*entry, content.status.application_id)) {
+                    log_write("[GAME] failed to find nsp for content id: %016lx\n", content.status.application_id);
+                    continue;
+                }
+            }
+
+            filestat->st_nlink = 1;
+            filestat->st_size = content.nsp->nsp_size;
+            filestat->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
+            std::snprintf(filename, NAME_MAX, "%s", content.nsp->path.s);
+            dir->index++;
+            break;
+        } while (dir->index++);
     }
 
-    dir->index++;
     return 0;
 }
 

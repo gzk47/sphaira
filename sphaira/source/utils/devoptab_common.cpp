@@ -47,30 +47,6 @@ const char* curl_url_strerror_wrap(CURLUcode code) {
     }
 }
 
-struct ScopedRwLock {
-    ScopedRwLock(RwLock* _lock, bool _write) : lock{_lock}, write{_write} {
-        if (write) {
-            rwlockWriteLock(lock);
-        } else {
-            rwlockReadLock(lock);
-        }
-    }
-
-    ~ScopedRwLock() {
-        if (write) {
-            rwlockWriteUnlock(lock);
-        } else {
-            rwlockReadUnlock(lock);
-        }
-    }
-
-private:
-    RwLock* const lock;
-    bool const write;
-};
-
-#define SCOPED_RWLOCK(_m, _write) ScopedRwLock ANONYMOUS_VARIABLE(SCOPE_EXIT_STATE_){_m, _write}
-
 struct Device {
     std::unique_ptr<MountDevice> mount_device;
     size_t file_size;
@@ -408,6 +384,14 @@ int devoptab_lstat(struct _reent *r, const char *_path, struct stat *st) {
     SCOPED_RWLOCK(&g_rwlock, false);
     SCOPED_MUTEX(&device->mutex);
 
+    // special case: root of the device.
+    const auto dilem = std::strchr(_path, ':');
+    if (dilem && (dilem > _path) && (dilem[1] == '\0' || (dilem[1] == '/' && dilem[2] == '\0'))) {
+        st->st_mode = S_IFDIR | S_IRUSR | S_IRGRP | S_IROTH;
+        st->st_nlink = 1;
+        return r->_errno = 0;
+    }
+
     char path[PATH_MAX]{};
     if (!device->mount_device->fix_path(_path, path)) {
         return set_errno(r, ENOENT);
@@ -494,7 +478,7 @@ int devoptab_utimes(struct _reent *r, const char *_path, const struct timeval ti
     SCOPED_MUTEX(&device->mutex);
 
     if (!times) {
-        log_write("[NFS] devoptab_utimes() times is null\n");
+        log_write("[DEVOPTAB] devoptab_utimes() times is null\n");
         return set_errno(r, EINVAL);
     }
 

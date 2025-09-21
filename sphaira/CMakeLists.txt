@@ -133,6 +133,7 @@ add_executable(sphaira
     source/utils/devoptab_vfs.cpp
     source/utils/devoptab_fatfs.cpp
     source/utils/devoptab_game.cpp
+    source/utils/devoptab_mounts.cpp
     source/utils/devoptab.cpp
 
     source/usb/base.cpp
@@ -399,7 +400,7 @@ endif()
 if (ENABLE_LIBHAZE)
     FetchContent_Declare(libhaze
         GIT_REPOSITORY https://github.com/ITotalJustice/libhaze.git
-        GIT_TAG 6e24502
+        GIT_TAG 81154c1
     )
 
     FetchContent_MakeAvailable(libhaze)

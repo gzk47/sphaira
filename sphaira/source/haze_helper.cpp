@@ -65,11 +65,6 @@ struct FsProxyBase : haze::FileSystemProxyImpl {
         fs::FsPath buf;
         const auto len = std::strlen(GetName());
 
-        // if (!base || !base[0]) {
-        //     std::strcpy(buf, path);
-        //     return buf;
-        // }
-
         if (len && !strncasecmp(path, GetName(), len)) {
             std::snprintf(buf, sizeof(buf), "%s/%s", base, path + len);
         } else {
@@ -636,9 +631,9 @@ struct FsInstallProxy final : FsProxyVfs {
 haze::FsEntries g_fs_entries{};
 
 void haze_callback(const haze::CallbackData *data) {
+    #if 0
     auto& e = *data;
 
-    #if 0
     switch (e.type) {
         case haze::CallbackType_OpenSession: log_write("[LIBHAZE] Opening Session\n"); break;
         case haze::CallbackType_CloseSession: log_write("[LIBHAZE] Closing Session\n"); break;
@@ -677,6 +672,7 @@ bool Init() {
     g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeSd>(), "", "microSD card"));
     g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsNativeImage>(FsImageDirectoryId_Sd), "Album", "Album (Image SD)"));
     g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsStdio>(true, "games:/"), "Games", "Games"));
+    g_fs_entries.emplace_back(std::make_shared<FsProxy>(std::make_unique<fs::FsStdio>(true, "mounts:/"), "Mounts", "Mounts"));
     g_fs_entries.emplace_back(std::make_shared<FsDevNullProxy>("DevNull", "DevNull (Speed Test)"));
     g_fs_entries.emplace_back(std::make_shared<FsInstallProxy>("install", "Install (NSP, XCI, NSZ, XCZ)"));
 

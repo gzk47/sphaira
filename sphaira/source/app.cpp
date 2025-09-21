@@ -1732,6 +1732,11 @@ App::App(const char* argv0) {
         }
 
         {
+            SCOPED_TIMESTAMP("mounts init");
+            devoptab::MountInternalMounts();
+        }
+
+        {
             SCOPED_TIMESTAMP("timestamp init");
             // ini_putl(GetExePath(), "timestamp", m_start_timestamp, App::PLAYLOG_PATH);
         }
