@@ -425,7 +425,7 @@ int Device::devoptab_dirnext(void* fd, char *filename, struct stat *filestat) {
             std::snprintf(filename, NAME_MAX, "%s", content.nsp->path.s);
             dir->index++;
             break;
-        } while (dir->index++);
+        } while (++dir->index);
     }
 
     return 0;

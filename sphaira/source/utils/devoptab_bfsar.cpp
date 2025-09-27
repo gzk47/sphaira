@@ -215,7 +215,7 @@ int Device::devoptab_dirnext(void* fd, char *filename, struct stat *filestat) {
         filestat->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
         dir->index++;
         break;
-    } while (dir->index++);
+    } while (++dir->index);
 
     return 0;
 }

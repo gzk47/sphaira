@@ -688,6 +688,20 @@ Result Dir::GetEntryCount(s64* out) {
             if (!std::strcmp(d->d_name, ".") || !std::strcmp(d->d_name, "..")) {
                 continue;
             }
+
+            if (d->d_type == DT_DIR) {
+                if (!(m_mode & FsDirOpenMode_ReadDirs)) {
+                    continue;
+                }
+            } else if (d->d_type == DT_REG) {
+                if (!(m_mode & FsDirOpenMode_ReadFiles)) {
+                    continue;
+                }
+            } else {
+                log_write("[FS] WARNING: unknown type when counting dir: %u\n", d->d_type);
+                continue;
+            }
+
             (*out)++;
         }
 
