@@ -85,7 +85,7 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
     }
 
     MenuBase::Update(controller, touch);
-    m_list->OnUpdate(controller, touch, m_index, m_entries.size(), [this](bool touch, auto i) {
+    m_list->OnUpdate(controller, touch, m_index, m_entries_current.size(), [this](bool touch, auto i) {
         if (touch && m_index == i) {
             FireAction(Button::A);
         } else {
@@ -356,7 +356,7 @@ void Menu::Sort() {
         m_entries_current = m_entries_index[Filter_HideHidden];
     }
 
-    std::sort(m_entries_current.begin(), m_entries_current.end(), sorter);
+    std::ranges::sort(m_entries_current, sorter);
 }
 
 void Menu::SortAndFindLastFile(bool scan) {
@@ -398,6 +398,7 @@ void Menu::FreeEntries() {
     }
 
     m_entries.clear();
+    m_entries_current = {};
     for (auto& e : m_entries_index) {
         e.clear();
     }
