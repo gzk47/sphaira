@@ -1606,6 +1606,7 @@ App::App(const char* argv0) {
             m_fs->CreateDirectory("/config/sphaira/themes");
             m_fs->CreateDirectory("/config/sphaira/github");
             m_fs->CreateDirectory("/config/sphaira/i18n");
+            m_fs->CreateDirectory("/config/sphaira/mount");
         }
 
         {

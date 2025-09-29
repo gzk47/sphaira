@@ -20,6 +20,8 @@
 namespace sphaira::devoptab {
 namespace {
 
+#define MOUNT_PATH "/config/sphaira/mount/"
+
 using namespace sphaira::ui;
 using namespace sphaira::devoptab::common;
 
@@ -56,12 +58,12 @@ using TypeConfigs = std::vector<TypeConfig>;
 
 auto BuildIniPathFromType(DevoptabType type) -> fs::FsPath {
     switch (type) {
-        case DevoptabType::HTTP: return "/config/sphaira/mount/http.ini";
-        case DevoptabType::FTP: return "/config/sphaira/mount/ftp.ini";
-        case DevoptabType::SFTP: return "/config/sphaira/mount/sftp.ini";
-        case DevoptabType::NFS: return "/config/sphaira/mount/nfs.ini";
-        case DevoptabType::SMB: return "/config/sphaira/mount/smb.ini";
-        case DevoptabType::WEBDAV: return "/config/sphaira/mount/webdav.ini";
+        case DevoptabType::HTTP: return MOUNT_PATH "/http.ini";
+        case DevoptabType::FTP: return MOUNT_PATH "/ftp.ini";
+        case DevoptabType::SFTP: return MOUNT_PATH "/sftp.ini";
+        case DevoptabType::NFS: return MOUNT_PATH "/nfs.ini";
+        case DevoptabType::SMB: return MOUNT_PATH "/smb.ini";
+        case DevoptabType::WEBDAV: return MOUNT_PATH "/webdav.ini";
     }
 
     std::unreachable();
@@ -236,6 +238,7 @@ void DevoptabForm::SetupButtons(bool type_change) {
 
         const auto ini_path = BuildIniPathFromType(m_type);
 
+        fs::FsNativeSd().CreateDirectoryRecursively(MOUNT_PATH);
         ini_puts(m_config.name.c_str(), "url", m_config.url.c_str(), ini_path);
         ini_puts(m_config.name.c_str(), "user", m_config.user.c_str(), ini_path);
         ini_puts(m_config.name.c_str(), "pass", m_config.pass.c_str(), ini_path);
