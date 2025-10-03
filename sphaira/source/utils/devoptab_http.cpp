@@ -20,7 +20,9 @@ namespace sphaira::devoptab {
 namespace {
 
 struct DirEntry {
-    std::string name{};
+    // deprecated because the names can be truncated and really set to anything.
+    std::string name_deprecated{};
+    // url decoded href.
     std::string href{};
     bool is_dir{};
 };
@@ -113,14 +115,30 @@ int Device::http_dirlist(const std::string& path, DirEntries& out) {
     // todo: if i ever add an xml parser to sphaira, use that instead.
     // todo: for the above, benchmark the parser to ensure its faster than the my code.
     std::string_view chunk_view{chunk.data(), chunk.size()};
+
+    const auto body_start = chunk_view.find("<body");
+    const auto body_end = chunk_view.rfind("</body>");
     const auto table_start = chunk_view.find("<table");
     const auto table_end = chunk_view.rfind("</table>");
 
+    std::string_view table_view{};
+
+    // try and find the body, if this doesn't exist, fallback it's not a valid html page.
+    if (body_start != std::string_view::npos && body_end != std::string_view::npos && body_end > body_start) {
+        table_view = chunk_view.substr(body_start, body_end - body_start);
+    }
+
+    // try and find the table, massively speeds up parsing if it exists.
+    // todo: this may cause issues with some web servers that don't use a table for listings.
+    // todo: if table fails to fine anything, fallback to body_view.
     if (table_start != std::string_view::npos && table_end != std::string_view::npos && table_end > table_start) {
+        table_view = chunk_view.substr(table_start, table_end - table_start);
+    }
+
+    if (!table_view.empty()) {
         const std::string_view href_tag_start = "<a href=\"";
         const std::string_view href_tag_end = "\">";
         const std::string_view anchor_tag_end = "</a>";
-        const auto table_view = chunk_view.substr(table_start, table_end - table_start);
 
         size_t pos = 0;
         out.reserve(10000);
@@ -138,6 +156,11 @@ int Device::http_dirlist(const std::string& path, DirEntries& out) {
                 break; // no more href.
             }
 
+            const auto href_name_end = table_view.find('"', href_begin);
+            if (href_name_end == std::string_view::npos || href_name_end < href_begin || href_name_end > href_end) {
+                break; // invalid href.
+            }
+
             const auto name_begin = href_end + href_tag_end.length();
             const auto name_end = table_view.find(anchor_tag_end, name_begin);
             if (name_end == std::string_view::npos) {
@@ -145,7 +168,7 @@ int Device::http_dirlist(const std::string& path, DirEntries& out) {
             }
 
             pos = name_end + anchor_tag_end.length();
-            const auto href = url_decode(std::string{table_view.substr(href_begin, href_end - href_begin)});
+            auto href = url_decode(std::string{table_view.substr(href_begin, href_name_end - href_begin)});
             auto name = url_decode(std::string{table_view.substr(name_begin, name_end - name_begin)});
 
             // skip empty names/links, root dir entry and links that are not actual files/dirs (e.g. sorting/filter controls).
@@ -158,9 +181,9 @@ int Device::http_dirlist(const std::string& path, DirEntries& out) {
                 continue;
             }
 
-            const auto is_dir = name.ends_with('/');
+            const auto is_dir = href.ends_with('/');
             if (is_dir) {
-                name.pop_back(); // remove the trailing '/'
+                href.pop_back(); // remove the trailing '/'
             }
 
             out.emplace_back(name, href, is_dir);
@@ -375,8 +398,10 @@ int Device::devoptab_dirnext(void* fd, char *filename, struct stat *filestat) {
         filestat->st_mode = S_IFREG | S_IRUSR | S_IRGRP | S_IROTH;
     }
 
+    // <a href="Compass_2.0.7.1-Release_ScVi3.0.1-Standalone-21-2-0-7-1-1729820977.zip">Compass_2.0.7.1-Release_ScVi3.0.1-Standalone-21..&gt;</a>
     filestat->st_nlink = 1;
-    std::strcpy(filename, entry.name.c_str());
+    // std::strcpy(filename, entry.name.c_str());
+    std::strcpy(filename, entry.href.c_str());
 
     dir->index++;
     return 0;

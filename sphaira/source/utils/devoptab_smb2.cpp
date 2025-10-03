@@ -123,7 +123,13 @@ bool Device::Mount() {
         }
     }
 
-    auto smb2_url = smb2_parse_url(this->smb2, this->config.url.c_str());
+    // due to a bug in old sphira, i incorrectly prepended the url with smb:// rather than smb2://
+    auto url = this->config.url;
+    if (!url.ends_with('/')) {
+        url += '/';
+    }
+
+    auto smb2_url = smb2_parse_url(this->smb2, url.c_str());
     if (!smb2_url) {
         log_write("[SMB2] smb2_parse_url() failed: %s\n", smb2_get_error(this->smb2));
         return false;

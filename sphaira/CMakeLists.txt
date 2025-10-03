@@ -341,7 +341,7 @@ endif()
 if (ENABLE_FTPSRV)
     FetchContent_Declare(ftpsrv
         GIT_REPOSITORY https://github.com/ITotalJustice/ftpsrv.git
-        GIT_TAG 7770dab
+        GIT_TAG 7c82402
         SOURCE_SUBDIR NONE
     )
 

@@ -224,8 +224,10 @@ void DevoptabForm::SetupButtons(bool type_change) {
         "Hide the mount from being visible as a export option for games and saves."_i18n
     );
 
-    // set default scheme if needed.
-    UpdateSchemeURL();
+    // set default scheme when creating a new entry.
+    if (type_change) {
+        UpdateSchemeURL();
+    }
 
     const auto callback = this->Add<SidebarEntryCallback>("Save", [this](){
         m_config.name = m_name->GetValue();
