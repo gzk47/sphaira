@@ -26,7 +26,7 @@ option(ENABLE_DEVOPTAB_WEBDAV "" ON)
 # max speed is 8MiB/s, which is fine for wifi, but awful for ethernet.
 # other clients get 36-40MiB/s.
 # it also adds 230k to binary size, and i don't think anyone will use it.
-option(ENABLE_DEVOPTAB_SFTP "" ON)
+option(ENABLE_DEVOPTAB_SFTP "" OFF)
 
 set(sphaira_VERSION 0.13.3)
 

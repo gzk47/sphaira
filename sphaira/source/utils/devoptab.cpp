@@ -25,10 +25,13 @@ namespace {
 using namespace sphaira::ui;
 using namespace sphaira::devoptab::common;
 
+// todo: support for disabling some / all mounts.
 enum class DevoptabType {
     HTTP,
     FTP,
+#ifdef ENABLE_DEVOPTAB_SFTP
     SFTP,
+#endif
     NFS,
     SMB,
     WEBDAV,
@@ -44,7 +47,9 @@ struct TypeEntry {
 const TypeEntry TYPE_ENTRIES[] = {
     {"HTTP", "http://", 80, DevoptabType::HTTP},
     {"FTP", "ftp://", 21, DevoptabType::FTP},
+#ifdef ENABLE_DEVOPTAB_SFTP
     {"SFTP", "sftp://", 22, DevoptabType::SFTP},
+#endif
     {"NFS", "nfs://", 2049, DevoptabType::NFS},
     {"SMB", "smb://", 445, DevoptabType::SMB},
     {"WEBDAV", "webdav://", 80, DevoptabType::WEBDAV},
@@ -60,7 +65,9 @@ auto BuildIniPathFromType(DevoptabType type) -> fs::FsPath {
     switch (type) {
         case DevoptabType::HTTP: return MOUNT_PATH "/http.ini";
         case DevoptabType::FTP: return MOUNT_PATH "/ftp.ini";
+#ifdef ENABLE_DEVOPTAB_SFTP
         case DevoptabType::SFTP: return MOUNT_PATH "/sftp.ini";
+#endif
         case DevoptabType::NFS: return MOUNT_PATH "/nfs.ini";
         case DevoptabType::SMB: return MOUNT_PATH "/smb.ini";
         case DevoptabType::WEBDAV: return MOUNT_PATH "/webdav.ini";
