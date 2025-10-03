@@ -1506,6 +1506,7 @@ App::App(const char* argv0) {
             else if (app->m_theme_music.LoadFrom(Key, Value)) {}
             else if (app->m_show_ip_addr.LoadFrom(Key, Value)) {}
             else if (app->m_language.LoadFrom(Key, Value)) {}
+            else if (app->m_center_menu.LoadFrom(Key, Value)) {}
             else if (app->m_left_menu.LoadFrom(Key, Value)) {}
             else if (app->m_right_menu.LoadFrom(Key, Value)) {}
             else if (app->m_install_sysmmc.LoadFrom(Key, Value)) {}
@@ -1989,7 +1990,9 @@ void App::DisplayMenuOptions(bool left_side) {
     ON_SCOPE_EXIT(App::Push(std::move(options)));
 
     for (auto& e : ui::menu::main::GetMenuMenuEntries()) {
-        if (e.name == g_app->m_left_menu.Get()) {
+        if (e.name == g_app->m_center_menu.Get()) {
+            continue;
+        } else if (e.name == g_app->m_left_menu.Get()) {
             continue;
         } else if (e.name == g_app->m_right_menu.Get()) {
             continue;
@@ -2078,11 +2081,33 @@ void App::DisplayAdvancedOptions(bool left_side) {
         App::SetTextScrollSpeed(index_out);
     }, App::GetTextScrollSpeed(), "Change how fast the scrolling text updates"_i18n);
 
+    options->Add<ui::SidebarEntryArray>("Set center menu"_i18n, menu_items, [menu_names](s64& index_out){
+        const auto e = menu_names[index_out];
+        if (g_app->m_center_menu.Get() != e) {
+            // swap menus around.
+            if (g_app->m_left_menu.Get() == e) {
+                g_app->m_left_menu.Set(g_app->m_left_menu.Get());
+            } else if (g_app->m_right_menu.Get() == e) {
+                g_app->m_right_menu.Set(g_app->m_left_menu.Get());
+            }
+            g_app->m_center_menu.Set(e);
+
+            App::Push<ui::OptionBox>(
+                "Press OK to restart Sphaira"_i18n, "OK"_i18n, [](auto){
+                    App::ExitRestart();
+                }
+            );
+        }
+    }, i18n::get(g_app->m_center_menu.Get()), "Set the menu that appears on the center tab."_i18n);
+
+
     options->Add<ui::SidebarEntryArray>("Set left-side menu"_i18n, menu_items, [menu_names](s64& index_out){
         const auto e = menu_names[index_out];
         if (g_app->m_left_menu.Get() != e) {
             // swap menus around.
-            if (g_app->m_right_menu.Get() == e) {
+            if (g_app->m_center_menu.Get() == e) {
+                g_app->m_center_menu.Set(g_app->m_left_menu.Get());
+            } else if (g_app->m_right_menu.Get() == e) {
                 g_app->m_right_menu.Set(g_app->m_left_menu.Get());
             }
             g_app->m_left_menu.Set(e);
@@ -2099,7 +2124,9 @@ void App::DisplayAdvancedOptions(bool left_side) {
         const auto e = menu_names[index_out];
         if (g_app->m_right_menu.Get() != e) {
             // swap menus around.
-            if (g_app->m_left_menu.Get() == e) {
+            if (g_app->m_center_menu.Get() == e) {
+                g_app->m_center_menu.Set(g_app->m_right_menu.Get());
+            } else if (g_app->m_left_menu.Get() == e) {
                 g_app->m_left_menu.Set(g_app->m_right_menu.Get());
             }
             g_app->m_right_menu.Set(e);

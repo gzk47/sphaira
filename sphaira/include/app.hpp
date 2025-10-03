@@ -304,6 +304,7 @@ public:
     option::OptionBool m_theme_music{INI_SECTION, "theme_music", true};
     option::OptionBool m_show_ip_addr{INI_SECTION, "show_ip_addr", true};
     option::OptionLong m_language{INI_SECTION, "language", 0}; // auto
+    option::OptionString m_center_menu{INI_SECTION, "center_side_menu", "Homebrew"};
     option::OptionString m_left_menu{INI_SECTION, "left_side_menu", "FileBrowser"};
     option::OptionString m_right_menu{INI_SECTION, "right_side_menu", "Appstore"};
     option::OptionBool m_progress_boost_mode{INI_SECTION, "progress_boost_mode", true};

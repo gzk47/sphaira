@@ -49,6 +49,10 @@ auto MiscMenuFuncGenerator(u32 flags) {
 }
 
 const MiscMenuEntry MISC_MENU_ENTRIES[] = {
+    { .name = "Homebrew", .title = "Homebrew", .func = MiscMenuFuncGenerator<ui::menu::homebrew::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
+        "The homebrew menu.\n\n"
+        "Allows you to launch, delete and mount homebrew!"},
+
     { .name = "Appstore", .title = "Appstore", .func = MiscMenuFuncGenerator<ui::menu::appstore::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
         "Download and update apps.\n\n"
         "Internet connection required." },
@@ -163,8 +167,33 @@ auto InstallUpdate(ProgressBox* pbox, const std::string url, const std::string v
     R_SUCCEED();
 }
 
-auto CreateLeftSideMenu(std::string& name_out) -> std::unique_ptr<MenuBase> {
+auto CreateCenterMenu(std::string& name_out) -> std::unique_ptr<MenuBase> {
+    const auto name = App::GetApp()->m_center_menu.Get();
+
+    for (auto& e : GetMenuMenuEntries()) {
+        if (e.name == name) {
+            name_out = name;
+            return e.func(MenuFlag_Tab);
+        }
+    }
+
+    name_out = "Homebrew";
+    return std::make_unique<ui::menu::homebrew::Menu>(MenuFlag_Tab);
+}
+
+auto CreateLeftSideMenu(std::string_view center_name, std::string& name_out) -> std::unique_ptr<MenuBase> {
     const auto name = App::GetApp()->m_left_menu.Get();
+
+    // handle if the user tries to mount the same menu twice.
+    if (name == center_name) {
+        // check if we can mount the default.
+        if (center_name != "FileBrowser") {
+            return std::make_unique<ui::menu::filebrowser::Menu>(MenuFlag_Tab);
+        } else {
+            // otherwise, fallback to center default.
+            return std::make_unique<ui::menu::homebrew::Menu>(MenuFlag_Tab);
+        }
+    }
 
     for (auto& e : GetMenuMenuEntries()) {
         if (e.name == name) {
@@ -177,6 +206,7 @@ auto CreateLeftSideMenu(std::string& name_out) -> std::unique_ptr<MenuBase> {
     return std::make_unique<ui::menu::filebrowser::Menu>(MenuFlag_Tab);
 }
 
+// todo: handle center / left menu being the same.
 auto CreateRightSideMenu(std::string_view left_name) -> std::unique_ptr<MenuBase> {
     const auto name = App::GetApp()->m_right_menu.Get();
 
@@ -378,11 +408,13 @@ MainMenu::MainMenu() {
         }}
     ));
 
-    m_centre_menu = std::make_unique<homebrew::Menu>();
+    std::string center_name;
+    m_centre_menu = CreateCenterMenu(center_name);
     m_current_menu = m_centre_menu.get();
 
     std::string left_side_name;
-    m_left_menu = CreateLeftSideMenu(left_side_name);
+    m_left_menu = CreateLeftSideMenu(center_name, left_side_name);
+
     m_right_menu = CreateRightSideMenu(left_side_name);
 
     AddOnLRPress();

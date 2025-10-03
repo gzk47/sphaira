@@ -2110,8 +2110,16 @@ void Base::LoadAssocEntriesPath(const fs::FsPath& path) {
         if (!assoc.path.empty()) {
             file_exists = view->m_fs->FileExists(assoc.path);
         } else {
+            auto nros = homebrew::GetNroEntries();
+            if (nros.empty()) {
+                if (m_nro_entries.empty()) {
+                    nro_scan("/switch", m_nro_entries);
+                    nros = m_nro_entries;
+                }
+            }
+
             const auto nro_name = assoc.name + ".nro";
-            for (const auto& nro : homebrew::GetNroEntries()) {
+            for (const auto& nro : nros) {
                 const auto len = std::strlen(nro.path);
                 if (len < nro_name.length()) {
                     continue;

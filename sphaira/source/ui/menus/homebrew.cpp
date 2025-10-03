@@ -55,7 +55,7 @@ auto GetNroEntries() -> std::span<const NroEntry> {
     return g_menu->GetHomebrewList();
 }
 
-Menu::Menu() : grid::Menu{"Homebrew"_i18n, MenuFlag_Tab} {
+Menu::Menu(u32 flags) : grid::Menu{"Homebrew"_i18n, flags} {
     g_menu = this;
 
     this->SetActions(

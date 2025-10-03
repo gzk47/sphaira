@@ -34,7 +34,7 @@ auto GetNroEntries() -> std::span<const NroEntry>;
 void SignalChange();
 
 struct Menu final : grid::Menu {
-    Menu();
+    Menu(u32 flags);
     ~Menu();
 
     auto GetShortTitle() const -> const char* override { return "Apps"; };

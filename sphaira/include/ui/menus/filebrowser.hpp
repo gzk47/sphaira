@@ -7,6 +7,7 @@
 #include "fs.hpp"
 #include "option.hpp"
 #include "hasher.hpp"
+#include "nro.hpp"
 #include <span>
 
 namespace sphaira::ui::menu::filebrowser {
@@ -478,6 +479,15 @@ protected:
     SelectedStash m_selected{};
 
     std::vector<std::string> m_filter{};
+
+    // local copy of nro entries that is loaded in LoadAssocEntriesPath()
+    // if homebrew::GetNroEntries() returns nothing, usually due to
+    // the menu not being loaded.
+    // this is a bit of a hack to support replacing the homebrew menu tab,
+    // sphaira wasn't really designed for this.
+    // however this will work for now, until i add support for additional
+    // nro scan mounts, at which point this won't scale.
+    std::vector<NroEntry> m_nro_entries{};
 
     option::OptionLong m_sort{INI_SECTION, "sort", SortType::SortType_Alphabetical};
     option::OptionLong m_order{INI_SECTION, "order", OrderType::OrderType_Descending};
