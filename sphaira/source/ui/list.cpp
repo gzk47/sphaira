@@ -65,11 +65,7 @@ auto List::ScrollDown(s64& index, s64 step, s64 count) -> bool {
         return false;
     }
 
-    if (index + step < count) {
-        index += step;
-    } else {
-        index = count - 1;
-    }
+    index = std::min(index + step, count - 1);
 
     if (index != old_index) {
         App::PlaySoundEffect(SoundEffect::Scroll);
@@ -103,11 +99,7 @@ auto List::ScrollUp(s64& index, s64 step, s64 count) -> bool {
         return false;
     }
 
-    if (index >= step) {
-        index -= step;
-    } else {
-        index = 0;
-    }
+    index = std::max<s64>(0, index - step);
 
     if (index != old_index) {
         App::PlaySoundEffect(SoundEffect::Scroll);
@@ -169,20 +161,24 @@ void List::OnUpdateGrid(Controller* controller, TouchInfo* touch, s64 index, s64
     const auto page_up_button = GetPageJump() ? (m_row == 1 ? Button::DPAD_LEFT : Button::L2) : (Button::NONE);
     const auto page_down_button = GetPageJump() ? (m_row == 1 ? Button::DPAD_RIGHT : Button::R2) : (Button::NONE);
 
+    const auto hotkey = m_row == 1 ? controller->GotHeld(Button::R2) : false;
+    const auto end_page = INT32_MAX;
+    const auto hot_page = m_page * 4;
+
     if (controller->GotDown(Button::DOWN)) {
-        if (ScrollDown(index, m_row, count)) {
+        if (ScrollDown(index, hotkey ? end_page : m_row, count)) {
             callback(false, index);
         }
     } else if (controller->GotDown(Button::UP)) {
-        if (ScrollUp(index, m_row, count)) {
+        if (ScrollUp(index, hotkey ? end_page : m_row, count)) {
             callback(false, index);
         }
     } else if (controller->GotDown(page_down_button)) {
-        if (ScrollDown(index, m_page, count)) {
+        if (ScrollDown(index, hotkey ? hot_page : m_page, count)) {
             callback(false, index);
         }
     } else if (controller->GotDown(page_up_button)) {
-        if (ScrollUp(index, m_page, count)) {
+        if (ScrollUp(index, hotkey ? hot_page : m_page, count)) {
             callback(false, index);
         }
     } else if (m_row > 1 && controller->GotDown(Button::RIGHT)) {

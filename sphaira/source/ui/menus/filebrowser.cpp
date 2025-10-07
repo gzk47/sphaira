@@ -529,12 +529,31 @@ FsView::~FsView() {
 }
 
 void FsView::Update(Controller* controller, TouchInfo* touch) {
-    m_list->OnUpdate(controller, touch, m_index, m_entries_current.size(), [this](bool touch, auto i) {
+    m_list->OnUpdate(controller, touch, m_index, m_entries_current.size(), [this, controller](bool touch, auto i) {
         if (touch && m_index == i) {
             FireAction(Button::A);
         } else {
             App::PlaySoundEffect(SoundEffect::Focus);
+            auto old_index = m_index;
             SetIndex(i);
+            const auto new_index = m_index;
+
+            // if L2 is helt, select all between old and new index.
+            if (old_index != new_index && controller->GotHeld(Button::L2)) {
+                const auto inc = old_index < new_index ? +1 : -1;
+
+                while (old_index != new_index) {
+                    old_index += inc;
+
+                    auto& e = GetEntry(old_index);
+                    e.selected ^= 1;
+                    if (e.selected) {
+                        m_selected_count++;
+                    } else {
+                        m_selected_count--;
+                    }
+                }
+            }
         }
     });
 }

@@ -474,15 +474,29 @@ struct Controller {
 
     void UpdateButtonHeld(u64 buttons, double delta) {
         if (m_kdown & buttons) {
-            m_step = 50;
+            m_step_max = m_MAX_STEP;
+            m_step = m_INC_STEP;
             m_counter = 0;
+            m_step_max_counter = 0;
         } else if (m_kheld & buttons) {
             m_counter += m_step * delta;
+
+            // if we are at the max, ignore the delta and go as fast as the frame rate.
+            if (m_step_max == m_MAX) {
+                m_counter = m_MAX;
+            }
 
             if (m_counter >= m_MAX) {
                 m_kdown |= m_kheld & buttons;
                 m_counter = 0;
-                m_step = std::min(m_step + 50, m_MAX_STEP);
+                m_step = std::min(m_step + m_INC_STEP, m_step_max);
+
+                // slowly speed up until we reach 1 button down per frame.
+                m_step_max_counter++;
+                if (m_step_max_counter >= 5) {
+                    m_step_max_counter = 0;
+                    m_step_max = std::min(m_step_max + m_INC_STEP, m_MAX);
+                }
             }
         }
     }
@@ -490,8 +504,12 @@ struct Controller {
 private:
     static constexpr double m_MAX = 1000;
     static constexpr double m_MAX_STEP = 250;
-    double m_step = 50;
+    static constexpr double m_INC_STEP = 50;
+
+    double m_step_max = m_MAX_STEP;
+    double m_step = m_INC_STEP;
     double m_counter = 0;
+    int m_step_max_counter = 0;
 };
 
 } // namespace sphaira
