@@ -309,16 +309,17 @@ void SidebarEntryTextBase::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_p
     SidebarEntryBase::DrawEntry(vg, theme, m_title, m_value, true);
 }
 
-SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide, s64 len_min, s64 len_max, const std::string& info, const Callback& callback)
+SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& header, const std::string& guide, s64 len_min, s64 len_max, const std::string& info, const Callback& callback)
 : SidebarEntryTextBase{title, value, {}, info}
-, m_guide{guide}
+, m_header{header.empty() ? title : header}
+, m_guide{guide.empty() ? title : guide}
 , m_len_min{len_min}
 , m_len_max{len_max}
 , m_callback{callback} {
 
     SetCallback([this](){
         std::string out;
-        if (R_SUCCEEDED(swkbd::ShowText(out, m_guide.c_str(), GetValue().c_str(), m_len_min, m_len_max))) {
+        if (R_SUCCEEDED(swkbd::ShowText(out, m_header.c_str(), m_guide.c_str(), GetValue().c_str(), m_len_min, m_len_max))) {
             SetValue(out);
 
             if (m_callback) {
@@ -328,11 +329,11 @@ SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, const std
     });
 }
 
-SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, s64 value, const std::string& guide, s64 len_min, s64 len_max, const std::string& info, const Callback& callback)
-: SidebarEntryTextInput{title, std::to_string(value), guide, len_min, len_max, info, callback} {
+SidebarEntryTextInput::SidebarEntryTextInput(const std::string& title, s64 value, const std::string& header, const std::string& guide, s64 len_min, s64 len_max, const std::string& info, const Callback& callback)
+: SidebarEntryTextInput{title, std::to_string(value), header, guide, len_min, len_max, info, callback} {
     SetCallback([this](){
         s64 out = std::stoul(GetValue());
-        if (R_SUCCEEDED(swkbd::ShowNumPad(out, m_guide.c_str(), GetValue().c_str(), m_len_min, m_len_max))) {
+        if (R_SUCCEEDED(swkbd::ShowNumPad(out, m_header.c_str(), m_guide.c_str(), GetValue().c_str(), m_len_min, m_len_max))) {
             SetValue(std::to_string(out));
 
             if (m_callback) {

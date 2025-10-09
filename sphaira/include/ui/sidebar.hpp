@@ -188,9 +188,9 @@ public:
 
 public:
     // uses normal keyboard.
-    explicit SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& guide = {}, s64 len_min = -1, s64 len_max = PATH_MAX, const std::string& info = "", const Callback& callback = nullptr);
+    explicit SidebarEntryTextInput(const std::string& title, const std::string& value, const std::string& header = {}, const std::string& guide = {}, s64 len_min = -1, s64 len_max = PATH_MAX, const std::string& info = "", const Callback& callback = nullptr);
     // uses numpad.
-    explicit SidebarEntryTextInput(const std::string& title, s64 value, const std::string& guide = {}, s64 len_min = -1, s64 len_max = PATH_MAX, const std::string& info = "", const Callback& callback = nullptr);
+    explicit SidebarEntryTextInput(const std::string& title, s64 value, const std::string& header = {}, const std::string& guide = {}, s64 len_min = -1, s64 len_max = PATH_MAX, const std::string& info = "", const Callback& callback = nullptr);
 
     auto GetNumValue() const -> s64 {
         return std::stoul(GetValue());
@@ -200,6 +200,7 @@ public:
         SetValue(std::to_string(value));
     }
 private:
+    const std::string m_header;
     const std::string m_guide;
     const s64 m_len_min;
     const s64 m_len_max;

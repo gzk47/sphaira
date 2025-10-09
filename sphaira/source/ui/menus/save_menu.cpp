@@ -9,6 +9,7 @@
 #include "threaded_file_transfer.hpp"
 #include "minizip_helper.hpp"
 #include "dumper.hpp"
+#include "swkbd.hpp"
 
 #include "utils/devoptab.hpp"
 
@@ -689,13 +690,38 @@ void Menu::DisplayOptions() {
                 entries.emplace_back(m_entries[m_index]);
             }
 
-            BackupSaves(entries);
-        }, true);
+            BackupSaves(entries, BackupFlag_None);
+        }, true,
+            "Backup the selected save(s) to a location of your choice."_i18n
+        );
+
+        if (!m_selected_count || m_selected_count == 1) {
+            options->Add<SidebarEntryCallback>("Backup to..."_i18n, [this](){
+                std::vector<std::reference_wrapper<Entry>> entries;
+                if (m_selected_count) {
+                    for (auto& e : m_entries) {
+                        if (e.selected) {
+                            entries.emplace_back(e);
+                        }
+                    }
+                } else {
+                    entries.emplace_back(m_entries[m_index]);
+                }
+
+                BackupSaves(entries, BackupFlag_SetName);
+            }, true,
+                "Backup the selected save(s) to a location of your choice, and set the name of the backup."_i18n
+            );
+        }
 
         if (m_entries[m_index].save_data_type == FsSaveDataType_Account || m_entries[m_index].save_data_type == FsSaveDataType_Bcat) {
             options->Add<SidebarEntryCallback>("Restore"_i18n, [this](){
                 RestoreSave();
-            }, true);
+            }, true,
+                "Restore the save for the current title.\n"
+                "if \"Auto backup\" is enabled, the save will first be backed up and then restored. "
+                "Saves that are auto backed up will have \"Auto\" in their name."_i18n
+            );
         }
     }
 
@@ -705,18 +731,21 @@ void Menu::DisplayOptions() {
 
         options->Add<SidebarEntryBool>("Auto backup on restore"_i18n, m_auto_backup_on_restore.Get(), [this](bool& v_out){
             m_auto_backup_on_restore.Set(v_out);
-        });
+        }, "If enabled, when restoring a save, the current save will first be backed up."_i18n);
 
         options->Add<SidebarEntryBool>("Compress backup"_i18n, m_compress_save_backup.Get(), [this](bool& v_out){
             m_compress_save_backup.Set(v_out);
-        });
+        },  "If enabled, backups will be compressed to a zip file.\n\n"
+            "NOTE: Disabling this option does not disable the zip file, it only disables compressing "
+            "the files stored in the zip.\n"
+            "Disabling will result in a much faster backup, at the cost of the file size."_i18n);
     });
 }
 
-void Menu::BackupSaves(std::vector<std::reference_wrapper<Entry>>& entries) {
-    dump::DumpGetLocation("Select backup location"_i18n, dump::DumpLocationFlag_SdCard|dump::DumpLocationFlag_Stdio|dump::DumpLocationFlag_Usb, [this, entries](const dump::DumpLocation& location){
-        App::Push<ProgressBox>(0, "Backup"_i18n, "", [this, entries, location](auto pbox) -> Result {
-            return BackupSaveInternal(pbox, location, entries, m_compress_save_backup.Get());
+void Menu::BackupSaves(std::vector<std::reference_wrapper<Entry>>& entries, u32 flags) {
+    dump::DumpGetLocation("Select backup location"_i18n, dump::DumpLocationFlag_SdCard|dump::DumpLocationFlag_Stdio|dump::DumpLocationFlag_Usb, [this, entries, flags](const dump::DumpLocation& location){
+        App::Push<ProgressBox>(0, "Backup"_i18n, "", [this, entries, location, flags](auto pbox) -> Result {
+            return BackupSaveInternal(pbox, location, entries, flags);
         }, [](Result rc){
             App::PushErrorBox(rc, "Backup failed!"_i18n);
 
@@ -794,7 +823,7 @@ void Menu::RestoreSave() {
 
                                 if (m_auto_backup_on_restore.Get()) {
                                     pbox->SetActionName("Auto backup"_i18n);
-                                    R_TRY(BackupSaveInternal(pbox, location, m_entries[m_index], m_compress_save_backup.Get(), true));
+                                    R_TRY(BackupSaveInternal(pbox, location, m_entries[m_index], BackupFlag_IsAuto));
                                 }
 
                                 pbox->SetActionName("Restore"_i18n);
@@ -814,7 +843,7 @@ void Menu::RestoreSave() {
     });
 }
 
-auto Menu::BuildSavePath(const Entry& e, bool is_auto) const -> fs::FsPath {
+auto Menu::BuildSavePath(const Entry& e, u32 flags) const -> fs::FsPath {
     const auto t = std::time(NULL);
     const auto tm = std::localtime(&t);
     const auto base = BuildSaveBasePath(e);
@@ -822,27 +851,39 @@ auto Menu::BuildSavePath(const Entry& e, bool is_auto) const -> fs::FsPath {
     char time[64];
     std::snprintf(time, sizeof(time), "%u.%02u.%02u @ %02u.%02u.%02u", tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
 
-    fs::FsPath path;
+    fs::FsPath name;
     if (e.save_data_type == FsSaveDataType_Account) {
         const auto acc = m_accounts[m_account_index];
 
         fs::FsPath name_buf;
-        if (is_auto) {
+        if (flags & BackupFlag_IsAuto) {
             std::snprintf(name_buf, sizeof(name_buf), "AUTO - %s", acc.nickname);
         } else {
             std::snprintf(name_buf, sizeof(name_buf), "%s", acc.nickname);
         }
 
         title::utilsReplaceIllegalCharacters(name_buf, true);
-        std::snprintf(path, sizeof(path), "%s/%s - %s.zip", base.s, name_buf.s, time);
+        std::snprintf(name, sizeof(name), "%s - %s.zip", name_buf.s, time);
     } else {
-        std::snprintf(path, sizeof(path), "%s/%s.zip", base.s, time);
+        std::snprintf(name, sizeof(name), "%s.zip", time);
     }
 
-    return path;
+    if (flags & BackupFlag_SetName) {
+        std::string out;
+        while (out.empty()) {
+            const auto header = "Set name for "_i18n + e.GetName();
+            if (R_FAILED(swkbd::ShowText(out, header.c_str(), "Set backup name", name, 1, 128))) {
+                out.clear();
+            }
+        }
+
+        name = out;
+    }
+
+    return fs::AppendPath(base, name);
 }
 
-Result Menu::RestoreSaveInternal(ProgressBox* pbox, const Entry& e, const fs::FsPath& path) const {
+Result Menu::RestoreSaveInternal(ProgressBox* pbox, const Entry& e, const fs::FsPath& path) {
     pbox->SetTitle(e.GetName());
     if (e.image) {
         pbox->SetImage(e.image);
@@ -960,14 +1001,15 @@ Result Menu::RestoreSaveInternal(ProgressBox* pbox, const Entry& e, const fs::Fs
     R_SUCCEED();
 }
 
-Result Menu::BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& location, std::span<const std::reference_wrapper<Entry>> entries, bool compressed, bool is_auto) const {
+Result Menu::BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& location, std::span<const std::reference_wrapper<Entry>> entries, u32 flags) {
     std::vector<fs::FsPath> paths;
     for (auto& e : entries) {
         // ensure that we have title name and icon loaded.
         LoadControlEntry(e);
-        paths.emplace_back(BuildSavePath(e, is_auto));
+        paths.emplace_back(BuildSavePath(e, flags));
     }
 
+    const auto compressed = m_compress_save_backup.Get();
     auto source = std::make_shared<DumpSource>(entries, paths);
 
     return dump::Dump(pbox, source, location, paths, [&](ui::ProgressBox* pbox, dump::BaseSource* _source, dump::WriteSource* writer, const fs::FsPath& path) -> Result {
@@ -1116,11 +1158,11 @@ Result Menu::BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& loc
     });
 }
 
-Result Menu::BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& location, Entry& e, bool compressed, bool is_auto) const {
+Result Menu::BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& location, Entry& e, u32 flags) {
     std::vector<std::reference_wrapper<Entry>> entries;
     entries.emplace_back(e);
 
-    return BackupSaveInternal(pbox, location, entries, compressed, is_auto);
+    return BackupSaveInternal(pbox, location, entries, flags);
 }
 
 Result Menu::MountSaveFs() {

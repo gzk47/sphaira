@@ -12,6 +12,14 @@
 
 namespace sphaira::ui::menu::save {
 
+enum BackupFlag {
+    BackupFlag_None = 0,
+    // option to allow the user to set the save file name.
+    BackupFlag_SetName = 1 << 0,
+    // set if this is a auto backup (on restore).
+    BackupFlag_IsAuto = 1 << 1,
+};
+
 struct Entry final : FsSaveDataInfo {
     NacpLanguageEntry lang{};
     int image{};
@@ -82,13 +90,13 @@ private:
 
     void DisplayOptions();
 
-    void BackupSaves(std::vector<std::reference_wrapper<Entry>>& entries);
+    void BackupSaves(std::vector<std::reference_wrapper<Entry>>& entries, u32 flags);
     void RestoreSave();
 
-    auto BuildSavePath(const Entry& e, bool is_auto) const -> fs::FsPath;
-    Result RestoreSaveInternal(ProgressBox* pbox, const Entry& e, const fs::FsPath& path) const;
-    Result BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& location, Entry& e, bool compressed, bool is_auto = false) const;
-    Result BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& location, std::span<const std::reference_wrapper<Entry>> entries, bool compressed, bool is_auto = false) const;
+    auto BuildSavePath(const Entry& e, u32 flags) const -> fs::FsPath;
+    Result RestoreSaveInternal(ProgressBox* pbox, const Entry& e, const fs::FsPath& path);
+    Result BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& location, Entry& e, u32 flags);
+    Result BackupSaveInternal(ProgressBox* pbox, const dump::DumpLocation& location, std::span<const std::reference_wrapper<Entry>> entries, u32 flags);
 
     Result MountSaveFs();
 

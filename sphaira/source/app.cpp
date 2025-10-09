@@ -2338,7 +2338,7 @@ void App::DisplayFtpOptions(bool left_side) {
     },  "Enable FTP server to run in the background."_i18n);
 
     options->Add<ui::SidebarEntryTextInput>(
-        "Port", App::GetApp()->m_ftp_port.Get(), "Port number", 1, 5,
+        "Port", App::GetApp()->m_ftp_port.Get(), "", "", 1, 5,
         "Opens the FTP server on this port."_i18n,
         [](auto* input){
             App::GetApp()->m_ftp_port.Set(input->GetNumValue());
@@ -2352,7 +2352,7 @@ void App::DisplayFtpOptions(bool left_side) {
     );
 
     options->Add<ui::SidebarEntryTextInput>(
-        "User", App::GetApp()->m_ftp_user.Get(), "Username", -1, 64,
+        "User", App::GetApp()->m_ftp_user.Get(), "", "", -1, 64,
         "Sets the username, must be set if anon is disabled."_i18n,
         [](auto* input){
             App::GetApp()->m_ftp_user.Set(input->GetValue());
@@ -2360,7 +2360,7 @@ void App::DisplayFtpOptions(bool left_side) {
     );
 
     options->Add<ui::SidebarEntryTextInput>(
-        "Pass", App::GetApp()->m_ftp_pass.Get(), "Password", -1, 64,
+        "Pass", App::GetApp()->m_ftp_pass.Get(), "", "", -1, 64,
         "Sets the password, must be set if anon is disabled."_i18n,
         [](auto* input){
             App::GetApp()->m_ftp_pass.Set(input->GetValue());

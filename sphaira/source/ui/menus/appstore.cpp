@@ -599,7 +599,8 @@ EntryMenu::EntryMenu(Entry& entry, const LazyImage& default_icon, Menu& menu)
 
             options->Add<SidebarEntryCallback>("Leave Feedback"_i18n, [this](){
                 std::string out;
-                if (R_SUCCEEDED(swkbd::ShowText(out)) && !out.empty()) {
+                std::string header = "Leave feedback for " + m_entry.title;
+                if (R_SUCCEEDED(swkbd::ShowText(out, header.c_str())) && !out.empty()) {
                     const auto post = "name=" "switch_user" "&package=" + m_entry.name + "&message=" + out;
                     const auto file = BuildFeedbackCachePath(m_entry);
 
@@ -970,7 +971,7 @@ Menu::Menu(u32 flags) : grid::Menu{"AppStore"_i18n, flags} {
 
             options->Add<SidebarEntryCallback>("Search"_i18n, [this](){
                 std::string out;
-                if (R_SUCCEEDED(swkbd::ShowText(out)) && !out.empty()) {
+                if (R_SUCCEEDED(swkbd::ShowText(out, "Search for app")) && !out.empty()) {
                     SetSearch(out);
                     log_write("got %s\n", out.c_str());
                 }

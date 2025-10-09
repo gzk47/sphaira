@@ -315,17 +315,17 @@ ForwarderForm::ForwarderForm(const FileAssocEntry& assoc, const RomDatabaseIndex
     const auto icon = m_assoc.path;
 
     m_name = this->Add<SidebarEntryTextInput>(
-        "Name", name, "", -1, sizeof(NacpLanguageEntry::name) - 1,
+        "Name", name, "", "", -1, sizeof(NacpLanguageEntry::name) - 1,
         "Set the name of the application"_i18n
     );
 
     m_author = this->Add<SidebarEntryTextInput>(
-        "Author", author, "", -1, sizeof(NacpLanguageEntry::author) - 1,
+        "Author", author, "", "", -1, sizeof(NacpLanguageEntry::author) - 1,
         "Set the author of the application"_i18n
     );
 
     m_version = this->Add<SidebarEntryTextInput>(
-        "Version", version, "", -1, sizeof(NacpStruct::display_version) - 1,
+        "Version", version, "", "", -1, sizeof(NacpStruct::display_version) - 1,
         "Set the display version of the application"_i18n
     );
 
@@ -1711,7 +1711,8 @@ void FsView::DisplayOptions() {
             std::string out;
             const auto& entry = GetEntry();
             const auto name = entry.GetName();
-            if (R_SUCCEEDED(swkbd::ShowText(out, "Set New File Name"_i18n.c_str(), name.c_str())) && !out.empty() && out != name) {
+            const auto header = "Set new name"_i18n;
+            if (R_SUCCEEDED(swkbd::ShowText(out, header.c_str(), header.c_str(), name.c_str())) && !out.empty() && out != name) {
                 App::PopToMenu();
 
                 const auto src_path = GetNewPath(entry);
@@ -1804,7 +1805,7 @@ void FsView::DisplayOptions() {
 
                 options->Add<SidebarEntryCallback>("Extract to..."_i18n, [this](){
                     std::string out;
-                    if (R_SUCCEEDED(swkbd::ShowText(out, "Enter the path to the folder to extract into", fs::AppendPath(m_path, ""))) && !out.empty()) {
+                    if (R_SUCCEEDED(swkbd::ShowText(out, "Extract path", "Enter the path to the folder to extract into", fs::AppendPath(m_path, ""))) && !out.empty()) {
                         UnzipFiles(out);
                     }
                 });
@@ -1822,7 +1823,7 @@ void FsView::DisplayOptions() {
 
                 options->Add<SidebarEntryCallback>("Compress to..."_i18n, [this](){
                     std::string out;
-                    if (R_SUCCEEDED(swkbd::ShowText(out, "Enter the path to the folder to extract into", m_path)) && !out.empty()) {
+                    if (R_SUCCEEDED(swkbd::ShowText(out, "Compress path", "Enter the path to the folder to compress into", m_path)) && !out.empty()) {
                         ZipFiles(out);
                     }
                 });
@@ -1842,7 +1843,8 @@ void FsView::DisplayAdvancedOptions() {
     if (!m_fs_entry.IsReadOnly()) {
         options->Add<SidebarEntryCallback>("Create File"_i18n, [this](){
             std::string out;
-            if (R_SUCCEEDED(swkbd::ShowText(out, "Set File Name"_i18n.c_str(), fs::AppendPath(m_path, ""))) && !out.empty()) {
+            const auto header = "Set File Name"_i18n;
+            if (R_SUCCEEDED(swkbd::ShowText(out, header.c_str(), header.c_str(), fs::AppendPath(m_path, ""))) && !out.empty()) {
                 App::PopToMenu();
 
                 fs::FsPath full_path;
@@ -1864,7 +1866,8 @@ void FsView::DisplayAdvancedOptions() {
 
         options->Add<SidebarEntryCallback>("Create Folder"_i18n, [this](){
             std::string out;
-            if (R_SUCCEEDED(swkbd::ShowText(out, "Set Folder Name"_i18n.c_str(), fs::AppendPath(m_path, ""))) && !out.empty()) {
+            const auto header = "Set Folder Name"_i18n;
+            if (R_SUCCEEDED(swkbd::ShowText(out, header.c_str(), header.c_str(), fs::AppendPath(m_path, ""))) && !out.empty()) {
                 App::PopToMenu();
 
                 fs::FsPath full_path;

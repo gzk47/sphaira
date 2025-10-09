@@ -167,17 +167,17 @@ void DevoptabForm::SetupButtons(bool type_change) {
     }
 
     m_name = this->Add<SidebarEntryTextInput>(
-        "Name", m_config.name, "", -1, 32,
+        "Name", m_config.name, "", "", -1, 32,
         "Set the name of the application"_i18n
     );
 
     m_url = this->Add<SidebarEntryTextInput>(
-        "URL", m_config.url, "", -1, PATH_MAX,
+        "URL", m_config.url, "", "", -1, PATH_MAX,
         "Set the URL of the application"_i18n
     );
 
     m_port = this->Add<SidebarEntryTextInput>(
-        "Port", m_config.port, "Port number", 1, 5,
+        "Port", m_config.port, "", "", 1, 5,
         "Optional: Set the port of the server. If left empty, the default port for the protocol will be used."_i18n
     );
 
@@ -189,17 +189,17 @@ void DevoptabForm::SetupButtons(bool type_change) {
     #endif
 
     m_user = this->Add<SidebarEntryTextInput>(
-        "User", m_config.user, "", -1, PATH_MAX,
+        "User", m_config.user, "", "", -1, PATH_MAX,
         "Optional: Set the username of the application"_i18n
     );
 
     m_pass = this->Add<SidebarEntryTextInput>(
-        "Pass", m_config.pass, "", -1, PATH_MAX,
+        "Pass", m_config.pass, "", "", -1, PATH_MAX,
         "Optional: Set the password of the application"_i18n
     );
 
     m_dump_path = this->Add<SidebarEntryTextInput>(
-        "Dump path", m_config.dump_path, "", -1, PATH_MAX,
+        "Dump path", m_config.dump_path, "", "", -1, PATH_MAX,
         "Optional: Set the dump path used when exporting games and saves."_i18n
     );
 
