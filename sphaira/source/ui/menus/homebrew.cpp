@@ -67,6 +67,13 @@ Menu::Menu(u32 flags) : grid::Menu{"Homebrew"_i18n, flags} {
         }})
     );
 
+    // Add Back button only when entered via Menus (Not center, righit, left tab).
+    if (!(flags & MenuFlag_Tab)) {
+        this->SetAction(Button::B, Action{"Back"_i18n, [this](){
+            this->SetPop();
+        }});
+    }
+
     OnLayoutChange();
 }
 
