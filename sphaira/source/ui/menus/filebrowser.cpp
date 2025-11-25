@@ -1805,7 +1805,7 @@ void FsView::DisplayOptions() {
 
                 options->Add<SidebarEntryCallback>("Extract to..."_i18n, [this](){
                     std::string out;
-                    if (R_SUCCEEDED(swkbd::ShowText(out, "Extract path", "Enter the path to the folder to extract into"_i18n.c_str, fs::AppendPath(m_path, ""))) && !out.empty()) {
+                    if (R_SUCCEEDED(swkbd::ShowText(out, "Extract path", "Enter the path to the folder to extract into"_i18n.c_str(), fs::AppendPath(m_path, ""))) && !out.empty()) {
                         UnzipFiles(out);
                     }
                 });
@@ -1823,7 +1823,7 @@ void FsView::DisplayOptions() {
 
                 options->Add<SidebarEntryCallback>("Compress to..."_i18n, [this](){
                     std::string out;
-                    if (R_SUCCEEDED(swkbd::ShowText(out, "Compress path", "Enter the path to the folder to compress into"_i18n.c_str, m_path)) && !out.empty()) {
+                    if (R_SUCCEEDED(swkbd::ShowText(out, "Compress path", "Enter the path to the folder to compress into"_i18n.c_str(), m_path)) && !out.empty()) {
                         ZipFiles(out);
                     }
                 });
