@@ -168,13 +168,13 @@ void Menu::SetIndex(s64 index) {
         if (fs::FsNativeSd().FileExists(star_path)) {
             SetAction(Button::R3, Action{"Unstar"_i18n, [this](){
                 fs::FsNativeSd().DeleteFile(GenerateStarPath(GetEntry().path));
-                App::Notify("Unstarred "_i18n + GetEntry().GetName());
+                App::Notify(i18n::Reorder("Unstarred ", GetEntry().GetName()));
                 SortAndFindLastFile();
             }});
         } else {
             SetAction(Button::R3, Action{"Star"_i18n, [this](){
                 fs::FsNativeSd().CreateFile(GenerateStarPath(GetEntry().path));
-                App::Notify("Starred "_i18n + GetEntry().GetName());
+                App::Notify(i18n::Reorder("Starred ", GetEntry().GetName()));
                 SortAndFindLastFile();
             }});
         }
@@ -469,7 +469,7 @@ void Menu::DisplayOptions() {
 
     // for testing stuff.
     #if 0
-    options->Add<SidebarEntrySlider>("Test", 1, 0, 2, 10, [](auto& v_out){
+    options->Add<SidebarEntrySlider>("Test"_i18n, 1, 0, 2, 10, [](auto& v_out){
 
     });
     #endif
@@ -494,7 +494,7 @@ void Menu::DisplayOptions() {
         },  "Mounts the NRO FileSystem (icon, nacp and RomFS)."_i18n);
 
         options->Add<SidebarEntryCallback>("Delete"_i18n, [this](){
-            const auto buf = "Are you sure you want to delete "_i18n + GetEntry().path.toString() + "?";
+            const auto buf = i18n::Reorder("Are you sure you want to delete ", GetEntry().path.toString()) + "?";
             App::Push<OptionBox>(
                 buf,
                 "Back"_i18n, "Delete"_i18n, 1, [this](auto op_index){
@@ -510,9 +510,10 @@ void Menu::DisplayOptions() {
                     }
                 }, GetEntry().image
             );
-        },  "Perminately delete the selected homebrew.\n\n"
-            "Files and folders created by the homebrew will still remain. "
-            "Use the FileBrowser to delete them."_i18n);
+        },  i18n::get("hb_remove_info",
+                "Perminately delete the selected homebrew.\n\n"
+                "Files and folders created by the homebrew will still remain. "
+                "Use the FileBrowser to delete them."));
 
         auto forwarder_entry = options->Add<SidebarEntryCallback>("Install Forwarder"_i18n, [this](){
             InstallHomebrew();
