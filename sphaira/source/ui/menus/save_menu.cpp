@@ -877,7 +877,7 @@ auto Menu::BuildSavePath(const Entry& e, u32 flags) const -> fs::FsPath {
         std::string out;
         while (out.empty()) {
             const auto header = i18n::Reorder("Set name for ", e.GetName());
-            if (R_FAILED(swkbd::ShowText(out, header.c_str(), "Set backup name", name, 1, 128))) {
+            if (R_FAILED(swkbd::ShowText(out, header.c_str(), "Set backup name"_i18n.c_str(), name, 1, 128))) {
                 out.clear();
             }
         }

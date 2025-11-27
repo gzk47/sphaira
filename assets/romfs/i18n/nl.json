@@ -78,7 +78,7 @@
   "Customise the look of Sphaira by changing the theme": "",
   "Music": "Muziek",
   "bgm_enable_info": [
-    "Enable background music.\n",,
+    "Enable background music.",
     "Each theme can have it's own music file. ",
     "If a theme does not set a music file, the default music is loaded instead (if it exists)."
   ],

@@ -534,7 +534,7 @@ void Menu::updateColourArray() {
 
 auto Menu::GetEntryName(s64 i) -> std::string {
     const auto& e = m_entries[i];
-    std::string text = i18n::Reorder("Pad "_i18n, (i == 8 ? "HandHeld" : std::to_string(i)));
+    std::string text = i18n::Reorder("Pad ", (i == 8 ? "HandHeld"_i18n : std::to_string(i)));
     switch (e.status) {
         case IrsIrCameraStatus_Available:
             text += " (Available)"_i18n;
