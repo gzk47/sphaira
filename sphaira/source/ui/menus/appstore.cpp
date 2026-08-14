@@ -17,6 +17,7 @@
 #include "hasher.hpp"
 #include "threaded_file_transfer.hpp"
 #include "nro.hpp"
+#include "nacp_compat.hpp"
 #include "web.hpp"
 #include "minizip_helper.hpp"
 
@@ -29,16 +30,21 @@
 #include <stb_image.h>
 #include <minizip/unzip.h>
 #include <algorithm>
+#include <cctype>
 #include <ranges>
 #include <utility>
 
 namespace sphaira::ui::menu::appstore {
 namespace {
 
-constexpr fs::FsPath REPO_PATH{"/switch/sphaira/cache/appstore/repo.json"};
 constexpr fs::FsPath CACHE_PATH{"/switch/sphaira/cache/appstore"};
-constexpr auto URL_BASE = "https://switch.cdn.fortheusers.org";
-constexpr auto URL_JSON = "https://switch.cdn.fortheusers.org/repo.json";
+constexpr fs::FsPath STORE_CONFIG_PATH{"/config/sphaira/appstoreAPI.ini"};
+constexpr auto STORE_CONFIG_SECTION = "STORE";
+constexpr auto STORE_CONFIG_SECTION_LEGACY = "appstore";
+constexpr auto OFFICIAL_STORE_NAME = "HB App Store";
+constexpr auto OFFICIAL_STORE_URL = "https://switch.cdn.fortheusers.org";
+constexpr std::size_t MAX_STORE_SOURCES = 32;
+constexpr std::size_t MAX_STORE_PACKAGES = 20000;
 constexpr auto URL_POST_FEEDBACK = "http://switchbru.com/appstore/feedback";
 constexpr auto URL_GET_FEEDACK = "http://switchbru.com/appstore/feedback";
 
@@ -81,39 +87,102 @@ constexpr const char* ORDER_STR[] = {
     "Asc",
 };
 
+auto HashStore(std::string_view value) -> u64 {
+    u64 hash = 1469598103934665603ULL;
+    for (const auto c : value) {
+        hash ^= static_cast<u8>(c);
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+auto IsRemoteUrl(std::string_view value) -> bool {
+    return value.starts_with("https://") || value.starts_with("http://");
+}
+
+auto TrimStoreUrl(std::string value) -> std::string {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) {
+        value.pop_back();
+    }
+    const auto first = std::ranges::find_if(value, [](char c){ return !std::isspace(static_cast<unsigned char>(c)); });
+    value.erase(value.begin(), first);
+    while (value.size() > 8 && value.back() == '/') {
+        value.pop_back();
+    }
+    return value;
+}
+
+auto StoreBaseUrl(std::string url) -> std::string {
+    url = TrimStoreUrl(std::move(url));
+    constexpr std::string_view suffix{"/repo.json"};
+    if (url.size() >= suffix.size() && !strcasecmp(url.c_str() + url.size() - suffix.size(), suffix.data())) {
+        url.resize(url.size() - suffix.size());
+    } else if (url.size() >= 5 && !strcasecmp(url.c_str() + url.size() - 5, ".json")) {
+        // A source may point directly to an arbitrarily named catalog. Resolve
+        // relative package resources beside that catalog, not below the JSON
+        // filename itself.
+        const auto scheme = url.find("://");
+        const auto slash = url.find_last_of('/');
+        if (slash != std::string::npos && (scheme == std::string::npos || slash > scheme + 2)) {
+            url.resize(slash);
+        }
+    }
+    return url;
+}
+
+auto BuildRepoUrl(const StoreSource& source) -> std::string {
+    const auto url = TrimStoreUrl(source.url);
+    if (url.ends_with(".json")) {
+        return url;
+    }
+    return url + "/repo.json";
+}
+
+auto ResolveResourceUrl(const Entry& entry, std::string_view resource, std::string_view fallback) -> std::string {
+    if (resource.empty()) {
+        resource = fallback;
+    }
+    if (IsRemoteUrl(resource)) {
+        return std::string{resource};
+    }
+
+    if (!resource.empty() && resource.front() == '/') {
+        const auto scheme = entry.store_base.find("://");
+        const auto slash = scheme == std::string::npos ? std::string::npos : entry.store_base.find('/', scheme + 3);
+        if (slash != std::string::npos) {
+            return entry.store_base.substr(0, slash) + std::string{resource};
+        }
+    }
+
+    return entry.store_base + (resource.empty() || resource.front() == '/' ? "" : "/") + std::string{resource};
+}
+
 auto BuildIconUrl(const Entry& e) -> std::string {
-    char out[0x100];
-    std::snprintf(out, sizeof(out), "%s/packages/%s/icon.png", URL_BASE, e.name.c_str());
-    return out;
+    return ResolveResourceUrl(e, e.icon_url, "packages/" + e.name + "/icon.png");
 }
 
 auto BuildBannerUrl(const Entry& e) -> std::string {
-    char out[0x100];
-    std::snprintf(out, sizeof(out), "%s/packages/%s/screen.png", URL_BASE, e.name.c_str());
-    return out;
+    return ResolveResourceUrl(e, e.banner_url, "packages/" + e.name + "/screen.png");
 }
 
 auto BuildManifestUrl(const Entry& e) -> std::string {
-    char out[0x100];
-    std::snprintf(out, sizeof(out), "%s/packages/%s/manifest.install", URL_BASE, e.name.c_str());
-    return out;
+    return ResolveResourceUrl(e, e.manifest_url, "packages/" + e.name + "/manifest.install");
 }
 
 auto BuildZipUrl(const Entry& e) -> std::string {
-    char out[0x100];
-    std::snprintf(out, sizeof(out), "%s/zips/%s.zip", URL_BASE, e.name.c_str());
-    return out;
+    const auto& resource = !e.download_url.empty() ? e.download_url : (!e.zip_url.empty() ? e.zip_url : e.resource_url);
+    return ResolveResourceUrl(e, resource, "zips/" + e.name + ".zip");
 }
 
 auto BuildIconCachePath(const Entry& e) -> fs::FsPath {
     fs::FsPath out;
-    std::snprintf(out, sizeof(out), "%s/icons/%s.png", CACHE_PATH.s, e.name.c_str());
+    std::snprintf(out, sizeof(out), "%s/stores/%016llx/icons/%s.png", CACHE_PATH.s, static_cast<unsigned long long>(e.store_id), e.name.c_str());
     return out;
 }
 
 auto BuildBannerCachePath(const Entry& e) -> fs::FsPath {
     fs::FsPath out;
-    std::snprintf(out, sizeof(out), "%s/banners/%s.png", CACHE_PATH.s, e.name.c_str());
+    std::snprintf(out, sizeof(out), "%s/stores/%016llx/banners/%s.png", CACHE_PATH.s, static_cast<unsigned long long>(e.store_id), e.name.c_str());
     return out;
 }
 
@@ -127,7 +196,13 @@ auto BuildScreensCachePath(const Entry& e, u8 num) -> fs::FsPath {
 
 // use appstore path in order to maintain compat with appstore
 auto BuildPackageCachePath(const Entry& e) -> fs::FsPath {
-    return "/switch/appstore/.get/packages/" + e.name;
+    if (e.store_id == HashStore(OFFICIAL_STORE_URL)) {
+        return "/switch/appstore/.get/packages/" + e.name;
+    }
+
+    fs::FsPath out;
+    std::snprintf(out, sizeof(out), "/switch/appstore/.get/stores/%016llx/packages/%s", static_cast<unsigned long long>(e.store_id), e.name.c_str());
+    return out;
 }
 
 auto BuildInfoCachePath(const Entry& e) -> fs::FsPath {
@@ -161,15 +236,63 @@ void from_json(yyjson_val* json, Entry& e) {
         JSON_SET_STR(details);
         JSON_SET_UINT(app_dls);
         JSON_SET_STR(md5);
+        JSON_SET_STR(sha256);
+        JSON_SET_STR(icon_url);
+        JSON_SET_STR(banner_url);
+        JSON_SET_STR(manifest_url);
+        JSON_SET_STR(download_url);
+        JSON_SET_STR(zip_url);
+        JSON_SET_STR(resource_url);
     );
 }
 
-void from_json(const fs::FsPath& path, std::vector<appstore::Entry>& e) {
-    yyjson_read_err err;
-    JSON_INIT_VEC_FILE(path, nullptr, &err);
-    JSON_OBJ_ITR(
-        JSON_SET_ARR_OBJ2(packages, e);
-    );
+auto from_json(const fs::FsPath& path, std::vector<appstore::Entry>& entries) -> bool {
+    yyjson_read_err error{};
+    auto document = yyjson_read_file(path, YYJSON_READ_NOFLAG, nullptr, &error);
+    R_UNLESS(document, false);
+    ON_SCOPE_EXIT(yyjson_doc_free(document));
+
+    const auto root = yyjson_doc_get_root(document);
+    R_UNLESS(root && yyjson_is_obj(root), false);
+    const auto packages = yyjson_obj_get(root, "packages");
+    R_UNLESS(packages && yyjson_is_arr(packages), false);
+
+    const auto count = yyjson_arr_size(packages);
+    R_UNLESS(count <= MAX_STORE_PACKAGES, false);
+    entries.clear();
+    entries.resize(count);
+
+    size_t index{}, max{};
+    yyjson_val* package{};
+    yyjson_arr_foreach(packages, index, max, package) {
+        from_json(package, entries[index]);
+    }
+    return true;
+}
+
+auto IsSafePackageName(std::string_view name) -> bool {
+    if (name.empty() || name.size() > 128 || name == "." || name == "..") {
+        return false;
+    }
+    return std::ranges::none_of(name, [](char c){
+        const auto value = static_cast<unsigned char>(c);
+        return value < 0x20 || c == '/' || c == '\\' || c == ':';
+    });
+}
+
+auto IsSafeManifestPath(std::string_view path) -> bool {
+    if (path.empty() || path.size() >= PATH_MAX || path.find('\\') != std::string_view::npos) {
+        return false;
+    }
+
+    while (!path.empty() && path.front() == '/') {
+        path.remove_prefix(1);
+    }
+    return !path.empty()
+        && path != ".."
+        && !path.starts_with("../")
+        && !path.ends_with("/..")
+        && path.find("/../") == std::string_view::npos;
 }
 
 auto ParseManifest(std::span<const char> view) -> ManifestEntries {
@@ -183,7 +306,21 @@ auto ParseManifest(std::span<const char> view) -> ManifestEntries {
 
         ManifestEntry entry{};
         entry.command = line[0];
-        std::strncpy(entry.path, line.data() + 3, line.size() - 3);
+        if (entry.command != 'E' && entry.command != 'U' && entry.command != 'G') {
+            continue;
+        }
+
+        auto path = std::string_view{line.data() + 3, line.size() - 3};
+        if (!path.empty() && path.back() == '\r') {
+            path.remove_suffix(1);
+        }
+        if (!IsSafeManifestPath(path)) {
+            log_write("[APPSTORE] rejected unsafe manifest path\n");
+            continue;
+        }
+
+        std::memcpy(entry.path.s, path.data(), path.size());
+        entry.path.s[path.size()] = '\0';
         entries.emplace_back(entry);
     }
 
@@ -207,6 +344,16 @@ auto EntryLoadImageData(std::span<const u8> image_buf, LazyImage& image) -> bool
         // log_write("warning, tried to load image: %s when already loaded\n", path);
         return true;
     }
+    if (image_buf.empty() || image_buf.size() > 8 * 1024 * 1024) {
+        return false;
+    }
+
+    int probe_w{}, probe_h{}, probe_channels{};
+    if (!stbi_info_from_memory(image_buf.data(), image_buf.size(), &probe_w, &probe_h, &probe_channels)
+        || probe_w <= 0 || probe_h <= 0 || probe_w > 4096 || probe_h > 4096) {
+        return false;
+    }
+
     auto vg = App::GetVg();
 
     int channels_in_file;
@@ -226,6 +373,17 @@ auto EntryLoadImageFile(fs::Fs& fs, const fs::FsPath& path, LazyImage& image) ->
         // log_write("warning, tried to load image: %s when already loaded\n", path);
         return true;
     }
+
+    fs::File file;
+    s64 file_size{};
+    if (R_FAILED(fs.OpenFile(path, FsOpenMode_Read, &file))
+        || R_FAILED(file.GetSize(&file_size))
+        || file_size <= 0
+        || file_size > 8 * 1024 * 1024) {
+        log_write("invalid image file size: %s\n", path.s);
+        return false;
+    }
+    file.Close();
 
     std::vector<u8> image_buf;
     if (R_FAILED(fs.read_entire_file(path, image_buf))) {
@@ -312,12 +470,13 @@ void ReadFromInfoJson(Entry& e) {
     if (doc) {
         const auto root = yyjson_doc_get_root(doc);
         const auto version = yyjson_obj_get(root, "version");
-        if (version) {
-            if (!std::strcmp(yyjson_get_str(version), e.version.c_str())) {
+        if (version && yyjson_is_str(version)) {
+            const auto installed_version = yyjson_get_str(version);
+            if (installed_version && !std::strcmp(installed_version, e.version.c_str())) {
                 e.status = EntryStatus::Installed;
             } else {
                 e.status = EntryStatus::Update;
-                log_write("info.json said %s needs update: %s vs %s\n", e.name.c_str(), yyjson_get_str(version), e.version.c_str());
+                log_write("info.json said %s needs update: %s vs %s\n", e.name.c_str(), installed_version ? installed_version : "", e.version.c_str());
             }
         }
         // log_write("got info for: %s\n", e.name.c_str());
@@ -372,14 +531,15 @@ auto UninstallApp(ProgressBox* pbox, const Entry& entry) -> Result {
 // 4. move everything from placeholder to normal location
 auto InstallApp(ProgressBox* pbox, const Entry& entry) -> Result {
     static const fs::FsPath zip_out{"/switch/sphaira/cache/appstore/temp.zip"};
-    std::vector<u8> buf(1024 * 512); // 512KiB
 
     fs::FsNativeSd fs;
     R_TRY(fs.GetFsOpenResult());
 
     // check if we can download the entire zip to mem for faster download / extract times.
-    // current limit is 300MiB, or disabled for applet mode.
-    const auto file_download = App::IsApplet() || entry.filesize >= 1024 * 1024 * 300;
+    // Repository sizes are expressed in KiB. Stream unknown or >=300 MiB
+    // archives to the SD card so a malformed third-party entry cannot exhaust
+    // application memory.
+    const auto file_download = App::IsApplet() || !entry.filesize || entry.filesize >= 300 * 1024;
     curl::ApiResult api_result{};
 
     // 1. download the zip
@@ -405,20 +565,24 @@ auto InstallApp(ProgressBox* pbox, const Entry& entry) -> Result {
 
     ON_SCOPE_EXIT(fs.DeleteFile(zip_out));
 
-    // 2. md5 check the zip
-    if (!pbox->ShouldExit()) {
-        pbox->NewTransfer("Checking MD5"_i18n);
-        log_write("starting md5 check\n");
+    // 2. Verify the strongest checksum supplied by the repository. Custom
+    // direct-resource entries may omit checksums, in which case ZIP CRCs are
+    // still verified during extraction.
+    const auto hash_type = entry.sha256.size() == 64 ? hash::Type::Sha256 : hash::Type::Md5;
+    const auto& expected_hash = hash_type == hash::Type::Sha256 ? entry.sha256 : entry.md5;
+    if (!pbox->ShouldExit() && (expected_hash.size() == 32 || expected_hash.size() == 64)) {
+        pbox->NewTransfer(hash_type == hash::Type::Sha256 ? "Checking SHA-256"_i18n : "Checking MD5"_i18n);
+        log_write("starting package hash check\n");
 
         std::string hash_out;
         if (file_download) {
-            R_TRY(hash::Hash(pbox, hash::Type::Md5, &fs, zip_out, hash_out));
+            R_TRY(hash::Hash(pbox, hash_type, &fs, zip_out, hash_out));
         } else {
-            R_TRY(hash::Hash(pbox, hash::Type::Md5, api_result.data, hash_out));
+            R_TRY(hash::Hash(pbox, hash_type, api_result.data, hash_out));
         }
 
-        if (strncasecmp(hash_out.data(), entry.md5.data(), entry.md5.length())) {
-            log_write("bad md5: %.*s vs %.*s\n", 32, hash_out.data(), 32, entry.md5.c_str());
+        if (hash_out.size() != expected_hash.size() || strncasecmp(hash_out.data(), expected_hash.data(), expected_hash.size())) {
+            log_write("bad package hash\n");
             R_THROW(Result_AppstoreFailedMd5);
         }
     }
@@ -456,6 +620,11 @@ auto InstallApp(ProgressBox* pbox, const Entry& entry) -> Result {
             if (UNZ_OK != unzGetCurrentFileInfo64(zfile, &info, 0, 0, 0, 0, 0, 0)) {
                 log_write("failed to get current info\n");
                 R_THROW(Result_UnzGetGlobalInfo64);
+            }
+
+            if (!info.uncompressed_size || info.uncompressed_size > 2 * 1024 * 1024) {
+                log_write("manifest has invalid size\n");
+                R_THROW(Result_AppstoreFailedParseManifest);
             }
 
             std::vector<char> manifest_data(info.uncompressed_size);
@@ -563,7 +732,7 @@ auto InstallApp(ProgressBox* pbox, const Entry& entry) -> Result {
 // case-insensitive version of str.find()
 auto FindCaseInsensitive(std::string_view base, std::string_view term) -> bool {
     const auto it = std::search(base.cbegin(), base.cend(), term.cbegin(), term.cend(), [](char a, char b){
-        return std::toupper(a) == std::toupper(b);
+        return std::toupper(static_cast<unsigned char>(a)) == std::toupper(static_cast<unsigned char>(b));
     });
     return it != base.cend();
 }
@@ -660,7 +829,7 @@ EntryMenu::EntryMenu(Entry& entry, const LazyImage& default_icon, Menu& menu)
         }})
     );
 
-    SetTitleSubHeading("by " + m_entry.author);
+    SetTitleSubHeading("by "_i18n + m_entry.author);
 
     m_details = std::make_unique<ScrollableText>(m_entry.details, 0, 374, 250, 768, 18);
     m_changelog = std::make_unique<ScrollableText>(m_entry.changelog, 0, 374, 250, 768, 18);
@@ -803,7 +972,7 @@ void EntryMenu::UpdateOptions() {
             return InstallApp(pbox, m_entry);
         }, [this](Result rc){
             homebrew::SignalChange();
-            App::PushErrorBox(rc, "Failed to, TODO: add message here"_i18n);
+            App::PushErrorBox(rc, "Failed to install app"_i18n);
 
             if (R_SUCCEEDED(rc)) {
                 App::Notify(i18n::Reorder("Downloaded ", m_entry.title));
@@ -819,7 +988,7 @@ void EntryMenu::UpdateOptions() {
             return UninstallApp(pbox, m_entry);
         }, [this](Result rc){
             homebrew::SignalChange();
-            App::PushErrorBox(rc, "Failed to, TODO: add message here"_i18n);
+            App::PushErrorBox(rc, "Failed to remove app"_i18n);
 
             if (R_SUCCEEDED(rc)) {
                 App::Notify(i18n::Reorder("Removed ", m_entry.title));
@@ -879,9 +1048,13 @@ void EntryMenu::SetIndex(s64 index) {
 
 Menu::Menu(u32 flags) : grid::Menu{"AppStore"_i18n, flags} {
     fs::FsNativeSd fs;
-    fs.CreateDirectoryRecursively("/switch/sphaira/cache/appstore/icons");
-    fs.CreateDirectoryRecursively("/switch/sphaira/cache/appstore/banners");
-    fs.CreateDirectoryRecursively("/switch/sphaira/cache/appstore/screens");
+    fs.CreateDirectoryRecursively(CACHE_PATH);
+    fs.CreateDirectoryRecursively("/config/sphaira");
+    LoadStoreSources();
+    if (m_filter.Get() < 0 || m_filter.Get() >= Filter_MAX) m_filter.Set(Filter_All);
+    if (m_sort.Get() < 0 || m_sort.Get() > SortType_Alphabetical) m_sort.Set(SortType_Updated);
+    if (m_order.Get() < 0 || m_order.Get() > OrderType_Ascending) m_order.Set(OrderType_Descending);
+    if (m_layout.Get() < 0 || m_layout.Get() > LayoutType::LayoutType_GridDetail) m_layout.Set(LayoutType::LayoutType_GridDetail);
 
     this->SetActions(
         std::make_pair(Button::B, Action{"Back"_i18n, [this](){
@@ -949,6 +1122,16 @@ Menu::Menu(u32 flags) : grid::Menu{"AppStore"_i18n, flags} {
             layout_items.push_back("Icon"_i18n);
             layout_items.push_back("Grid"_i18n);
 
+            options->Add<SidebarEntryCallback>("Store Source"_i18n, [this](){
+                ShowStoreSelector();
+            }, true, i18n::Reorder("Current store: ", m_store_sources[m_active_store].name));
+
+            if (m_active_store > 0) {
+                options->Add<SidebarEntryCallback>("Delete Current Store"_i18n, [this](){
+                    DeleteActiveStore();
+                }, true);
+            }
+
             options->Add<SidebarEntryArray>("Filter"_i18n, filter_items, [this](s64& index_out){
                 m_filter.Set(index_out);
                 SetFilter();
@@ -971,7 +1154,7 @@ Menu::Menu(u32 flags) : grid::Menu{"AppStore"_i18n, flags} {
 
             options->Add<SidebarEntryCallback>("Search"_i18n, [this](){
                 std::string out;
-                if (R_SUCCEEDED(swkbd::ShowText(out, "Search for app")) && !out.empty()) {
+                if (R_SUCCEEDED(swkbd::ShowText(out, "Search for app"_i18n.c_str())) && !out.empty()) {
                     SetSearch(out);
                     log_write("got %s\n", out.c_str());
                 }
@@ -979,25 +1162,193 @@ Menu::Menu(u32 flags) : grid::Menu{"AppStore"_i18n, flags} {
         }})
     );
 
+    OnLayoutChange();
+    StartStoreDownload();
+}
+
+void Menu::LoadStoreSources() {
+    m_store_sources.clear();
+    m_store_sources.push_back({OFFICIAL_STORE_NAME, OFFICIAL_STORE_URL});
+
+    for (std::size_t i = 1; i < MAX_STORE_SOURCES; ++i) {
+        char name_key[32]{};
+        char url_key[32]{};
+        char name[128]{};
+        char url[PATH_MAX]{};
+        std::snprintf(name_key, sizeof(name_key), "store_%zu_name", i);
+        std::snprintf(url_key, sizeof(url_key), "store_%zu_url", i);
+        ini_gets(STORE_CONFIG_SECTION, name_key, "", name, sizeof(name), STORE_CONFIG_PATH);
+        ini_gets(STORE_CONFIG_SECTION, url_key, "", url, sizeof(url), STORE_CONFIG_PATH);
+        if (!name[0] || !url[0]) {
+            ini_gets(STORE_CONFIG_SECTION_LEGACY, name_key, "", name, sizeof(name), STORE_CONFIG_PATH);
+            ini_gets(STORE_CONFIG_SECTION_LEGACY, url_key, "", url, sizeof(url), STORE_CONFIG_PATH);
+        }
+
+        auto normalized_url = TrimStoreUrl(url);
+        if (name[0] && IsRemoteUrl(normalized_url)) {
+            m_store_sources.push_back({name, std::move(normalized_url)});
+        }
+    }
+
+    auto saved = ini_getl(STORE_CONFIG_SECTION, "store_active", -1, STORE_CONFIG_PATH);
+    if (saved < 0) {
+        saved = ini_getl(STORE_CONFIG_SECTION_LEGACY, "store_active", 0, STORE_CONFIG_PATH);
+    }
+    m_active_store = std::clamp<s64>(saved, 0, m_store_sources.size() - 1);
+    SaveStoreSources();
+}
+
+void Menu::SaveStoreSources() {
+    ini_putl(STORE_CONFIG_SECTION, "store_active", m_active_store, STORE_CONFIG_PATH);
+
+    for (std::size_t i = 0; i < MAX_STORE_SOURCES; ++i) {
+        char name_key[32]{};
+        char url_key[32]{};
+        std::snprintf(name_key, sizeof(name_key), "store_%zu_name", i);
+        std::snprintf(url_key, sizeof(url_key), "store_%zu_url", i);
+
+        if (i < m_store_sources.size()) {
+            ini_puts(STORE_CONFIG_SECTION, name_key, m_store_sources[i].name.c_str(), STORE_CONFIG_PATH);
+            ini_puts(STORE_CONFIG_SECTION, url_key, m_store_sources[i].url.c_str(), STORE_CONFIG_PATH);
+        } else {
+            ini_puts(STORE_CONFIG_SECTION, name_key, "", STORE_CONFIG_PATH);
+            ini_puts(STORE_CONFIG_SECTION, url_key, "", STORE_CONFIG_PATH);
+        }
+    }
+}
+
+void Menu::ShowStoreSelector() {
+    PopupList::Items items;
+    items.reserve(m_store_sources.size() + 1);
+    for (const auto& source : m_store_sources) {
+        items.push_back(source.name);
+    }
+    items.push_back("Add Custom Store..."_i18n);
+
+    App::Push<PopupList>("Select store source"_i18n, items, [this](auto index){
+        if (!index) {
+            return;
+        }
+        if (*index == static_cast<s64>(m_store_sources.size())) {
+            AddStoreSource();
+        } else {
+            SwitchStore(*index);
+        }
+    }, m_active_store);
+}
+
+void Menu::AddStoreSource() {
+    if (m_store_sources.size() >= MAX_STORE_SOURCES) {
+        App::Notify("The store source limit has been reached"_i18n);
+        return;
+    }
+
+    std::string name;
+    if (R_FAILED(swkbd::ShowText(name, "Store Name"_i18n.c_str(), "Enter a name for the store"_i18n.c_str(), nullptr, 1, 96)) || name.empty()) {
+        return;
+    }
+
+    std::string url;
+    if (R_FAILED(swkbd::ShowText(url, "Store URL"_i18n.c_str(), "Enter custom store API (URL)"_i18n.c_str(), "https://", 8, PATH_MAX - 1))) {
+        return;
+    }
+    url = TrimStoreUrl(std::move(url));
+    if (!IsRemoteUrl(url) || url.find_first_of("\r\n\t ") != std::string::npos) {
+        App::Notify("Store URL must be a valid HTTP or HTTPS address"_i18n);
+        return;
+    }
+
+    m_store_sources.push_back({std::move(name), std::move(url)});
+    SwitchStore(m_store_sources.size() - 1);
+}
+
+void Menu::DeleteActiveStore() {
+    if (m_active_store <= 0 || m_active_store >= static_cast<s64>(m_store_sources.size())) {
+        return;
+    }
+
+    const auto name = m_store_sources[m_active_store].name;
+    App::Push<OptionBox>(
+        i18n::Reorder("Delete custom store '", name) + "'?",
+        "Back"_i18n,
+        "Delete"_i18n,
+        0,
+        [this](auto index){
+            if (!index || *index != 1 || m_active_store <= 0) {
+                return;
+            }
+            m_store_sources.erase(m_store_sources.begin() + m_active_store);
+            m_active_store = 0;
+            SaveStoreSources();
+            StartStoreDownload();
+        }
+    );
+}
+
+void Menu::SwitchStore(s64 index) {
+    if (index < 0 || index >= static_cast<s64>(m_store_sources.size())) {
+        return;
+    }
+    m_active_store = index;
+    SaveStoreSources();
+    StartStoreDownload();
+    App::Notify(i18n::Reorder("Selected store: ", m_store_sources[m_active_store].name));
+}
+
+void Menu::StartStoreDownload() {
+    const auto generation = ++m_store_generation;
+    const auto& source = m_store_sources[m_active_store];
+    const auto store_id = HashStore(StoreBaseUrl(source.url));
+
+    m_entries.clear();
+    for (auto& index : m_entries_index) {
+        index.clear();
+    }
+    m_entries_index_author.clear();
+    m_entries_index_search.clear();
+    m_entries_current = {};
+    m_index = 0;
+    m_is_search = false;
+    m_is_author = false;
+    m_dirty = false;
     m_repo_download_state = ImageDownloadState::Progress;
-    curl::Api().ToFileAsync(
-        curl::Url{URL_JSON},
-        curl::Path{REPO_PATH},
+    SetTitleSubHeading(source.name);
+    SetSubHeading("Loading store catalog..."_i18n);
+
+    fs::FsNativeSd fs;
+    fs::FsPath store_cache;
+    std::snprintf(store_cache, sizeof(store_cache), "%s/stores/%016llx", CACHE_PATH.s, static_cast<unsigned long long>(store_id));
+    fs.CreateDirectoryRecursively(store_cache + "/icons");
+    fs.CreateDirectoryRecursively(store_cache + "/banners");
+    m_repo_path = store_cache + "/repo.json";
+
+    const auto queued = curl::Api().ToFileAsync(
+        curl::Url{BuildRepoUrl(source)},
+        curl::Path{m_repo_path},
         curl::Flags{curl::Flag_Cache},
         curl::StopToken{this->GetToken()},
-        curl::OnComplete{[this](auto& result){
-            if (result.success) {
+        curl::OnComplete{[this, generation](auto& result){
+            if (generation != m_store_generation) {
+                return;
+            }
+
+            const auto has_cache = fs::FsNativeSd().FileExists(m_repo_path);
+            if (result.success || has_cache) {
                 m_repo_download_state = ImageDownloadState::Done;
                 if (HasFocus()) {
                     ScanHomebrew();
                 }
             } else {
                 m_repo_download_state = ImageDownloadState::Failed;
+                SetSubHeading("Failed to load store catalog"_i18n);
             }
-        }
-    });
+        }}
+    );
 
-    OnLayoutChange();
+    if (!queued) {
+        m_repo_download_state = ImageDownloadState::Failed;
+        SetSubHeading("Failed to queue store download"_i18n);
+    }
 }
 
 Menu::~Menu() {
@@ -1020,7 +1371,10 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
     MenuBase::Draw(vg, theme);
 
     if (m_entries.empty()) {
-        gfx::drawTextArgs(vg, SCREEN_WIDTH / 2.f, SCREEN_HEIGHT / 2.f, 36.f, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE, theme->GetColour(ThemeEntryID_TEXT_INFO), "Loading..."_i18n.c_str());
+        const auto message = m_repo_download_state == ImageDownloadState::Failed
+            ? "Failed to load store catalog"_i18n
+            : (m_repo_download_state == ImageDownloadState::Done ? "This store has no packages"_i18n : "Loading..."_i18n);
+        gfx::drawTextArgs(vg, SCREEN_WIDTH / 2.f, SCREEN_HEIGHT / 2.f, 36.f, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE, theme->GetColour(ThemeEntryID_TEXT_INFO), "%s", message.c_str());
         return;
     }
 
@@ -1030,7 +1384,7 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
     }
 
     // max images per frame, in order to not hit io / gpu too hard.
-    const int image_load_max = 2;
+    const int image_load_max = 1;
     int image_load_count = 0;
 
     m_list->Draw(vg, theme, m_entries_current.size(), [this, &image_load_count](auto* vg, auto* theme, auto v, auto pos) {
@@ -1054,25 +1408,44 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
                 case ImageDownloadState::None: {
                     const auto path = BuildIconCachePath(e);
                     const auto url = BuildIconUrl(e);
+                    const auto entry_name = e.name;
+                    const auto generation = m_store_generation;
                     image.state = ImageDownloadState::Progress;
-                    curl::Api().ToFileAsync(
+                    const auto queued = curl::Api().ToFileAsync(
                         curl::Url{url},
                         curl::Path{path},
                         curl::Flags{curl::Flag_Cache},
                         curl::StopToken{this->GetToken()},
-                        curl::OnComplete{[this, &image](auto& result) {
+                        curl::OnComplete{[this, entry_name, generation](auto& result) {
+                            if (generation != m_store_generation) {
+                                return;
+                            }
+                            const auto it = std::ranges::find_if(m_entries, [&entry_name](const Entry& entry){
+                                return entry.name == entry_name;
+                            });
+                            if (it == m_entries.end()) {
+                                return;
+                            }
+                            auto& completed_image = it->image;
                             if (result.success) {
-                                image.state = ImageDownloadState::Done;
+                                completed_image.state = ImageDownloadState::Done;
                                 // data hasn't changed
                                 if (result.code == 304) {
-                                    image.cached = false;
+                                    completed_image.cached = false;
+                                } else if (completed_image.image) {
+                                    nvgDeleteImage(App::GetVg(), completed_image.image);
+                                    completed_image.image = 0;
+                                    completed_image.cached = false;
                                 }
                             } else {
-                                image.state = ImageDownloadState::Failed;
+                                completed_image.state = ImageDownloadState::Failed;
                                 log_write("failed to download image\n");
                             }
                         }
                     });
+                    if (!queued) {
+                        image.state = ImageDownloadState::Failed;
+                    }
                 }   break;
                 case ImageDownloadState::Progress: {
 
@@ -1138,7 +1511,7 @@ void Menu::OnFocusGained() {
             ScanHomebrew();
         }
     } else {
-        if (m_dirty) {
+        if (m_dirty && !m_entries_current.empty()) {
             m_dirty = false;
             const auto& current_entry = m_entries[m_entries_current[m_index]];
             Sort();
@@ -1163,7 +1536,13 @@ void Menu::OnFocusGained() {
 }
 
 void Menu::SetIndex(s64 index) {
-    m_index = index;
+    if (m_entries_current.empty()) {
+        m_index = 0;
+        SetSubHeading("0 / 0");
+        return;
+    }
+
+    m_index = std::clamp<s64>(index, 0, m_entries_current.size() - 1);
     if (!m_index) {
         m_list->SetYoff(0);
     }
@@ -1175,7 +1554,33 @@ void Menu::ScanHomebrew() {
     App::SetBoostMode(true);
     ON_SCOPE_EXIT(App::SetBoostMode(false));
 
-    from_json(REPO_PATH, m_entries);
+    m_entries.clear();
+    for (auto& index : m_entries_index) {
+        index.clear();
+    }
+    m_entries_index_author.clear();
+    m_entries_index_search.clear();
+    m_entries_current = {};
+
+    if (!from_json(m_repo_path, m_entries)) {
+        m_repo_download_state = ImageDownloadState::Failed;
+        SetSubHeading("The selected store returned an invalid catalog"_i18n);
+        return;
+    }
+
+    const auto store_base = StoreBaseUrl(m_store_sources[m_active_store].url);
+    const auto store_id = HashStore(store_base);
+    std::erase_if(m_entries, [](const Entry& entry){ return !IsSafePackageName(entry.name); });
+    for (auto& entry : m_entries) {
+        entry.store_base = store_base;
+        entry.store_id = store_id;
+        if (entry.title.empty()) {
+            entry.title = entry.name;
+        }
+        if (entry.author.empty()) {
+            entry.author = "Unknown"_i18n;
+        }
+    }
 
     fs::FsNativeSd fs;
     if (R_FAILED(fs.GetFsOpenResult())) {
@@ -1183,7 +1588,8 @@ void Menu::ScanHomebrew() {
         return;
     }
 
-    // pre-allocate the max size, can shrink later if needed
+    // Pre-allocate once; retaining this capacity makes source reloads and
+    // filter changes substantially cheaper.
     for (auto& index : m_entries_index) {
         index.reserve(m_entries.size());
     }
@@ -1209,10 +1615,12 @@ void Menu::ScanHomebrew() {
             m_entries_index[Filter_Misc].push_back(i);
         }
 
-        // fwiw, this is how N stores update info
-        e.updated_num = std::atoi(e.updated.c_str()); // day
-        e.updated_num += std::atoi(e.updated.c_str() + 3) * 100; // month
-        e.updated_num += std::atoi(e.updated.c_str() + 6) * 100 * 100; // year
+        unsigned day{}, month{}, year{};
+        if (std::sscanf(e.updated.c_str(), "%u/%u/%u", &day, &month, &year) == 3) {
+            e.updated_num = day + month * 100 + year * 10000;
+        } else {
+            e.updated_num = 0;
+        }
 
         e.status = EntryStatus::Get;
         // if binary is present, check for it, if not avalible, report as not installed
@@ -1235,7 +1643,7 @@ void Menu::ScanHomebrew() {
                     if (e.name == "hbmenu") {
                         NacpStruct nacp;
                         if (R_SUCCEEDED(nro_get_nacp(e.binary, nacp))) {
-                            filtered = std::strcmp(nacp.lang[0].name, "nx-hbmenu");
+                            filtered = std::strcmp(NacpLanguageEntries(nacp)[0].name, "nx-hbmenu");
                         }
                     }
                     // ignore single retroarch core.
@@ -1258,13 +1666,9 @@ void Menu::ScanHomebrew() {
         e.image.image = 0; // images are lazy loaded
     }
 
-    for (auto& index : m_entries_index) {
-        index.shrink_to_fit();
-    }
-
     SetFilter();
-    SetIndex(0);
-    Sort();
+    m_repo_download_state = ImageDownloadState::Done;
+    SetSubHeading(m_entries.empty() ? "This store has no packages"_i18n : "");
 }
 
 void Menu::Sort() {
@@ -1343,6 +1747,12 @@ void Menu::Sort() {
 }
 
 void Menu::SortAndFindLastFile() {
+    if (m_entries_current.empty()) {
+        Sort();
+        SetIndex(0);
+        return;
+    }
+
     const auto name = GetEntry().name;
     Sort();
     SetIndex(0);
@@ -1372,7 +1782,8 @@ void Menu::SetFilter() {
     m_is_search = false;
     m_is_author = false;
 
-    m_entries_current = m_entries_index[m_filter.Get()];
+    const auto filter = std::clamp<long>(m_filter.Get(), Filter_All, Filter_MAX - 1);
+    m_entries_current = m_entries_index[filter];
     SetIndex(0);
     Sort();
 }
@@ -1400,6 +1811,10 @@ void Menu::SetSearch(const std::string& term) {
 }
 
 void Menu::SetAuthor() {
+    if (m_entries_current.empty()) {
+        return;
+    }
+
     if (!m_is_author) {
         m_entry_author_jump_back = m_index;
     }
@@ -1424,6 +1839,28 @@ void Menu::SetAuthor() {
 void Menu::OnLayoutChange() {
     m_index = 0;
     grid::Menu::OnLayoutChange(m_list, m_layout.Get());
+}
+
+LazyImage::LazyImage(LazyImage&& other) noexcept {
+    *this = std::move(other);
+}
+
+auto LazyImage::operator=(LazyImage&& other) noexcept -> LazyImage& {
+    if (this == &other) {
+        return *this;
+    }
+    if (image) {
+        nvgDeleteImage(App::GetVg(), image);
+    }
+
+    image = std::exchange(other.image, 0);
+    w = other.w;
+    h = other.h;
+    tried_cache = other.tried_cache;
+    cached = other.cached;
+    state = other.state;
+    std::memcpy(first_pixel, other.first_pixel, sizeof(first_pixel));
+    return *this;
 }
 
 LazyImage::~LazyImage() {

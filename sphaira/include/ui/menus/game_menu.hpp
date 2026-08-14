@@ -10,10 +10,14 @@
 #include "fs.hpp"
 #include "option.hpp"
 #include <memory>
+#include <string>
+#include <string_view>
 #include <vector>
 #include <span>
 
 namespace sphaira::ui::menu::game {
+
+struct PlaytimeWorker;
 
 struct Entry {
     u64 app_id{};
@@ -21,6 +25,11 @@ struct Entry {
     NacpLanguageEntry lang{};
     int image{};
     bool selected{};
+    u64 last_played{};
+    u64 playtime{};
+    u64 playtime_cached_last_played{};
+    bool playtime_cached{};
+    std::vector<u64> user_playtimes{};
     title::NacpLoadStatus status{title::NacpLoadStatus::None};
 
     auto GetName() const -> const char* {
@@ -33,7 +42,12 @@ struct Entry {
 };
 
 enum SortType {
-    SortType_Updated,
+    SortType_Updated = 0,
+    SortType_Title = 1,
+    SortType_TitleID = 2,
+    SortType_LastPlayed = 3,
+    SortType_TotalPlayTime = 4,
+    SortType_Publisher = 5,
 };
 
 enum OrderType {
@@ -57,10 +71,16 @@ struct Menu final : grid::Menu {
 private:
     void SetIndex(s64 index);
     void ScanHomebrew();
+    void Filter();
     void Sort();
     void SortAndFindLastFile(bool scan);
     void FreeEntries();
     void OnLayoutChange();
+    void LoadPlaytime();
+    void StartPlaytimeWorker();
+    void StopPlaytimeWorker(bool apply_results);
+    void ApplyPlaytimeResults();
+    void SyncEntryToMaster(const Entry& entry);
 
     auto GetSelectedEntries() const {
         std::vector<Entry> out;
@@ -95,11 +115,16 @@ private:
     static constexpr inline const char* INI_SECTION_DUMP = "dump";
 
     std::vector<Entry> m_entries{};
+    std::vector<Entry> m_all_entries{};
+    std::string m_search_query{};
+    std::vector<AccountProfileBase> m_accounts{};
     s64 m_index{}; // where i am in the array
     s64 m_selected_count{};
     std::unique_ptr<List> m_list{};
     bool m_is_reversed{};
     bool m_dirty{};
+    bool m_pdm_initialized{};
+    std::unique_ptr<PlaytimeWorker> m_playtime_worker{};
 
     // use for detection game card removal to force a refresh.
     Event m_gc_event{};
@@ -167,9 +192,9 @@ struct ContentInfoEntry {
     std::vector<NcmRightsId> ncm_rights_id{};
 };
 
-auto BuildNspPath(const Entry& e, const NsApplicationContentMetaStatus& status, bool to_nsz = false) -> fs::FsPath;
+auto BuildNspPath(const Entry& e, std::string_view export_name, const NsApplicationContentMetaStatus& status, bool to_nsz = false) -> fs::FsPath;
 Result BuildContentEntry(const NsApplicationContentMetaStatus& status, ContentInfoEntry& out, bool to_nsz = false);
-Result BuildNspEntry(const Entry& e, const ContentInfoEntry& info, const keys::Keys& keys, NspEntry& out, bool to_nsz = false);
+Result BuildNspEntry(const Entry& e, std::string_view export_name, const ContentInfoEntry& info, const keys::Keys& keys, NspEntry& out, bool to_nsz = false);
 Result BuildNspEntries(Entry& e, const title::MetaEntries& meta_entries, std::vector<NspEntry>& out, bool to_nsz = false);
 Result BuildNspEntries(Entry& e, u32 flags, std::vector<NspEntry>& out, bool to_nsz = false);
 

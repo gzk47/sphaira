@@ -3,6 +3,14 @@
 #include "app.hpp"
 
 namespace sphaira::ui {
+namespace {
+
+constexpr float BOX_WIDTH = 770.f;
+constexpr float BOX_HEIGHT = 360.f;
+constexpr float BUTTON_HEIGHT = 75.f;
+constexpr float CONTENT_HEIGHT = BOX_HEIGHT - BUTTON_HEIGHT;
+
+} // namespace
 
 OptionBoxEntry::OptionBoxEntry(const std::string& text, const Vec4& pos)
 : m_text{text} {
@@ -29,14 +37,14 @@ OptionBox::OptionBox(const std::string& message, const Option& a, const Callback
 , m_image{image}
 , m_own_image{own_image} {
 
-    m_pos.w = 770.f;
-    m_pos.h = 295.f;
+    m_pos.w = BOX_WIDTH;
+    m_pos.h = BOX_HEIGHT;
     m_pos.x = (SCREEN_WIDTH / 2.f) - (m_pos.w / 2.f);
     m_pos.y = (SCREEN_HEIGHT / 2.f) - (m_pos.h / 2.f);
 
     auto box = m_pos;
-    box.y += 220.f;
-    box.h -= 220.f;
+    box.y += CONTENT_HEIGHT;
+    box.h = BUTTON_HEIGHT;
     m_entries.emplace_back(a, box);
 
     Setup(0);
@@ -53,15 +61,15 @@ OptionBox::OptionBox(const std::string& message, const Option& a, const Option& 
 , m_image{image}
 , m_own_image{own_image} {
 
-    m_pos.w = 770.f;
-    m_pos.h = 295.f;
+    m_pos.w = BOX_WIDTH;
+    m_pos.h = BOX_HEIGHT;
     m_pos.x = (SCREEN_WIDTH / 2.f) - (m_pos.w / 2.f);
     m_pos.y = (SCREEN_HEIGHT / 2.f) - (m_pos.h / 2.f);
 
     auto box = m_pos;
     box.w /= 2.f;
-    box.y += 220.f;
-    box.h -= 220.f;
+    box.y += CONTENT_HEIGHT;
+    box.h = BUTTON_HEIGHT;
     m_entries.emplace_back(a, box);
     box.x += box.w;
     m_entries.emplace_back(b, box);
@@ -95,7 +103,7 @@ auto OptionBox::Draw(NVGcontext* vg, Theme* theme) -> void {
     gfx::drawRect(vg, m_pos, theme->GetColour(ThemeEntryID_POPUP), 5);
 
     nvgSave(vg);
-    nvgTextLineHeight(vg, 1.5);
+    nvgIntersectScissor(vg, m_pos.x, m_pos.y, m_pos.w, CONTENT_HEIGHT - 2.f);
     if (m_image) {
         Vec4 image{m_pos};
         image.x += 40;
@@ -105,10 +113,47 @@ auto OptionBox::Draw(NVGcontext* vg, Theme* theme) -> void {
 
         const float padding = 40;
         gfx::drawImage(vg, image, m_image, 5);
-        gfx::drawTextBox(vg, image.x + image.w + padding, m_pos.y + 110.f, 22.f, m_pos.w - (image.x - m_pos.x) - image.w - padding*2, theme->GetColour(ThemeEntryID_TEXT), m_message.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
+        nvgTextLineHeight(vg, 1.35f);
+        gfx::drawTextBox(vg, image.x + image.w + padding, image.y, 22.f,
+            m_pos.w - (image.x - m_pos.x) - image.w - padding * 2.f,
+            theme->GetColour(ThemeEntryID_TEXT), m_message.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
     } else {
         const float padding = 30;
-        gfx::drawTextBox(vg, m_pos.x + padding, m_pos.y + 110.f, 24.f, m_pos.w - padding*2, theme->GetColour(ThemeEntryID_TEXT), m_message.c_str(), NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        const auto text_x = m_pos.x + padding;
+        const auto text_width = m_pos.w - padding * 2.f;
+        const auto first_break = m_message.find_first_of("\r\n");
+
+        if (first_break == std::string::npos) {
+            nvgTextLineHeight(vg, 1.35f);
+            gfx::drawTextBox(vg, text_x, m_pos.y + CONTENT_HEIGHT / 2.f, 24.f,
+                text_width, theme->GetColour(ThemeEntryID_TEXT), m_message.c_str(),
+                NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        } else {
+            const auto heading = m_message.substr(0, first_break);
+            auto body_start = first_break;
+            while (body_start < m_message.size() && (m_message[body_start] == '\r' || m_message[body_start] == '\n')) {
+                ++body_start;
+            }
+
+            constexpr float heading_y_offset = 28.f;
+            constexpr float body_gap = 18.f;
+            const auto heading_y = m_pos.y + heading_y_offset;
+            nvgTextLineHeight(vg, 1.2f);
+            gfx::drawTextBox(vg, text_x, heading_y, 26.f, text_width,
+                theme->GetColour(ThemeEntryID_TEXT), heading.c_str(), NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+
+            float heading_bounds[4]{};
+            nvgFontSize(vg, 26.f);
+            nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
+            nvgTextBoxBounds(vg, text_x, heading_y, text_width, heading.c_str(), nullptr, heading_bounds);
+
+            if (body_start < m_message.size()) {
+                nvgTextLineHeight(vg, 1.35f);
+                gfx::drawTextBox(vg, text_x, heading_bounds[3] + body_gap, 20.f,
+                    text_width, theme->GetColour(ThemeEntryID_TEXT), m_message.c_str() + body_start,
+                    NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+            }
+        }
     }
     nvgRestore(vg);
 
@@ -132,7 +177,7 @@ auto OptionBox::OnFocusLost() noexcept -> void {
 auto OptionBox::Setup(s64 index) -> void {
     m_index = std::min<s64>(m_entries.size() - 1, index);
     m_entries[m_index].Selected(true);
-    m_spacer_line = Vec4{m_pos.x, m_pos.y + 220.f - 2.f, m_pos.w, 2.f};
+    m_spacer_line = Vec4{m_pos.x, m_pos.y + CONTENT_HEIGHT - 2.f, m_pos.w, 2.f};
 
     SetActions(
         std::make_pair(Button::LEFT, Action{[this](){

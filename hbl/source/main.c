@@ -222,6 +222,55 @@ static void getCodeMemoryCapability(void) {
     }
 }
 
+static const romfs_file* findRomfsFile(const u8* table, u64 table_size, const romfs_dir* dir, const char* name) {
+    u32 offset = dir->childFile;
+    const size_t name_len = strlen(name);
+
+    while (offset != UINT32_MAX) {
+        if (offset > table_size || table_size - offset < sizeof(romfs_file))
+            return NULL;
+
+        const romfs_file* file = (const romfs_file*)(table + offset);
+        if (file->nameLen > table_size - offset - sizeof(romfs_file))
+            return NULL;
+
+        if (file->nameLen == name_len && !memcmp(file->name, name, name_len))
+            return file;
+
+        offset = file->sibling;
+    }
+
+    return NULL;
+}
+
+static bool readRomfsFile(FsStorage* storage, const romfs_header* header, const u8* table, u64 table_size, const romfs_dir* dir, const char* name, void* out, size_t out_size) {
+    const romfs_file* file = findRomfsFile(table, table_size, dir, name);
+    if (!file || file->dataSize > out_size)
+        return false;
+
+    return R_SUCCEEDED(fsStorageRead(storage, header->fileDataOff + file->dataOff, out, file->dataSize));
+}
+
+static Result restoreProgramPath(NcmStorageId storage_id, u64 program_id, const char* path) {
+    Result rc = smInitialize();
+    if (R_FAILED(rc))
+        return rc;
+
+    rc = lrInitialize();
+    if (R_SUCCEEDED(rc)) {
+        LrLocationResolver resolver;
+        rc = lrOpenLocationResolver(storage_id, &resolver);
+        if (R_SUCCEEDED(rc)) {
+            rc = lrLrRedirectProgramPath(&resolver, program_id, path);
+            serviceClose(&resolver.s);
+        }
+        lrExit();
+    }
+
+    smExit();
+    return rc;
+}
+
 void NX_NORETURN loadNro(void) {
     NroHeader* header = NULL;
     size_t rw_size = 0;
@@ -291,7 +340,7 @@ void NX_NORETURN loadNro(void) {
         }
 
         u8 romfs_dirs[1024 * 2]; // should be 1 entry ("/")
-        u8 romfs_files[1024 * 4]; // should be 2 entries (argv and nro)
+        u8 romfs_files[1024 * 4];
 
         if (romfs_header.dirTableSize > sizeof(romfs_dirs) || romfs_header.fileTableSize > sizeof(romfs_files)) {
             diagAbortWithResult(MAKERESULT(Module_HomebrewLoader, LibnxError_OutOfMemory));
@@ -306,21 +355,37 @@ void NX_NORETURN loadNro(void) {
         }
 
         const romfs_dir* dir = (const romfs_dir*)romfs_dirs;
-        const romfs_file* next_argv_file = (const romfs_file*)(romfs_files + dir->childFile);
-        const romfs_file* next_nro_file = (const romfs_file*)(romfs_files + next_argv_file->sibling);
+        if (!readRomfsFile(&s, &romfs_header, romfs_files, romfs_header.fileTableSize, dir, "nextArgv", g_nextArgv, sizeof(g_nextArgv) - 1) ||
+            !readRomfsFile(&s, &romfs_header, romfs_files, romfs_header.fileTableSize, dir, "nextNroPath", g_nextNroPath, sizeof(g_nextNroPath) - 1))
+            diagAbortWithResult(MAKERESULT(Module_HomebrewLoader, 44));
 
-        if (R_FAILED(rc = fsStorageRead(&s, romfs_header.fileDataOff + next_argv_file->dataOff, g_nextArgv, next_argv_file->dataSize))) {
-            diagAbortWithResult(rc);
-        }
+        char return_argv[sizeof(g_defaultArgv)] = {0};
+        char return_nro_path[sizeof(g_defaultNroPath)] = {0};
+        const bool has_return =
+            readRomfsFile(&s, &romfs_header, romfs_files, romfs_header.fileTableSize, dir, "returnArgv", return_argv, sizeof(return_argv) - 1) &&
+            readRomfsFile(&s, &romfs_header, romfs_files, romfs_header.fileTableSize, dir, "returnNroPath", return_nro_path, sizeof(return_nro_path) - 1);
 
-        if (R_FAILED(rc = fsStorageRead(&s, romfs_header.fileDataOff + next_nro_file->dataOff, g_nextNroPath, next_nro_file->dataSize))) {
-            diagAbortWithResult(rc);
-        }
+        NcmStorageId redirect_storage = NcmStorageId_None;
+        u64 redirect_program_id = 0;
+        char redirect_path[FS_MAX_PATH] = {0};
+        const bool has_redirect =
+            readRomfsFile(&s, &romfs_header, romfs_files, romfs_header.fileTableSize, dir, "redirectStorage", &redirect_storage, sizeof(redirect_storage)) &&
+            readRomfsFile(&s, &romfs_header, romfs_files, romfs_header.fileTableSize, dir, "redirectProgramId", &redirect_program_id, sizeof(redirect_program_id)) &&
+            readRomfsFile(&s, &romfs_header, romfs_files, romfs_header.fileTableSize, dir, "redirectPath", redirect_path, sizeof(redirect_path) - 1);
 
         fsStorageClose(&s);
 
-        strcpy(g_defaultNroPath, g_nextNroPath);
-        strcpy(g_defaultArgv, g_nextArgv);
+        if (has_redirect && R_FAILED(rc = restoreProgramPath(redirect_storage, redirect_program_id, redirect_path)))
+            diagAbortWithResult(rc);
+
+        if (has_return) {
+            strcpy(g_defaultNroPath, return_nro_path);
+            strcpy(g_defaultArgv, return_argv);
+        } else {
+            strcpy(g_defaultNroPath, g_nextNroPath);
+            strcpy(g_defaultArgv, g_nextArgv);
+        }
+
     }
 
     {

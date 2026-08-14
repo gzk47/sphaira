@@ -4,7 +4,7 @@ A homebrew menu for the Nintendo Switch.
 
 [See the GBATemp thread for more details / discussion](https://gbatemp.net/threads/sphaira-hbmenu-replacement.664523/).
 
-[We have now have a Discord server!](https://discord.gg/8vZBsrprEc) Please use the issues tab to report bugs, as it is much easier for me to track.
+[We have now have a Discord server!](https://discord.gg/pBybbdasfQ) Please use the issues tab to report bugs, as it is much easier for me to track.
 
 ## Showcase
 
@@ -104,4 +104,6 @@ The output will be found in `build/MinSizeRel/sphaira.nro`
 - [oss-nvjpg](https://github.com/averne/oss-nvjpg)
 - [nsz](https://github.com/nicoboss/nsz)
 - [themezer](https://themezer.net/)
+- [nx-versions](https://github.com/16BitWonder/nx-versions)
+- [NX-Update-Checker](https://github.com/16BitWonder/NX-Update-Checker)
 - Everyone who has contributed to this project!

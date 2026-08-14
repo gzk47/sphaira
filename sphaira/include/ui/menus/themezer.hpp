@@ -1,4 +1,3 @@
-#if 0
 #pragma once
 
 #include "ui/menus/menu_base.hpp"
@@ -18,6 +17,11 @@ enum class ImageDownloadState {
 };
 
 struct LazyImage {
+    LazyImage() = default;
+    LazyImage(const LazyImage&) = delete;
+    auto operator=(const LazyImage&) -> LazyImage& = delete;
+    LazyImage(LazyImage&& other) noexcept;
+    auto operator=(LazyImage&& other) noexcept -> LazyImage&;
     ~LazyImage();
     int image{};
     int w{}, h{};
@@ -75,6 +79,7 @@ struct PackListEntry {
     std::string id{};
     Creator creator{};
     Details details{};
+    Preview preview{};
     std::vector<ThemeEntry> themes{};
 };
 
@@ -173,7 +178,7 @@ private:
     option::OptionBool m_nsfw{INI_SECTION, "nsfw", false};
 
     bool m_checked_for_nro{};
+    u64 m_generation{};
 };
 
 } // namespace sphaira::ui::menu::themezer
-#endif

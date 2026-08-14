@@ -15,10 +15,7 @@ Result ShowInternal(Config& cfg, const char* header, const char* guide, const ch
     R_TRY(swkbdCreate(&c, 0));
     swkbdConfigMakePresetDefault(&c);
     swkbdConfigSetInitialCursorPos(&c, 1);
-
-    if (cfg.numpad) {
-        swkbdConfigSetType(&c, SwkbdType_NumPad);
-    }
+    swkbdConfigSetType(&c, cfg.numpad ? SwkbdType_NumPad : SwkbdType_All);
 
     // only works if len_max <= 32.
     if (header) {

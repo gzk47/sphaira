@@ -26,6 +26,10 @@ enum class ImageDownloadState {
 
 struct LazyImage {
     LazyImage() = default;
+    LazyImage(const LazyImage&) = delete;
+    auto operator=(const LazyImage&) -> LazyImage& = delete;
+    LazyImage(LazyImage&& other) noexcept;
+    auto operator=(LazyImage&& other) noexcept -> LazyImage&;
     ~LazyImage();
     int image{};
     int w{}, h{};
@@ -60,6 +64,18 @@ struct Entry {
     std::string details{};
     u64 app_dls{};
     std::string md5{}; // md5 of the zip
+    std::string sha256{};
+
+    // Optional resource links used by third-party store backends. Relative
+    // links are resolved against the selected store URL.
+    std::string icon_url{};
+    std::string banner_url{};
+    std::string manifest_url{};
+    std::string download_url{};
+    std::string zip_url{};
+    std::string resource_url{};
+    std::string store_base{};
+    u64 store_id{};
 
     LazyImage image{};
     u32 updated_num{};
@@ -143,6 +159,11 @@ enum OrderType {
 
 using LayoutType = grid::LayoutType;
 
+struct StoreSource {
+    std::string name;
+    std::string url;
+};
+
 struct Menu final : grid::Menu {
     Menu(u32 flags);
     ~Menu();
@@ -174,6 +195,13 @@ private:
     void SetFilter();
     void SetSearch(const std::string& term);
     void OnLayoutChange();
+    void LoadStoreSources();
+    void SaveStoreSources();
+    void ShowStoreSelector();
+    void AddStoreSource();
+    void DeleteActiveStore();
+    void SwitchStore(s64 index);
+    void StartStoreDownload();
 
 private:
     static constexpr inline const char* INI_SECTION = "appstore";
@@ -205,6 +233,11 @@ private:
     bool m_is_search{};
     bool m_is_author{};
     bool m_dirty{}; // if set, does a sort
+
+    std::vector<StoreSource> m_store_sources{};
+    s64 m_active_store{};
+    fs::FsPath m_repo_path{};
+    u64 m_store_generation{};
 };
 
 } // namespace sphaira::ui::menu::appstore

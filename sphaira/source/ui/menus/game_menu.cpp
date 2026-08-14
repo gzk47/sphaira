@@ -8,6 +8,7 @@
 #include "swkbd.hpp"
 
 #include "utils/utils.hpp"
+#include "utils/thread.hpp"
 #include "utils/nsz_dumper.hpp"
 
 #include "ui/menus/game_menu.hpp"
@@ -31,6 +32,9 @@
 #include <utility>
 #include <cstring>
 #include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <optional>
 #include <minIni.h>
 
 namespace sphaira::ui::menu::game {
@@ -233,6 +237,200 @@ Result CreateSave(u64 app_id, AccountUid uid) {
 
 } // namespace
 
+struct PlaytimeWorker {
+    struct Job {
+        u64 app_id{};
+        u64 last_played{};
+
+        bool operator==(const Job&) const = default;
+    };
+
+    struct Data {
+        u64 playtime{};
+        std::vector<u64> user_playtimes{};
+    };
+
+    struct ResultData {
+        Job job{};
+        Data data{};
+    };
+
+    explicit PlaytimeWorker(const std::vector<AccountProfileBase>& accounts) : m_accounts{accounts} {
+        ueventCreate(&m_uevent, true);
+        mutexInit(&m_job_mutex);
+        mutexInit(&m_result_mutex);
+        m_running = true;
+
+        if (R_FAILED(utils::CreateThread(&m_thread, ThreadFunc, this, 1024 * 32))) {
+            m_running = false;
+            return;
+        }
+
+        if (R_FAILED(threadStart(&m_thread))) {
+            threadClose(&m_thread);
+            m_running = false;
+            return;
+        }
+
+        m_started = true;
+    }
+
+    ~PlaytimeWorker() {
+        Stop();
+    }
+
+    bool IsRunning() const {
+        return m_started && m_running;
+    }
+
+    void Stop() {
+        if (!m_started) {
+            return;
+        }
+
+        m_running = false;
+        ueventSignal(&m_uevent);
+        threadWaitForExit(&m_thread);
+        threadClose(&m_thread);
+        m_started = false;
+    }
+
+    void Request(const Job& job) {
+        if (!IsRunning()) {
+            return;
+        }
+
+        SCOPED_MUTEX(&m_job_mutex);
+        if ((m_active && *m_active == job) || (m_completed && *m_completed == job)) {
+            m_pending.reset();
+            return;
+        }
+        if (m_pending && *m_pending == job) {
+            return;
+        }
+
+        m_pending = job;
+        ueventSignal(&m_uevent);
+    }
+
+    auto TakeResults() -> std::vector<ResultData> {
+        SCOPED_MUTEX(&m_result_mutex);
+        std::vector<ResultData> out;
+        std::swap(out, m_results);
+        return out;
+    }
+
+    static auto Query(u64 app_id, const std::vector<AccountProfileBase>& accounts, const std::atomic_bool* running = nullptr) -> std::optional<Data> {
+        Data data;
+        data.user_playtimes.reserve(accounts.size());
+
+        bool query_succeeded{};
+        for (const auto& account : accounts) {
+            if (running && !*running) {
+                return std::nullopt;
+            }
+
+            PdmPlayStatistics stats{};
+            u64 user_playtime{};
+            if (R_SUCCEEDED(pdmqryQueryPlayStatisticsByApplicationIdAndUserAccountId(app_id, account.uid, true, &stats))) {
+                user_playtime = stats.playtime;
+                query_succeeded = true;
+            }
+
+            data.playtime += user_playtime;
+            data.user_playtimes.push_back(user_playtime);
+        }
+
+        if (!data.playtime) {
+            if (running && !*running) {
+                return std::nullopt;
+            }
+
+            PdmPlayStatistics stats{};
+            if (R_SUCCEEDED(pdmqryQueryPlayStatisticsByApplicationId(app_id, true, &stats))) {
+                data.playtime = stats.playtime;
+                query_succeeded = true;
+            }
+        }
+
+        if (!query_succeeded) {
+            return std::nullopt;
+        }
+        return data;
+    }
+
+    static void WriteCache(const Job& job, const Data& data) {
+        char section[33];
+        std::snprintf(section, sizeof(section), "%016lX", job.app_id);
+
+        for (size_t i = 0; i < data.user_playtimes.size(); i++) {
+            char key[32];
+            std::snprintf(key, sizeof(key), "user_%zu_mins", i);
+            ini_putl(section, key, data.user_playtimes[i] / 60000000000ULL, App::PLAYLOG_PATH);
+        }
+
+        ini_putl(section, "last_played", job.last_played, App::PLAYLOG_PATH);
+        ini_putl(section, "playtime_mins", data.playtime / 60000000000ULL, App::PLAYLOG_PATH);
+    }
+
+private:
+    static void ThreadFunc(void* user) {
+        static_cast<PlaytimeWorker*>(user)->Run();
+    }
+
+    void Run() {
+        const auto waiter = waiterForUEvent(&m_uevent);
+        while (m_running) {
+            waitSingle(waiter, UINT64_MAX);
+            if (!m_running) {
+                return;
+            }
+
+            std::optional<Job> job;
+            {
+                SCOPED_MUTEX(&m_job_mutex);
+                if (m_pending) {
+                    job = std::exchange(m_pending, std::nullopt);
+                    m_active = job;
+                }
+            }
+            if (!job) {
+                continue;
+            }
+
+            auto data = Query(job->app_id, m_accounts, &m_running);
+            if (data && m_running) {
+                WriteCache(*job, *data);
+                {
+                    SCOPED_MUTEX(&m_result_mutex);
+                    m_results.push_back({*job, std::move(*data)});
+                }
+            }
+
+            {
+                SCOPED_MUTEX(&m_job_mutex);
+                if (data) {
+                    m_completed = job;
+                }
+                m_active.reset();
+            }
+        }
+    }
+
+private:
+    std::vector<AccountProfileBase> m_accounts{};
+    std::vector<ResultData> m_results{};
+    std::optional<Job> m_pending{};
+    std::optional<Job> m_active{};
+    std::optional<Job> m_completed{};
+    UEvent m_uevent{};
+    Mutex m_job_mutex{};
+    Mutex m_result_mutex{};
+    Thread m_thread{};
+    std::atomic_bool m_running{};
+    bool m_started{};
+};
+
 Result NspEntry::Read(void* buf, s64 off, s64 size, u64* bytes_read) {
     if (off == nsp_size) {
         log_write("[NspEntry::Read] read at eof...\n");
@@ -324,6 +522,18 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
             auto options = std::make_unique<Sidebar>("Game Options"_i18n, Sidebar::Side::RIGHT);
             ON_SCOPE_EXIT(App::Push(std::move(options)));
 
+            if (!m_all_entries.empty() || !m_search_query.empty()) {
+                options->Add<SidebarEntryCallback>("Search"_i18n, [this](){
+                    std::string out;
+                    if (R_SUCCEEDED(swkbd::ShowText(out, "Search"_i18n.c_str(), "Enter title name..."_i18n.c_str(), m_search_query.c_str()))) {
+                        m_search_query = std::move(out);
+                        Filter();
+                        SortAndFindLastFile(false);
+                        ClearSelection();
+                    }
+                }, true);
+            }
+
             if (m_entries.size()) {
                 options->Add<SidebarEntryCallback>("Sort By"_i18n, [this](){
                     auto options = std::make_unique<Sidebar>("Sort Options"_i18n, Sidebar::Side::RIGHT);
@@ -331,6 +541,11 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
 
                     SidebarEntryArray::Items sort_items;
                     sort_items.push_back("Updated"_i18n);
+                    sort_items.push_back("Title"_i18n);
+                    sort_items.push_back("Title ID"_i18n);
+                    sort_items.push_back("Last played"_i18n);
+                    sort_items.push_back("Total playtime"_i18n);
+                    sort_items.push_back("Publisher"_i18n);
 
                     SidebarEntryArray::Items order_items;
                     order_items.push_back("Descending"_i18n);
@@ -342,8 +557,12 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
                     layout_items.push_back("Grid"_i18n);
 
                     options->Add<SidebarEntryArray>("Sort"_i18n, sort_items, [this](s64& index_out){
-                        m_sort.Set(index_out);
-                        SortAndFindLastFile(false);
+                        if (index_out == SortType_TotalPlayTime) {
+                            LoadPlaytime();
+                        } else {
+                            m_sort.Set(index_out);
+                            SortAndFindLastFile(false);
+                        }
                     }, m_sort.Get());
 
                     options->Add<SidebarEntryArray>("Order"_i18n, order_items, [this](s64& index_out){
@@ -370,6 +589,7 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
                     const auto random_index = randomGet64() % std::size(m_entries);
                     auto& e = m_entries[random_index];
                     LoadControlEntry(e, true);
+                    SyncEntryToMaster(e);
 
                     App::Push<OptionBox>(
                         i18n::Reorder("Launch ", e.GetName()) + '?',
@@ -464,15 +684,23 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
     ns::Initialize();
     es::Initialize();
     title::Init();
+    m_pdm_initialized = R_SUCCEEDED(pdmqryInitialize());
+    if (!m_pdm_initialized) {
+        log_write("[PDM] failed to initialize pdm:qry; play statistics will be unavailable\n");
+    }
 
     fsOpenGameCardDetectionEventNotifier(std::addressof(m_gc_event_notifier));
     fsEventNotifierGetEventHandle(std::addressof(m_gc_event_notifier), std::addressof(m_gc_event), true);
 }
 
 Menu::~Menu() {
+    StopPlaytimeWorker(false);
     title::Exit();
 
     FreeEntries();
+    if (m_pdm_initialized) {
+        pdmqryExit();
+    }
     ns::Exit();
     es::Exit();
 
@@ -481,6 +709,8 @@ Menu::~Menu() {
 }
 
 void Menu::Update(Controller* controller, TouchInfo* touch) {
+    ApplyPlaytimeResults();
+
     if (g_change_signalled.exchange(false)) {
         m_dirty = true;
     }
@@ -535,6 +765,8 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
             }
         }
 
+        SyncEntryToMaster(e);
+
         char title_id[33];
         std::snprintf(title_id, sizeof(title_id), "%016lX", e.app_id);
 
@@ -550,24 +782,66 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
 
 void Menu::OnFocusGained() {
     MenuBase::OnFocusGained();
-    if (m_entries.empty()) {
+    if (m_all_entries.empty()) {
         ScanHomebrew();
     }
 }
 
 void Menu::SetIndex(s64 index) {
+    if (m_entries.empty()) {
+        m_index = 0;
+        SetTitleSubHeading("");
+        this->SetSubHeading("0 / 0");
+        return;
+    }
+
     m_index = index;
     if (!m_index) {
         m_list->SetYoff(0);
     }
 
+    auto& entry = m_entries[m_index];
     char title_id[33];
-    std::snprintf(title_id, sizeof(title_id), "%016lX", m_entries[m_index].app_id);
-    SetTitleSubHeading(title_id);
+    std::snprintf(title_id, sizeof(title_id), "%016lX", entry.app_id);
+
+    std::string title_info = title_id;
+    if (!entry.user_playtimes.empty()) {
+        bool showed_profile{};
+        if (entry.user_playtimes.size() > 1) {
+            for (size_t i = 0; i < entry.user_playtimes.size(); i++) {
+                if (!entry.user_playtimes[i]) {
+                    continue;
+                }
+
+                const u64 total_minutes = entry.user_playtimes[i] / 60000000000ULL;
+                title_info += " | P" + std::to_string(i + 1) + " " + std::to_string(total_minutes / 60) + "h " + std::to_string(total_minutes % 60) + "m";
+                showed_profile = true;
+            }
+        }
+
+        if (!showed_profile) {
+            const u64 total_minutes = entry.playtime / 60000000000ULL;
+            title_info += " | " + std::to_string(total_minutes / 60) + "h " + std::to_string(total_minutes % 60) + "m";
+        }
+    } else if (entry.playtime_cached) {
+        const u64 total_minutes = entry.playtime / 60000000000ULL;
+        title_info += " | " + std::to_string(total_minutes / 60) + "h " + std::to_string(total_minutes % 60) + "m";
+    } else {
+        title_info += " | " + "No statistics"_i18n;
+    }
+
+    SetTitleSubHeading(title_info);
     this->SetSubHeading(std::to_string(m_index + 1) + " / " + std::to_string(m_entries.size()));
+
+    const bool profile_cache_missing = !m_accounts.empty() && entry.user_playtimes.size() != m_accounts.size();
+    if (m_playtime_worker && (!entry.playtime_cached || entry.last_played != entry.playtime_cached_last_played || profile_cache_missing)) {
+        m_playtime_worker->Request({entry.app_id, entry.last_played});
+    }
 }
 
 void Menu::ScanHomebrew() {
+    StopPlaytimeWorker(false);
+
     constexpr auto ENTRY_CHUNK_COUNT = 1000;
     const auto hide_forwarders = m_hide_forwarders.Get();
     TimeStamp ts;
@@ -578,6 +852,10 @@ void Menu::ScanHomebrew() {
     FreeEntries();
     m_entries.reserve(ENTRY_CHUNK_COUNT);
     g_change_signalled = false;
+
+    if (m_accounts.empty()) {
+        m_accounts = App::GetAccountList();
+    }
 
     std::vector<NsApplicationRecord> record_list(ENTRY_CHUNK_COUNT);
     s32 offset{};
@@ -592,6 +870,10 @@ void Menu::ScanHomebrew() {
             break;
         }
 
+        std::vector<u64> batch_ids;
+        batch_ids.reserve(record_count);
+        const auto batch_start = m_entries.size();
+
         for (s32 i = 0; i < record_count; i++) {
             const auto& e = record_list[i];
 
@@ -599,49 +881,317 @@ void Menu::ScanHomebrew() {
                 continue;
             }
 
-            m_entries.emplace_back(e.application_id, e.last_event);
+            auto& entry = m_entries.emplace_back(e.application_id, e.last_event);
+            batch_ids.push_back(entry.app_id);
+
+            char section[33];
+            std::snprintf(section, sizeof(section), "%016lX", entry.app_id);
+            entry.playtime_cached_last_played = static_cast<u64>(ini_getl(section, "last_played", 0, App::PLAYLOG_PATH));
+            const auto cached_minutes = ini_getl(section, "playtime_mins", -1, App::PLAYLOG_PATH);
+            if (cached_minutes >= 0) {
+                entry.playtime = static_cast<u64>(cached_minutes) * 60000000000ULL;
+                entry.playtime_cached = true;
+
+                bool user_cache_complete{true};
+                for (size_t user = 0; user < m_accounts.size(); user++) {
+                    char key[32];
+                    std::snprintf(key, sizeof(key), "user_%zu_mins", user);
+                    const auto user_minutes = ini_getl(section, key, -1, App::PLAYLOG_PATH);
+                    if (user_minutes < 0) {
+                        user_cache_complete = false;
+                        break;
+                    }
+                    entry.user_playtimes.push_back(static_cast<u64>(user_minutes) * 60000000000ULL);
+                }
+                if (!user_cache_complete) {
+                    entry.user_playtimes.clear();
+                }
+            }
+        }
+
+        if (m_pdm_initialized && !batch_ids.empty()) {
+            std::vector<PdmLastPlayTime> play_times(batch_ids.size());
+            s32 play_time_count{};
+            if (R_SUCCEEDED(pdmqryQueryLastPlayTime(true, play_times.data(), batch_ids.data(), batch_ids.size(), &play_time_count))) {
+                for (s32 i = 0; i < play_time_count; i++) {
+                    const auto& play_time = play_times[i];
+                    if (!play_time.flag) {
+                        continue;
+                    }
+
+                    const auto it = std::find_if(m_entries.begin() + batch_start, m_entries.end(), [&play_time](const auto& entry) {
+                        return entry.app_id == play_time.application_id;
+                    });
+                    if (it != m_entries.end()) {
+                        it->last_played = pdmPlayTimestampToPosix(play_time.timestamp_user);
+                    }
+                }
+            }
         }
 
         offset += record_count;
     }
 
+    m_all_entries = m_entries;
     m_is_reversed = false;
     m_dirty = false;
-    log_write("games found: %zu time_taken: %.2f seconds %zu ms %zu ns\n", m_entries.size(), ts.GetSecondsD(), ts.GetMs(), ts.GetNs());
+    log_write("games found: %zu time_taken: %.2f seconds %zu ms %zu ns\n", m_all_entries.size(), ts.GetSecondsD(), ts.GetMs(), ts.GetNs());
+    this->Filter();
     this->Sort();
+    StartPlaytimeWorker();
     SetIndex(0);
     ClearSelection();
 }
 
-void Menu::Sort() {
-    // const auto sort = m_sort.Get();
-    const auto order = m_order.Get();
+void Menu::Filter() {
+    if (m_search_query.empty()) {
+        m_entries = m_all_entries;
+        return;
+    }
 
-    if (order == OrderType_Ascending) {
-        if (!m_is_reversed) {
-            std::ranges::reverse(m_entries);
-            m_is_reversed = true;
-        }
-    } else {
-        if (m_is_reversed) {
-            std::ranges::reverse(m_entries);
-            m_is_reversed = false;
+    auto query = m_search_query;
+    std::ranges::transform(query, query.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+
+    m_entries.clear();
+    for (auto& entry : m_all_entries) {
+        LoadControlEntry(entry);
+        auto name = std::string{entry.GetName()};
+        std::ranges::transform(name, name.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+
+        if (name.find(query) != std::string::npos) {
+            m_entries.push_back(entry);
         }
     }
 }
 
+void Menu::Sort() {
+    const auto sort = m_sort.Get();
+    const auto order = m_order.Get();
+
+    switch (sort) {
+        case SortType_Updated:
+            std::ranges::sort(m_entries, [](const auto& lhs, const auto& rhs) {
+                return lhs.last_event > rhs.last_event;
+            });
+            break;
+
+        case SortType_Title:
+            for (auto& entry : m_entries) {
+                LoadControlEntry(entry);
+                SyncEntryToMaster(entry);
+            }
+            std::ranges::sort(m_entries, [](const auto& lhs, const auto& rhs) {
+                return strcasecmp(lhs.GetName(), rhs.GetName()) > 0;
+            });
+            break;
+
+        case SortType_TitleID:
+            std::ranges::sort(m_entries, [](const auto& lhs, const auto& rhs) {
+                return lhs.app_id > rhs.app_id;
+            });
+            break;
+
+        case SortType_LastPlayed:
+            std::ranges::sort(m_entries, [](const auto& lhs, const auto& rhs) {
+                return lhs.last_played > rhs.last_played;
+            });
+            break;
+
+        case SortType_TotalPlayTime:
+            std::ranges::sort(m_entries, [](const auto& lhs, const auto& rhs) {
+                return lhs.playtime > rhs.playtime;
+            });
+            break;
+
+        case SortType_Publisher:
+            for (auto& entry : m_entries) {
+                LoadControlEntry(entry);
+                SyncEntryToMaster(entry);
+            }
+            std::ranges::sort(m_entries, [](const auto& lhs, const auto& rhs) {
+                const auto publisher_order = strcasecmp(lhs.GetAuthor(), rhs.GetAuthor());
+                if (publisher_order) {
+                    return publisher_order > 0;
+                }
+
+                const auto title_order = strcasecmp(lhs.GetName(), rhs.GetName());
+                if (title_order) {
+                    return title_order > 0;
+                }
+
+                return lhs.app_id > rhs.app_id;
+            });
+            break;
+
+        default:
+            m_sort.Set(SortType_Updated);
+            Sort();
+            return;
+    }
+
+    if (order == OrderType_Ascending) {
+        std::ranges::reverse(m_entries);
+    }
+    m_is_reversed = order == OrderType_Ascending;
+}
+
+void Menu::SyncEntryToMaster(const Entry& entry) {
+    const auto it = std::ranges::find_if(m_all_entries, [&entry](const auto& candidate) {
+        return candidate.app_id == entry.app_id;
+    });
+    if (it != m_all_entries.end()) {
+        const bool selected = it->selected;
+        *it = entry;
+        it->selected = selected;
+    }
+}
+
+void Menu::StartPlaytimeWorker() {
+    if (!m_pdm_initialized || m_playtime_worker) {
+        return;
+    }
+
+    m_playtime_worker = std::make_unique<PlaytimeWorker>(m_accounts);
+    if (!m_playtime_worker->IsRunning()) {
+        log_write("[PDM] failed to start playtime worker\n");
+        m_playtime_worker.reset();
+    }
+}
+
+void Menu::StopPlaytimeWorker(bool apply_results) {
+    if (!m_playtime_worker) {
+        return;
+    }
+
+    m_playtime_worker->Stop();
+    if (apply_results) {
+        ApplyPlaytimeResults();
+    }
+    m_playtime_worker.reset();
+}
+
+void Menu::ApplyPlaytimeResults() {
+    if (!m_playtime_worker) {
+        return;
+    }
+
+    const auto selected_app_id = m_entries.empty() ? 0 : m_entries[m_index].app_id;
+    bool selected_updated{};
+
+    for (auto& result : m_playtime_worker->TakeResults()) {
+        const auto apply = [&result](Entry& entry) {
+            entry.playtime = result.data.playtime;
+            entry.user_playtimes = result.data.user_playtimes;
+            entry.playtime_cached_last_played = result.job.last_played;
+            entry.playtime_cached = true;
+        };
+
+        const auto master = std::ranges::find_if(m_all_entries, [&result](const auto& entry) {
+            return entry.app_id == result.job.app_id;
+        });
+        if (master != m_all_entries.end()) {
+            apply(*master);
+        }
+
+        const auto visible = std::ranges::find_if(m_entries, [&result](const auto& entry) {
+            return entry.app_id == result.job.app_id;
+        });
+        if (visible != m_entries.end()) {
+            apply(*visible);
+            selected_updated |= visible->app_id == selected_app_id;
+        }
+    }
+
+    if (selected_updated && !m_entries.empty()) {
+        SetIndex(m_index);
+    }
+}
+
+void Menu::LoadPlaytime() {
+    if (!m_pdm_initialized) {
+        App::Notify("Play statistics unavailable"_i18n);
+        return;
+    }
+
+    StopPlaytimeWorker(true);
+
+    if (m_accounts.empty()) {
+        m_accounts = App::GetAccountList();
+    }
+
+    std::vector<size_t> update_indices;
+    for (size_t i = 0; i < m_all_entries.size(); i++) {
+        const auto& entry = m_all_entries[i];
+        const bool profile_cache_missing = !m_accounts.empty() && entry.user_playtimes.size() != m_accounts.size();
+        if (!entry.playtime_cached || entry.last_played != entry.playtime_cached_last_played || profile_cache_missing) {
+            update_indices.push_back(i);
+        }
+    }
+
+    if (update_indices.empty()) {
+        StartPlaytimeWorker();
+        m_sort.Set(SortType_TotalPlayTime);
+        Filter();
+        SortAndFindLastFile(false);
+        return;
+    }
+
+    App::Push<ProgressBox>(0, "Updating play statistics"_i18n, "", [this, update_indices](auto pbox) -> Result {
+        pbox->UpdateTransfer(0, update_indices.size());
+
+        for (size_t i = 0; i < update_indices.size(); i++) {
+            R_TRY(pbox->ShouldExitResult());
+
+            auto& entry = m_all_entries[update_indices[i]];
+            const PlaytimeWorker::Job job{entry.app_id, entry.last_played};
+            if (auto data = PlaytimeWorker::Query(entry.app_id, m_accounts)) {
+                entry.playtime = data->playtime;
+                entry.user_playtimes = data->user_playtimes;
+                entry.playtime_cached_last_played = entry.last_played;
+                entry.playtime_cached = true;
+                PlaytimeWorker::WriteCache(job, *data);
+            }
+
+            pbox->SetTitle(std::to_string(i + 1) + " / " + std::to_string(update_indices.size()));
+            pbox->UpdateTransfer(i + 1, update_indices.size());
+        }
+
+        R_SUCCEED();
+    }, [this](Result rc) {
+        StartPlaytimeWorker();
+        if (R_SUCCEEDED(rc)) {
+            m_sort.Set(SortType_TotalPlayTime);
+            Filter();
+            SortAndFindLastFile(false);
+        } else {
+            App::PushErrorBox(rc, "Failed to update play statistics!"_i18n);
+        }
+    });
+}
+
 void Menu::SortAndFindLastFile(bool scan) {
-    const auto app_id = m_entries[m_index].app_id;
+    const bool had_entry = !m_entries.empty();
+    const auto app_id = had_entry ? m_entries[m_index].app_id : 0;
     if (scan) {
         ScanHomebrew();
     } else {
         Sort();
     }
+
+    if (m_entries.empty()) {
+        SetIndex(0);
+        return;
+    }
+
     SetIndex(0);
 
     s64 index = -1;
     for (u64 i = 0; i < m_entries.size(); i++) {
-        if (app_id == m_entries[i].app_id) {
+        if (had_entry && app_id == m_entries[i].app_id) {
             index = i;
             break;
         }
@@ -663,11 +1213,12 @@ void Menu::SortAndFindLastFile(bool scan) {
 void Menu::FreeEntries() {
     auto vg = App::GetVg();
 
-    for (auto&p : m_entries) {
+    for (auto&p : m_all_entries) {
         FreeEntry(vg, p);
     }
 
     m_entries.clear();
+    m_all_entries.clear();
 }
 
 void Menu::OnLayoutChange() {
@@ -843,10 +1394,7 @@ void DeleteMetaEntries(u64 app_id, int image, const std::string& name, const tit
     });
 }
 
-auto BuildNspPath(const Entry& e, const NsApplicationContentMetaStatus& status, bool to_nsz) -> fs::FsPath {
-    fs::FsPath name_buf = e.GetName();
-    title::utilsReplaceIllegalCharacters(name_buf, true);
-
+auto BuildNspPath(const Entry& e, std::string_view export_name, const NsApplicationContentMetaStatus& status, bool to_nsz) -> fs::FsPath {
     char version[sizeof(NacpStruct::display_version) + 1]{};
     if (status.meta_type == NcmContentMetaType_Patch) {
         u64 program_id;
@@ -861,14 +1409,24 @@ auto BuildNspPath(const Entry& e, const NsApplicationContentMetaStatus& status, 
 
     const auto ext = to_nsz ? "nsz" : "nsp";
 
-    fs::FsPath path;
-    if (App::GetApp()->m_dump_app_folder.Get()) {
-        std::snprintf(path, sizeof(path), "%s/%s %s[%016lX][v%u][%s].%s", name_buf.s, name_buf.s, version, status.application_id, status.version, ncm::GetMetaTypeShortStr(status.meta_type), ext);
+    fs::FsPath file_name;
+    if (export_name.empty()) {
+        std::snprintf(file_name, sizeof(file_name), "%s[%016lX][v%u][%s].%s", version, status.application_id, status.version, ncm::GetMetaTypeShortStr(status.meta_type), ext);
     } else {
-        std::snprintf(path, sizeof(path), "%s %s[%016lX][v%u][%s].%s", name_buf.s, version, status.application_id, status.version, ncm::GetMetaTypeShortStr(status.meta_type), ext);
+        std::snprintf(file_name, sizeof(file_name), "%.*s %s[%016lX][v%u][%s].%s", static_cast<int>(export_name.size()), export_name.data(), version, status.application_id, status.version, ncm::GetMetaTypeShortStr(status.meta_type), ext);
     }
 
-    return path;
+    if (App::GetApp()->m_dump_app_folder.Get()) {
+        fs::FsPath folder;
+        if (export_name.empty()) {
+            std::snprintf(folder, sizeof(folder), "%016lX", e.app_id);
+        } else {
+            std::snprintf(folder, sizeof(folder), "%.*s", static_cast<int>(export_name.size()), export_name.data());
+        }
+        return fs::AppendPath(folder, file_name);
+    }
+
+    return file_name;
 }
 
 Result BuildContentEntry(const NsApplicationContentMetaStatus& status, ContentInfoEntry& out, bool to_nsz) {
@@ -907,9 +1465,9 @@ Result BuildContentEntry(const NsApplicationContentMetaStatus& status, ContentIn
     R_SUCCEED();
 }
 
-Result BuildNspEntry(const Entry& e, const ContentInfoEntry& info, const keys::Keys& keys, NspEntry& out, bool to_nsz) {
+Result BuildNspEntry(const Entry& e, std::string_view export_name, const ContentInfoEntry& info, const keys::Keys& keys, NspEntry& out, bool to_nsz) {
     out.application_name = e.GetName();
-    out.path = BuildNspPath(e, info.status, to_nsz);
+    out.path = BuildNspPath(e, export_name, info.status, to_nsz);
     s64 offset{};
 
     for (auto& e : info.content_infos) {
@@ -962,6 +1520,10 @@ Result BuildNspEntry(const Entry& e, const ContentInfoEntry& info, const keys::K
 Result BuildNspEntries(Entry& e, const title::MetaEntries& meta_entries, std::vector<NspEntry>& out, bool to_nsz) {
     LoadControlEntry(e);
 
+    const auto fix_filenames = App::GetApp()->m_dump_fix_filenames.Get();
+    const auto english_name = fix_filenames ? title::GetEnglishTitleName(e.app_id) : std::string{};
+    const auto export_name = title::MakeExportTitleName(e.GetName(), english_name, fix_filenames);
+
     keys::Keys keys;
     R_TRY(keys::parse_keys(keys, true));
 
@@ -970,7 +1532,7 @@ Result BuildNspEntries(Entry& e, const title::MetaEntries& meta_entries, std::ve
         R_TRY(BuildContentEntry(status, info));
 
         NspEntry nsp;
-        R_TRY(BuildNspEntry(e, info, keys, nsp, to_nsz));
+        R_TRY(BuildNspEntry(e, export_name, info, keys, nsp, to_nsz));
         out.emplace_back(nsp).icon = e.image;
     }
 

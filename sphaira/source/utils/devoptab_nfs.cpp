@@ -123,9 +123,9 @@ bool Device::Mount() {
         url = "nfs://" + url;
     }
 
-    auto nfs_url = nfs_parse_url_full(nfs, url.c_str());
+    auto nfs_url = nfs_parse_url_dir(nfs, url.c_str());
     if (!nfs_url) {
-        log_write("[NFS] nfs_parse_url() failed for url: %s\n", url.c_str());
+        log_write("[NFS] nfs_parse_url_dir() failed for url: %s error: %s\n", url.c_str(), nfs_get_error(nfs));
         return false;
     }
     ON_SCOPE_EXIT(nfs_destroy_url(nfs_url));

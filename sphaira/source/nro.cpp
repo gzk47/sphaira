@@ -1,8 +1,10 @@
 #include "nro.hpp"
+#include "nacp_compat.hpp"
 #include "defines.hpp"
 #include "evman.hpp"
 #include "app.hpp"
 #include "log.hpp"
+#include "owo.hpp"
 
 #include <switch.h>
 #include <vector>
@@ -134,6 +136,44 @@ auto nro_scan_internal(const fs::FsPath& path, std::vector<NroEntry>& nros, bool
     return nro_scan_internal(&fs, path, nros, nested, scan_all_dir, root);
 }
 
+auto nro_scan_depth_internal(fs::Fs* fs, const fs::FsPath& path, std::vector<NroEntry>& nros, u32 depth, u32 max_depth) -> Result {
+    u32 open_mode = FsDirOpenMode_ReadFiles | FsDirOpenMode_NoFileSize;
+    if (depth < max_depth) {
+        open_mode |= FsDirOpenMode_ReadDirs;
+    }
+
+    fs::Dir dir;
+    R_TRY(fs->OpenDirectory(path, open_mode, &dir));
+
+    std::vector<FsDirectoryEntry> entries;
+    R_TRY(dir.ReadAll(entries));
+
+    for (const auto& entry : entries) {
+        if (entry.name[0] == '.') {
+            continue;
+        }
+
+        const auto full_path = fs::AppendPath(path, entry.name);
+        if (entry.type == FsDirEntryType_Dir) {
+            nro_scan_depth_internal(fs, full_path, nros, depth + 1, max_depth);
+        } else if (entry.type == FsDirEntryType_File) {
+            const std::string_view name{entry.name};
+            if (name.size() < 4 || strcasecmp(name.data() + name.size() - 4, ".nro")) {
+                continue;
+            }
+
+            NroEntry nro;
+            if (R_SUCCEEDED(nro_parse_internal(fs, full_path, nro))) {
+                nros.emplace_back(std::move(nro));
+            } else {
+                log_write("error when trying to parse %s\n", full_path.s);
+            }
+        }
+    }
+
+    R_SUCCEED();
+}
+
 auto nro_get_icon_internal(fs::File* f, u64 size, u64 offset) -> std::vector<u8> {
     // protect again really messed up sizes.
     if (size > 1024 * 1024) {
@@ -157,6 +197,18 @@ auto launch_internal(const std::string& path, const std::string& argv) -> Result
 
     evman::push(evman::LaunchNroEventData{path, argv});
     R_SUCCEED();
+}
+
+auto process_matches_core_mode(CpuCoreMode core_mode) -> bool {
+    u64 process_mask{};
+    if (R_FAILED(svcGetInfo(&process_mask, InfoType_CoreMask, CUR_PROCESS_HANDLE, 0))) {
+        return core_mode == CpuCoreMode::Three;
+    }
+
+    const auto requested_mask = core_mode == CpuCoreMode::Four
+        ? utils::FourCoreMask
+        : utils::SafeCoreMask;
+    return (process_mask & utils::FourCoreMask) == requested_mask;
 }
 
 } // namespace
@@ -190,6 +242,11 @@ auto nro_parse(const fs::FsPath& path, NroEntry& entry) -> Result {
 
 auto nro_scan(const fs::FsPath& path, std::vector<NroEntry>& nros, bool nested, bool scan_all_dir) -> Result {
     return nro_scan_internal(path, nros, nested, scan_all_dir, true);
+}
+
+auto nro_scan_depth(const fs::FsPath& path, std::vector<NroEntry>& nros, u32 max_depth) -> Result {
+    fs::FsNativeSd fs;
+    return nro_scan_depth_internal(&fs, path, nros, 0, max_depth);
 }
 
 auto nro_get_icon(const fs::FsPath& path, u64 size, u64 offset) -> std::vector<u8> {
@@ -234,6 +291,79 @@ auto nro_get_nacp(const fs::FsPath& path, NacpStruct& nacp) -> Result {
     R_SUCCEED();
 }
 
+auto nro_update_info(const fs::FsPath& path, std::string_view name, std::span<const u8> icon) -> Result {
+    R_UNLESS(!name.empty() && name.size() < sizeof(NacpLanguageEntry::name), Result_NroBadSize);
+    R_UNLESS(!icon.empty() && icon.size() <= 1024 * 1024, Result_NroBadSize);
+
+    fs::FsNativeSd fs;
+    std::vector<u8> original;
+    R_TRY(fs.read_entire_file(path, original));
+    R_UNLESS(original.size() >= sizeof(NroData), Result_NroBadSize);
+
+    NroData nro{};
+    std::memcpy(&nro, original.data(), sizeof(nro));
+    R_UNLESS(nro.header.magic == NROHEADER_MAGIC, Result_NroBadMagic);
+
+    const auto asset_base = static_cast<std::size_t>(nro.header.size);
+    R_UNLESS(asset_base <= original.size() && sizeof(NroAssetHeader) <= original.size() - asset_base, Result_NroBadSize);
+
+    NroAssetHeader asset{};
+    std::memcpy(&asset, original.data() + asset_base, sizeof(asset));
+    R_UNLESS(asset.magic == NROASSETHEADER_MAGIC, Result_NroBadMagic);
+
+    const auto section_valid = [&original, asset_base](const NroAssetSection& section) {
+        const auto tail_size = original.size() - asset_base;
+        return section.offset <= tail_size && section.size <= tail_size - section.offset;
+    };
+    R_UNLESS(section_valid(asset.nacp) && asset.nacp.size == sizeof(NacpStruct), Result_NroBadSize);
+    R_UNLESS(section_valid(asset.romfs), Result_NroBadSize);
+
+    NacpStruct nacp{};
+    std::memcpy(&nacp, original.data() + asset_base + asset.nacp.offset, sizeof(nacp));
+    for (auto& language : NacpLanguageEntries(nacp)) {
+        std::memset(language.name, 0, sizeof(language.name));
+        std::memcpy(language.name, name.data(), name.size());
+    }
+
+    NroAssetHeader updated_asset = asset;
+    updated_asset.icon.offset = sizeof(NroAssetHeader);
+    updated_asset.icon.size = icon.size();
+    updated_asset.nacp.offset = updated_asset.icon.offset + updated_asset.icon.size;
+    updated_asset.nacp.size = sizeof(NacpStruct);
+    updated_asset.romfs.offset = updated_asset.nacp.offset + updated_asset.nacp.size;
+
+    const auto updated_size = asset_base + updated_asset.romfs.offset + updated_asset.romfs.size;
+    R_UNLESS(updated_size >= asset_base, Result_NroBadSize);
+
+    std::vector<u8> updated(updated_size);
+    std::memcpy(updated.data(), original.data(), asset_base);
+    std::memcpy(updated.data() + asset_base, &updated_asset, sizeof(updated_asset));
+    std::memcpy(updated.data() + asset_base + updated_asset.icon.offset, icon.data(), icon.size());
+    std::memcpy(updated.data() + asset_base + updated_asset.nacp.offset, &nacp, sizeof(nacp));
+    if (updated_asset.romfs.size) {
+        std::memcpy(
+            updated.data() + asset_base + updated_asset.romfs.offset,
+            original.data() + asset_base + asset.romfs.offset,
+            asset.romfs.size
+        );
+    }
+
+    const auto backup_name = path.toString() + ".sphaira.bak";
+    R_UNLESS(backup_name.size() < PATH_MAX, Result_NroBadSize);
+    const fs::FsPath backup_path{backup_name};
+
+    // Keep a complete recovery copy until the rebuilt NRO has been written.
+    R_TRY(fs.write_entire_file(backup_path, original));
+    const auto write_result = fs.write_entire_file(path, updated);
+    if (R_FAILED(write_result)) {
+        fs.write_entire_file(path, original);
+        return write_result;
+    }
+
+    fs.DeleteFile(backup_path);
+    R_SUCCEED();
+}
+
 auto nro_launch(std::string path, std::string args) -> Result {
     if (path.empty()) {
         return 1;
@@ -253,6 +383,29 @@ auto nro_launch(std::string path, std::string args) -> Result {
     }
 
     return launch_internal(path, args);
+}
+
+auto nro_launch(std::string path, std::string args, CpuCoreMode core_mode) -> Result {
+    R_UNLESS(!path.empty(), Result_OwoBadArgs);
+
+    if (!path.starts_with("sdmc:")) {
+        path = "sdmc:" + path;
+    }
+
+    if (args.empty()) {
+        args = nro_add_arg(path);
+    } else {
+        args = nro_add_arg(path) + ' ' + args;
+    }
+
+    if (process_matches_core_mode(core_mode)) {
+        return launch_internal(path, args);
+    }
+
+    R_TRY(prepare_core_launch(path, args, core_mode));
+    log_write("set core launch with path: %s argv: %s cores: %u\n", path.c_str(), args.c_str(), static_cast<u32>(core_mode));
+    evman::push(evman::LaunchNroEventData{path, args});
+    R_SUCCEED();
 }
 
 auto nro_add_arg(std::string arg) -> std::string {

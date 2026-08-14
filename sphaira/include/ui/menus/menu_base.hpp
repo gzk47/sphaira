@@ -62,6 +62,7 @@ private:
     std::string m_title_sub_heading{};
     std::string m_sub_heading{};
 
+    ScrollingText m_scroll_title{};
     ScrollingText m_scroll_title_sub_heading{};
     ScrollingText m_scroll_sub_heading{};
 

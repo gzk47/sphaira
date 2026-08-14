@@ -13,6 +13,7 @@ yyjson_doc* json{};
 yyjson_val* root{};
 std::unordered_map<std::string, std::string> g_tr_cache{};
 Mutex g_mutex{};
+std::string g_language_code{"en"};
 
 static WordOrder g_word_order = WordOrder::PhraseName;
 
@@ -147,6 +148,7 @@ bool init(long index) {
     }
 
     g_word_order = DetectWordOrder(lang_name);
+    g_language_code = lang_name;
 
     const fs::FsPath sdmc_path = "/config/sphaira/i18n/" + lang_name + ".json";
     const fs::FsPath romfs_path = "romfs:/i18n/" + lang_name + ".json";
@@ -196,6 +198,11 @@ std::string get(std::string_view str) {
 
 std::string get(std::string_view str, std::string_view fallback) {
     return get_internal(str, fallback);
+}
+
+std::string GetLanguageCode() {
+    SCOPED_MUTEX(&g_mutex);
+    return g_language_code;
 }
 
 // Reorders sentence structure based on locale.

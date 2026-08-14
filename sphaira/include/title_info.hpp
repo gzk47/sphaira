@@ -3,6 +3,8 @@
 #include "fs.hpp"
 #include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 #include <memory>
 #include <functional>
@@ -73,6 +75,10 @@ Result GetMetaEntries(u64 id, MetaEntries& out, u32 flags = ContentFlag_All);
 
 // returns the nca path of a control nca.
 Result GetControlPathFromStatus(const NsApplicationContentMetaStatus& status, u64* out_program_id, fs::FsPath* out_path);
+
+auto GetEnglishTitleName(u64 app_id) -> std::string;
+
+auto MakeExportTitleName(std::string_view current_name, std::string_view english_name, bool fix_name) -> std::string;
 
 // taken from nxdumptool.
 void utilsReplaceIllegalCharacters(char *str, bool ascii_only);

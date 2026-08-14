@@ -18,13 +18,19 @@ struct AssetEntry {
 
 struct Entry {
     fs::FsPath json_path{};
+    std::string name{};
     std::string url{};
+    std::string direct_url{};
+    std::string path{};
     std::string owner{};
     std::string repo{};
     std::string tag{};
+    std::string catalog{};
     std::string pre_install_message{};
     std::string post_install_message{};
     std::vector<AssetEntry> assets{};
+    bool saved_direct_link{};
+    bool saved_repository{};
 };
 
 struct GhApiAsset {
@@ -57,6 +63,15 @@ private:
     void SetIndex(s64 index);
     void Scan();
     void LoadEntriesFromPath(const fs::FsPath& path);
+    void LoadDirectLinks();
+    void LoadRepositories();
+    void PromptAdd();
+    void PromptDirectLink();
+    void PromptRepository();
+    void SaveDirectLink(const Entry& entry);
+    void SaveRepository(const Entry& entry);
+    void RemoveSelectedDirectLink();
+    void RemoveSelectedRepository();
 
     auto GetEntry() -> Entry& {
         return m_entries[m_index];

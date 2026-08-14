@@ -120,13 +120,16 @@ struct FileEntry final : FsDirectoryEntry {
     std::string extension{}; // if any
     std::string internal_name{}; // if any
     std::string internal_extension{}; // if any
+    std::string display_name{};
     s64 file_count{-1}; // number of files in a folder, non-recursive
     s64 dir_count{-1}; // number folders in a folder, non-recursive
+    u64 application_id{};
     FsTimeStampRaw time_stamp{};
     bool checked_extension{}; // did we already search for an ext?
     bool checked_internal_extension{}; // did we already search for an ext?
     bool selected{}; // is this file selected?
     bool done_stat{}; // have we checked file_size / count.
+    bool title_lookup_complete{};
 
     auto IsFile() const -> bool {
         return type == FsDirEntryType_File;
@@ -142,6 +145,10 @@ struct FileEntry final : FsDirectoryEntry {
 
     auto GetName() const -> std::string {
         return name;
+    }
+
+    auto GetDisplayName() const -> const char* {
+        return display_name.empty() ? name : display_name.c_str();
     }
 
     auto GetExtension() const -> std::string {
@@ -358,6 +365,7 @@ struct FsView final : Widget {
     ScrollingText m_scroll_name{};
 
     bool m_is_update_folder{};
+    bool m_title_info_initialized{};
 };
 
 // contains all selected files for a command, such as copy, delete, cut etc.

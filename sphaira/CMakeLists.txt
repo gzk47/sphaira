@@ -28,7 +28,7 @@ option(ENABLE_DEVOPTAB_WEBDAV "" ON)
 # it also adds 230k to binary size, and i don't think anyone will use it.
 option(ENABLE_DEVOPTAB_SFTP "" OFF)
 
-set(sphaira_VERSION 1.0.0)
+set(sphaira_VERSION 1.0.4)
 
 project(sphaira
     VERSION ${sphaira_VERSION}
@@ -97,6 +97,8 @@ add_executable(sphaira
     source/ui/list.cpp
     source/ui/scrolling_text.cpp
     source/ui/music_player.cpp
+    source/ui/forwarder_editor.cpp
+    source/ui/steamgriddb_icon.cpp
 
     source/app.cpp
     source/download.cpp
@@ -118,6 +120,7 @@ add_executable(sphaira
     source/threaded_file_transfer.cpp
     source/title_info.cpp
     source/minizip_helper.cpp
+    source/nx_versions.cpp
 
     source/utils/utils.cpp
     source/utils/audio.cpp
@@ -246,6 +249,7 @@ FetchContent_Declare(zstd
 FetchContent_Declare(libnxtc
     GIT_REPOSITORY https://github.com/ITotalJustice/libnxtc.git
     GIT_TAG 88ce3d8
+    PATCH_COMMAND "${GIT_EXECUTABLE}" apply --ignore-whitespace "${CMAKE_SOURCE_DIR}/cmake/patches/libnxtc-libnx-nacp-layout.patch"
 )
 
 FetchContent_Declare(nvjpg
@@ -307,6 +311,7 @@ if (ENABLE_LIBUSBDVD)
     FetchContent_Declare(libusbdvd
         GIT_REPOSITORY https://github.com/proconsule/libusbdvd.git
         GIT_TAG 3cb0613
+        PATCH_COMMAND "${GIT_EXECUTABLE}" apply --ignore-whitespace "${CMAKE_SOURCE_DIR}/cmake/patches/libusbdvd-libnx-usb-enums.patch"
     )
 
     FetchContent_MakeAvailable(libusbdvd)
@@ -343,6 +348,7 @@ if (ENABLE_FTPSRV)
         GIT_REPOSITORY https://github.com/ITotalJustice/ftpsrv.git
         GIT_TAG 7c82402
         SOURCE_SUBDIR NONE
+        PATCH_COMMAND "${GIT_EXECUTABLE}" apply --ignore-whitespace "${CMAKE_SOURCE_DIR}/cmake/patches/ftpsrv-upload-callback.patch"
     )
 
     FetchContent_MakeAvailable(ftpsrv)
@@ -630,6 +636,19 @@ file(COPY ${CMAKE_SOURCE_DIR}/assets/romfs DESTINATION ${CMAKE_CURRENT_BINARY_DI
 
 # create assets target
 dkp_add_asset_target(sphaira_romfs ${CMAKE_CURRENT_BINARY_DIR}/romfs)
+
+file(GLOB_RECURSE sphaira_romfs_source_files CONFIGURE_DEPENDS
+    LIST_DIRECTORIES false
+    ${CMAKE_SOURCE_DIR}/assets/romfs/*
+)
+add_custom_target(sphaira_romfs_sync
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/assets/romfs
+        ${CMAKE_CURRENT_BINARY_DIR}/romfs
+    DEPENDS ${sphaira_romfs_source_files}
+)
+add_dependencies(sphaira_romfs sphaira_romfs_sync)
+set_property(TARGET sphaira_romfs APPEND PROPERTY DKP_ASSET_FILES ${sphaira_romfs_source_files})
 
 # wait until hbl is built first as we need the exefs to embed
 add_dependencies(sphaira hbl_nso hbl_npdm)

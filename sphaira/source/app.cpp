@@ -11,6 +11,7 @@
 #include "log.hpp"
 #include "ui/nvg_util.hpp"
 #include "nro.hpp"
+#include "nacp_compat.hpp"
 #include "evman.hpp"
 #include "owo.hpp"
 #include "image.hpp"
@@ -351,19 +352,16 @@ auto GetFrameBufferSize() -> FrameBufferSize {
 // this doesn't take long at all, but it's very overkill.
 // todo: look into jpeg/exif spec to manually strip data
 auto GetNroIcon(const std::vector<u8>& nro_icon) -> std::vector<u8> {
-    auto image = ImageLoadFromMemory(nro_icon);
-    if (!image.data.empty()) {
-        if (image.w != 256 || image.h != 256) {
-            image = ImageResize(image.data, image.w, image.h, 256, 256);
-        }
-        if (!image.data.empty()) {
-            image = ImageConvertToJpg(image.data, image.w, image.h);
-            if (!image.data.empty()) {
-                return image.data;
-            }
-        }
+    auto icon = ImageNormalizeIcon(nro_icon);
+    if (!icon.empty()) {
+        return icon;
     }
-    return nro_icon;
+
+    icon = ImageNormalizeIcon(DEFAULT_IMAGE_DATA);
+    if (!icon.empty()) {
+        return icon;
+    }
+    return {std::begin(DEFAULT_IMAGE_DATA), std::end(DEFAULT_IMAGE_DATA)};
 }
 
 auto LoadThemeMeta(const fs::FsPath& path, ThemeMeta& meta) -> bool {
@@ -823,7 +821,7 @@ void App::SetReplaceHbmenuEnable(bool enable) {
             // check we have already replaced hbmenu with sphaira
             NacpStruct hbmenu_nacp{};
             if (R_SUCCEEDED(nro_get_nacp("/hbmenu.nro", hbmenu_nacp))) {
-                if (std::strcmp(hbmenu_nacp.lang[0].name, "sphaira")) {
+                if (std::strcmp(NacpLanguageEntries(hbmenu_nacp)[0].name, "sphaira")) {
                     return;
                 }
             }
@@ -859,12 +857,12 @@ void App::SetReplaceHbmenuEnable(bool enable) {
 
                     // first, try and backup sphaira, its not super important if this fails.
                     rc = nro_get_nacp(sphaira_path, sphaira_nacp);
-                    if (R_FAILED(rc) || std::strcmp(sphaira_nacp.lang[0].name, "sphaira")) {
+                    if (R_FAILED(rc) || std::strcmp(NacpLanguageEntries(sphaira_nacp)[0].name, "sphaira")) {
                         sphaira_path = "/switch/sphaira.nro";
                         rc = nro_get_nacp(sphaira_path, sphaira_nacp);
                     }
 
-                    if (R_SUCCEEDED(rc) && !std::strcmp(sphaira_nacp.lang[0].name, "sphaira")) {
+                    if (R_SUCCEEDED(rc) && !std::strcmp(NacpLanguageEntries(sphaira_nacp)[0].name, "sphaira")) {
                         if (IsVersionNewer(sphaira_nacp.display_version, hbmenu_nacp.display_version)) {
                             if (R_FAILED(rc = g_app->m_fs->copy_entire_file(sphaira_path, "/hbmenu.nro"))) {
                                 log_write("failed to copy entire file: %s 0x%X module: %u desc: %u\n", sphaira_path.s, rc, R_MODULE(rc), R_DESCRIPTION(rc));
@@ -1004,9 +1002,10 @@ auto App::Install(OwoConfig& config) -> Result {
 
 auto App::Install(ui::ProgressBox* pbox, OwoConfig& config) -> Result {
     config.nro_path = nro_add_arg_file(config.nro_path);
-    if (!config.icon.empty()) {
-        config.icon = GetNroIcon(config.icon);
+    if (config.icon.empty()) {
+        config.icon.assign(std::begin(DEFAULT_IMAGE_DATA), std::end(DEFAULT_IMAGE_DATA));
     }
+    config.icon = GetNroIcon(config.icon);
 
     if (config.logo.empty()) {
         g_app->m_fs->read_entire_file("/config/sphaira/logo/NintendoLogo.png", config.logo);
@@ -1533,7 +1532,8 @@ App::App(const char* argv0) {
         } else if (!std::strcmp(Section, "accessibility")) {
             if (app->m_text_scroll_speed.LoadFrom(Key, Value)) {}
         } else if (!std::strcmp(Section, "dump")) {
-            if (app->m_dump_app_folder.LoadFrom(Key, Value)) {}
+            if (app->m_dump_fix_filenames.LoadFrom(Key, Value)) {}
+            else if (app->m_dump_app_folder.LoadFrom(Key, Value)) {}
             else if (app->m_dump_append_folder_with_xci.LoadFrom(Key, Value)) {}
             else if (app->m_dump_trim_xci.LoadFrom(Key, Value)) {}
             else if (app->m_dump_label_trim_xci.LoadFrom(Key, Value)) {}
@@ -1609,6 +1609,10 @@ App::App(const char* argv0) {
             m_fs->CreateDirectory("/config/sphaira/github");
             m_fs->CreateDirectory("/config/sphaira/i18n");
             m_fs->CreateDirectory("/config/sphaira/mount");
+
+            if (!ini_haskey("steamgriddb", "api_key", CONFIG_PATH)) {
+                ini_puts("steamgriddb", "api_key", "", CONFIG_PATH);
+            }
         }
 
         {
@@ -1663,8 +1667,6 @@ App::App(const char* argv0) {
                 log_write("[emummc] nintendo path: %s\n", m_emummc_paths.nintendo);
             }
         }
-
-        devoptab::FixDkpBug();
 
 #ifdef ENABLE_LIBHAZE
         if (App::GetMtpEnable()) {
@@ -1970,8 +1972,7 @@ void App::DisplayThemeOptions(bool left_side) {
 
     options->Add<ui::SidebarEntryBool>("Show IP address"_i18n, App::GetApp()->m_show_ip_addr,
         i18n::get("display_ip_info",
-            "Shows the IP address in all menus, including the WiFi strength.\n\n"
-            "NOTE: The IP address will be hidden in applet mode due to the applet warning being displayed in it's place."
+            "Shows the IP address, WiFi strength, and connection type in all menus, including Applet Mode."
         )
     );
 
@@ -2275,6 +2276,13 @@ void App::DisplayDumpOptions(bool left_side) {
         nsz_block_items.emplace_back(i18n::get(e.name));
     }
 
+    options->Add<ui::SidebarEntryBool>(
+        "Fix export filenames"_i18n, App::GetApp()->m_dump_fix_filenames,
+        i18n::get("fix_export_filenames_info",
+            "Uses the English title for export filenames and falls back to the Title ID when unavailable. "
+            "Disable this to preserve localized and Unicode titles on destinations that support them."
+        )
+    );
     options->Add<ui::SidebarEntryBool>(
         "Created nested folder"_i18n, App::GetApp()->m_dump_app_folder,
         i18n::get("game_folder_info",
@@ -2769,7 +2777,7 @@ App::~App() {
 
                 // todo: don't read whole nacp, only the name.
                 // todo: keep file open and use that as part of the file copy.
-                if (R_SUCCEEDED(rc = nro_get_nacp("/hbmenu.nro", hbmenu_nacp)) && std::strcmp(hbmenu_nacp.lang[0].name, "sphaira")) {
+                if (R_SUCCEEDED(rc = nro_get_nacp("/hbmenu.nro", hbmenu_nacp)) && std::strcmp(NacpLanguageEntries(hbmenu_nacp)[0].name, "sphaira")) {
                     log_write("backing up hbmenu.nro\n");
                     if (R_FAILED(rc = m_fs->copy_entire_file("/switch/hbmenu.nro", "/hbmenu.nro"))) {
                         log_write("failed to backup  hbmenu.nro\n");
@@ -2789,18 +2797,18 @@ App::~App() {
                 Result rc;
 
                 // ensure that are still sphaira
-                if (R_SUCCEEDED(rc = nro_get_nacp("/hbmenu.nro", hbmenu_nacp)) && !std::strcmp(hbmenu_nacp.lang[0].name, "sphaira")) {
+                if (R_SUCCEEDED(rc = nro_get_nacp("/hbmenu.nro", hbmenu_nacp)) && !std::strcmp(NacpLanguageEntries(hbmenu_nacp)[0].name, "sphaira")) {
                     NacpStruct sphaira_nacp;
                     fs::FsPath sphaira_path = "/switch/sphaira/sphaira.nro";
 
                     rc = nro_get_nacp(sphaira_path, sphaira_nacp);
-                    if (R_FAILED(rc) || std::strcmp(sphaira_nacp.lang[0].name, "sphaira")) {
+                    if (R_FAILED(rc) || std::strcmp(NacpLanguageEntries(sphaira_nacp)[0].name, "sphaira")) {
                         sphaira_path = "/switch/sphaira.nro";
                         rc = nro_get_nacp(sphaira_path, sphaira_nacp);
                     }
 
                     // found sphaira, now lets get compare version
-                    if (R_SUCCEEDED(rc) && !std::strcmp(sphaira_nacp.lang[0].name, "sphaira")) {
+                    if (R_SUCCEEDED(rc) && !std::strcmp(NacpLanguageEntries(sphaira_nacp)[0].name, "sphaira")) {
                         if (IsVersionNewer(hbmenu_nacp.display_version, sphaira_nacp.display_version)) {
                             if (R_FAILED(rc = m_fs->copy_entire_file(GetExePath(), sphaira_path))) {
                                 log_write("failed to copy entire file: %s 0x%X module: %u desc: %u\n", sphaira_path.s, rc, R_MODULE(rc), R_DESCRIPTION(rc));

@@ -40,6 +40,7 @@ private:
     s64 m_starting_index{};
 
     std::unique_ptr<List> m_list{};
+    ScrollingText m_scroll_title{};
     ScrollingText m_scroll_text{};
 
     float m_yoff{};

@@ -107,7 +107,9 @@ auto PopupList::Update(Controller* controller, TouchInfo* touch) -> void {
 auto PopupList::Draw(NVGcontext* vg, Theme* theme) -> void {
     gfx::dimBackground(vg);
     gfx::drawRect(vg, m_pos, theme->GetColour(ThemeEntryID_POPUP));
-    gfx::drawText(vg, m_pos + m_title_pos, 24.f, theme->GetColour(ThemeEntryID_TEXT), m_title.c_str());
+    m_scroll_title.Draw(vg, true, m_pos.x + m_title_pos.x, m_pos.y + m_title_pos.y,
+        m_pos.w - m_title_pos.x * 2.f, 24.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP,
+        theme->GetColour(ThemeEntryID_TEXT), m_title);
     gfx::drawRect(vg, 30.f, m_line_top, m_line_width, 1.f, theme->GetColour(ThemeEntryID_LINE));
     gfx::drawRect(vg, 30.f, m_line_bottom, m_line_width, 1.f, theme->GetColour(ThemeEntryID_LINE));
     gfx::drawTextArgs(vg, 80, 675, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "%zu / %zu", m_index + 1, m_items.size());

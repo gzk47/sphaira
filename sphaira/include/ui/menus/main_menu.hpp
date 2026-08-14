@@ -2,6 +2,7 @@
 
 #include "ui/widget.hpp"
 #include "ui/menus/menu_base.hpp"
+#include "fs.hpp"
 #include <span>
 
 namespace sphaira::ui::menu::main {
@@ -61,6 +62,10 @@ struct MainMenu final : Widget {
 private:
     void OnLRPress(MenuBase* menu, Button b);
     void AddOnLRPress();
+    void CheckForUpdates(bool show_result);
+    auto ParseUpdateMetadata(const fs::FsPath& path) -> bool;
+    void ShowUpdateInfo();
+    void StartUpdateInstall();
 
 private:
     std::unique_ptr<MenuBase> m_centre_menu{};
@@ -72,6 +77,7 @@ private:
     std::string m_update_version{};
     std::string m_update_description{};
     UpdateState m_update_state{UpdateState::Pending};
+    u64 m_update_generation{};
 };
 
 } // namespace sphaira::ui::menu::main

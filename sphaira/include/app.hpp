@@ -173,6 +173,10 @@ public:
         return !IsApplication();
     }
 
+    static auto CanSetCpuCores() -> bool {
+        return IsApplication() && GetApp()->m_is_launched_via_sphaira_forwader;
+    }
+
     // returns true if launched in applet mode with a title suspended in the background.
     static auto IsAppletWithSuspendedApp() -> bool {
         R_UNLESS(IsApplet(), false);
@@ -331,6 +335,7 @@ public:
     option::OptionBool m_lower_system_version{INI_SECTION, "lower_system_version", true};
 
     // dump options
+    option::OptionBool m_dump_fix_filenames{"dump", "fix_filenames", true};
     option::OptionBool m_dump_app_folder{"dump", "app_folder", true};
     option::OptionBool m_dump_append_folder_with_xci{"dump", "append_folder_with_xci", true};
     option::OptionBool m_dump_trim_xci{"dump", "trim_xci", false};

@@ -6,6 +6,7 @@
 #include "ui/list.hpp"
 #include <span>
 #include <memory>
+#include <string>
 
 // todo: pr to libnx
 extern "C" {
@@ -188,6 +189,7 @@ struct ApplicationEntry {
     u8 key_gen{};
     std::vector<u8> icon;
     NacpLanguageEntry lang_entry{};
+    std::string english_name{};
 
     std::vector<GcCollections> application{};
     std::vector<GcCollections> patch{};

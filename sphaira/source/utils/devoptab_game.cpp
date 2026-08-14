@@ -5,6 +5,7 @@
 #include "defines.hpp"
 #include "log.hpp"
 #include "title_info.hpp"
+#include "app.hpp"
 
 #include "ui/menus/game_menu.hpp"
 
@@ -28,6 +29,7 @@ struct ContentEntry {
 
 struct Entry final : game::Entry {
     std::string name{};
+    std::string export_name{};
     std::vector<ContentEntry> contents{};
 };
 
@@ -158,7 +160,7 @@ game::NspEntry* Device::FindNspFromEntry(Entry& entry, u64 id) const {
                 }
 
                 content.nsp = std::make_unique<game::NspEntry>();
-                if (R_FAILED(game::BuildNspEntry(entry, info, m_keys, *content.nsp))) {
+                if (R_FAILED(game::BuildNspEntry(entry, entry.export_name, info, m_keys, *content.nsp))) {
                     log_write("[GAME] failed to build nsp entry for app id: %016lx\n", entry.app_id);
                     content.nsp.reset();
                     return nullptr;
@@ -386,11 +388,16 @@ int Device::devoptab_dirnext(void* fd, char *filename, struct stat *filestat) {
 
             char name[NAME_MAX]{};
             if (result->status == title::NacpLoadStatus::Loaded) {
-                fs::FsPath name_buf = result->lang.name;
-                title::utilsReplaceIllegalCharacters(name_buf, true);
+                const auto fix_filenames = App::GetApp()->m_dump_fix_filenames.Get();
+                const auto english_name = fix_filenames ? title::GetEnglishTitleName(entry.app_id) : std::string{};
+                entry.export_name = title::MakeExportTitleName(result->lang.name, english_name, fix_filenames);
 
                 const int name_max = sizeof(name) - 33;
-                std::snprintf(name, sizeof(name), "%.*s [%016lX]", name_max, name_buf.s, entry.app_id);
+                if (entry.export_name.empty()) {
+                    std::snprintf(name, sizeof(name), "[%016lX]", entry.app_id);
+                } else {
+                    std::snprintf(name, sizeof(name), "%.*s [%016lX]", name_max, entry.export_name.c_str(), entry.app_id);
+                }
             } else {
                 std::snprintf(name, sizeof(name), "[%016lX]", entry.app_id);
                 log_write("[GAME] failed to get title info for %s\n", name);

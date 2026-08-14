@@ -6,6 +6,7 @@
 #include <span>
 #include <optional>
 #include "fs.hpp"
+#include "utils/core.hpp"
 
 namespace sphaira {
 
@@ -17,6 +18,7 @@ struct NroData {
 struct Hbini {
     u64 timestamp{}; // timestamp of last launch
     bool hidden{};
+    CpuCoreMode core_mode{CpuCoreMode::Three};
 };
 
 struct MiniNacp {
@@ -68,13 +70,16 @@ auto nro_parse(const fs::FsPath& path, NroEntry& entry) -> Result;
  *                     this does nothing if nested=false.
  */
 auto nro_scan(const fs::FsPath& path, std::vector<NroEntry>& nros, bool nested = true, bool scan_all_dir = true) -> Result;
+auto nro_scan_depth(const fs::FsPath& path, std::vector<NroEntry>& nros, u32 max_depth) -> Result;
 
 auto nro_get_icon(const fs::FsPath& path, u64 size, u64 offset) -> std::vector<u8>;
 auto nro_get_icon(const fs::FsPath& path) -> std::vector<u8>;
 auto nro_get_nacp(const fs::FsPath& path, NacpStruct& nacp) -> Result;
+auto nro_update_info(const fs::FsPath& path, std::string_view name, std::span<const u8> icon) -> Result;
 
 // path is pre-appended to args, such that argv[0] == path
 auto nro_launch(std::string path, std::string args = {}) -> Result;
+auto nro_launch(std::string path, std::string args, CpuCoreMode core_mode) -> Result;
 
 // if the arg contains a space, it will wrap it in quotes
 auto nro_add_arg(std::string arg) -> std::string;

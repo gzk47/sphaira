@@ -72,15 +72,6 @@ void MenuBase::Draw(NVGcontext* vg, Theme* theme) {
 
     nvgFontSize(vg, font_size);
 
-    #define draw(colour, fixed, ...) \
-        gfx::drawTextArgs(vg, start_x, start_y, font_size, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(colour), __VA_ARGS__); \
-        if (fixed) { \
-            start_x -= fixed; \
-        } else { \
-            gfx::textBoundsArgs(vg, 0, 0, bounds, __VA_ARGS__); \
-            start_x -= spacing + (bounds[2] - bounds[0]); \
-        }
-
     #define STORAGE_BAR_W   180
     #define STORAGE_BAR_H   8
 
@@ -108,14 +99,22 @@ void MenuBase::Draw(NVGcontext* vg, Theme* theme) {
     gfx::drawRect(vg, storage_x + 2, storage_y + 24 + 2, STORAGE_BAR_W - (((double)pdata.sd_free / (double)pdata.sd_total) * STORAGE_BAR_W) - 4, STORAGE_BAR_H - 4, theme->GetColour(ThemeEntryID_TEXT_INFO), rounding);
     start_x -= (STORAGE_BAR_W + spacing) * 2;
 
-    // ran out of space, its one or the other.
+    const auto status_right = start_x;
+    auto status_content_left = status_right;
+    const auto draw_status = [&](ThemeEntryID colour, const std::string& text, float y) {
+        gfx::drawText(vg, status_right, y, font_size, theme->GetColour(colour), text.c_str(), NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM);
+        gfx::textBounds(vg, 0, 0, bounds, text.c_str());
+        status_content_left = std::min(status_content_left, status_right - (bounds[2] - bounds[0]));
+    };
+
     if (!App::IsApplication()) {
-        draw(ThemeEntryID_ERROR, 0, ("[Applet Mode]"_i18n).c_str());
-    } else if (App::GetApp()->m_show_ip_addr.Get()) {
+        draw_status(ThemeEntryID_ERROR, "[Applet Mode]"_i18n, start_y - 28.f);
+    }
+
+    if (App::GetApp()->m_show_ip_addr.Get()) {
         if (pdata.ip) {
             char ip_buf[32];
             std::snprintf(ip_buf, sizeof(ip_buf), "%u.%u.%u.%u", pdata.ip & 0xFF, (pdata.ip >> 8) & 0xFF, (pdata.ip >> 16) & 0xFF, (pdata.ip >> 24) & 0xFF);
-            gfx::textBounds(vg, 0, 0, bounds, ip_buf);
 
             char type_buf[32];
             if (pdata.type == NifmInternetConnectionType_WiFi) {
@@ -126,29 +125,37 @@ void MenuBase::Draw(NVGcontext* vg, Theme* theme) {
                 std::snprintf(type_buf, sizeof(type_buf), "Unknown"_i18n.c_str());
             }
 
-            const auto ip_x = start_x;
-            const auto ip_w = bounds[2] - bounds[0];
-            const auto type_x = ip_x - ip_w / 2;
-            gfx::drawTextArgs(vg, type_x, start_y - 25, storage_font - 1, NVG_ALIGN_CENTER | NVG_ALIGN_BOTTOM, theme->GetColour(ThemeEntryID_TEXT_INFO), "%s", type_buf);
-            gfx::drawTextArgs(vg, ip_x, start_y, storage_font, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(ThemeEntryID_TEXT), "%s", ip_buf);
+            draw_status(ThemeEntryID_TEXT, std::string{type_buf} + " | " + ip_buf, start_y);
         } else {
-            draw(ThemeEntryID_TEXT, 0, ("No Internet"_i18n).c_str());
+            draw_status(ThemeEntryID_TEXT, "No Internet"_i18n, start_y);
         }
     }
-
-    #undef draw
 
     gfx::drawRect(vg, 30.f, 86.f, 1220.f, 1.f, theme->GetColour(ThemeEntryID_LINE));
     gfx::drawRect(vg, 30.f, 646.0f, 1220.f, 1.f, theme->GetColour(ThemeEntryID_LINE));
 
-    nvgFontSize(vg, 28);
-    gfx::textBounds(vg, 0, 0, bounds, m_title.c_str());
-
+    constexpr float header_left = 74.f;
     const auto text_w = SCREEN_WIDTH / 2 - 30;
-    const auto title_sub_x = 80 + (bounds[2] - bounds[0]) + 10;
+    const auto header_right = std::min<float>(text_w, status_content_left - 15.f);
+    const auto header_width = std::max(0.f, header_right - header_left);
 
-    gfx::drawTextArgs(vg, 80, start_y, 28.f, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM, theme->GetColour(ThemeEntryID_TEXT), m_title.c_str());
-    m_scroll_title_sub_heading.Draw(vg, true, title_sub_x, start_y, text_w - title_sub_x, 16, NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM, theme->GetColour(ThemeEntryID_TEXT_INFO), m_title_sub_heading.c_str());
+    float title_width = header_width;
+    float title_sub_x = header_right;
+    float title_sub_width = 0.f;
+    if (!m_title_sub_heading.empty() && header_width > 0.f) {
+        nvgFontSize(vg, 28.f);
+        gfx::textBounds(vg, 0, 0, bounds, m_title.c_str());
+        const auto measured_title_width = std::max(0.f, bounds[2] - bounds[0]);
+        const auto max_title_width = std::max(0.f, header_width * 0.55f);
+        title_width = std::min(measured_title_width + 6.f, max_title_width);
+        title_sub_x = header_left + title_width + 10.f;
+        title_sub_width = std::max(0.f, header_right - title_sub_x);
+    }
+
+    m_scroll_title.Draw(vg, m_title != "Homebrew", header_left, start_y, title_width, 28.f,
+        NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM, theme->GetColour(ThemeEntryID_TEXT), m_title);
+    m_scroll_title_sub_heading.Draw(vg, true, title_sub_x, start_y, title_sub_width, 16.f,
+        NVG_ALIGN_LEFT | NVG_ALIGN_BOTTOM, theme->GetColour(ThemeEntryID_TEXT_INFO), m_title_sub_heading);
     m_scroll_sub_heading.Draw(vg, true, 80, 675, text_w - 160, 18, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), m_sub_heading.c_str());
 }
 

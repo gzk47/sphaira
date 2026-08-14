@@ -3,6 +3,7 @@
 #include "fs.hpp"
 
 #include "ui/menus/homebrew.hpp"
+#include "ui/forwarder_editor.hpp"
 #include "ui/menus/filebrowser.hpp"
 
 #include "ui/sidebar.hpp"
@@ -13,6 +14,7 @@
 
 #include "utils/devoptab.hpp"
 #include "utils/profile.hpp"
+#include "utils/core.hpp"
 
 #include "owo.hpp"
 #include "defines.hpp"
@@ -22,12 +24,93 @@
 #include <minIni.h>
 #include <utility>
 #include <algorithm>
+#include <optional>
 
 namespace sphaira::ui::menu::homebrew {
 namespace {
 
 Menu* g_menu{};
 std::atomic_bool g_change_signalled{};
+constexpr const char* SEARCH_PATHS_INI_SECTION = "homebrew_paths";
+
+auto NormalizeSearchPath(const fs::FsPath& input) -> std::optional<fs::FsPath> {
+    const std::string_view path{input};
+    if (path.empty() || path.front() != '/' || path.size() >= PATH_MAX) {
+        return std::nullopt;
+    }
+
+    std::string normalized;
+    normalized.reserve(path.size());
+    for (const auto c : path) {
+        if (c != '/' || normalized.empty() || normalized.back() != '/') {
+            normalized.push_back(c);
+        }
+    }
+    while (normalized.size() > 1 && normalized.back() == '/') {
+        normalized.pop_back();
+    }
+
+    std::string_view components{normalized};
+    while (!components.empty()) {
+        const auto slash = components.find('/');
+        const auto component = components.substr(0, slash);
+        if (component == "." || component == "..") {
+            return std::nullopt;
+        }
+        if (slash == std::string_view::npos) {
+            break;
+        }
+        components.remove_prefix(slash + 1);
+    }
+
+    return fs::FsPath{normalized};
+}
+
+auto LoadSearchPaths() -> std::vector<fs::FsPath> {
+    std::vector<fs::FsPath> paths;
+    ini_browse([](const mTCHAR* section, const mTCHAR*, const mTCHAR* value, void* user_data) -> int {
+        if (std::strcmp(section, SEARCH_PATHS_INI_SECTION) || !value) {
+            return 1;
+        }
+
+        auto& paths = *static_cast<std::vector<fs::FsPath>*>(user_data);
+        const auto path = NormalizeSearchPath(value);
+        if (!path || *path == "/" || *path == "/switch") {
+            return 1;
+        }
+
+        if (std::ranges::none_of(paths, [&path](const auto& entry){ return entry == *path; })) {
+            paths.emplace_back(*path);
+        }
+        return 1;
+    }, &paths, App::CONFIG_PATH);
+    return paths;
+}
+
+auto SaveSearchPaths(const std::vector<fs::FsPath>& paths) -> bool {
+    if (!ini_puts(SEARCH_PATHS_INI_SECTION, nullptr, nullptr, App::CONFIG_PATH)) {
+        return false;
+    }
+
+    for (std::size_t i = 0; i < paths.size(); ++i) {
+        const auto key = "path_" + std::to_string(i);
+        if (!ini_puts(SEARCH_PATHS_INI_SECTION, key.c_str(), paths[i], App::CONFIG_PATH)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void AppendUniqueEntries(std::vector<NroEntry>& entries, std::vector<NroEntry>& scanned) {
+    for (auto& entry : scanned) {
+        const auto found = std::ranges::any_of(entries, [&entry](const auto& current){
+            return current.path == entry.path;
+        });
+        if (!found) {
+            entries.emplace_back(std::move(entry));
+        }
+    }
+}
 
 auto GenerateStarPath(const fs::FsPath& nro_path) -> fs::FsPath {
     fs::FsPath out{};
@@ -47,6 +130,53 @@ void SignalChange() {
     g_change_signalled = true;
 }
 
+auto IsSearchPath(const fs::FsPath& path) -> bool {
+    const auto normalized = NormalizeSearchPath(path);
+    if (!normalized) {
+        return false;
+    }
+    if (*normalized == "/switch") {
+        return true;
+    }
+
+    const auto paths = LoadSearchPaths();
+    return std::ranges::any_of(paths, [&normalized](const auto& entry){ return entry == *normalized; });
+}
+
+auto AddSearchPath(const fs::FsPath& path) -> bool {
+    const auto normalized = NormalizeSearchPath(path);
+    if (!normalized || *normalized == "/" || *normalized == "/switch") {
+        return false;
+    }
+
+    auto paths = LoadSearchPaths();
+    if (std::ranges::any_of(paths, [&normalized](const auto& entry){ return entry == *normalized; })) {
+        return false;
+    }
+
+    paths.emplace_back(*normalized);
+    if (!SaveSearchPaths(paths)) {
+        return false;
+    }
+    SignalChange();
+    return true;
+}
+
+auto RemoveSearchPath(const fs::FsPath& path) -> bool {
+    const auto normalized = NormalizeSearchPath(path);
+    if (!normalized) {
+        return false;
+    }
+
+    auto paths = LoadSearchPaths();
+    const auto removed = std::erase_if(paths, [&normalized](const auto& entry){ return entry == *normalized; });
+    if (!removed || !SaveSearchPaths(paths)) {
+        return false;
+    }
+    SignalChange();
+    return true;
+}
+
 auto GetNroEntries() -> std::span<const NroEntry> {
     if (!g_menu) {
         return {};
@@ -60,7 +190,10 @@ Menu::Menu(u32 flags) : grid::Menu{"Homebrew"_i18n, flags} {
 
     this->SetActions(
         std::make_pair(Button::A, Action{"Launch"_i18n, [this](){
-            nro_launch(GetEntry().path);
+            const auto rc = App::CanSetCpuCores()
+                ? nro_launch(GetEntry().path, {}, GetEntry().hbini.core_mode)
+                : nro_launch(GetEntry().path);
+            App::PushErrorBox(rc, "Failed to launch homebrew"_i18n);
         }}),
         std::make_pair(Button::X, Action{"Options"_i18n, [this](){
             DisplayOptions();
@@ -116,22 +249,21 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
         // lazy load image
         if (image_load_count < image_load_max) {
             if (!e.image && e.icon_size && e.icon_offset) {
-                // NOTE: it seems that images can be any size. SuperTux uses a 1024x1024
-                // ~300Kb image, which takes a few frames to completely load.
-                // really, switch-tools should handle this by resizing the image before
-                // adding it to the nro, as well as validate its a valid jpeg.
+                image_load_count++;
                 const auto icon = nro_get_icon(e.path, e.icon_size, e.icon_offset);
                 TimeStamp ts;
                 if (!icon.empty()) {
-                    const auto image = ImageLoadFromMemory(icon, ImageFlag_JPEG);
+                    const auto image = ImageLoadIcon(icon);
                     if (!image.data.empty()) {
                         e.image = nvgCreateImageRGBA(vg, image.w, image.h, 0, image.data.data());
-                        log_write("\t[image load] time taken: %.2fs %zums\n", ts.GetSecondsD(), ts.GetMs());
-                        image_load_count++;
-                    } else {
-                        // prevent loading of this icon again as it's already failed.
-                        e.icon_offset = e.icon_size = 0;
+                        if (e.image > 0) {
+                            log_write("\t[image load] time taken: %.2fs %zums\n", ts.GetSecondsD(), ts.GetMs());
+                        }
                     }
+                }
+
+                if (e.image <= 0) {
+                    e.icon_offset = e.icon_size = 0;
                 }
             }
         }
@@ -153,7 +285,9 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
         }
 
         const auto selected = pos == m_index;
-        DrawEntry(vg, theme, m_layout.Get(), v, selected, e.image, name.c_str(), e.GetAuthor(), e.GetDisplayVersion());
+        const auto image = e.image > 0 || (e.icon_size && e.icon_offset)
+            ? e.image : App::GetDefaultImage();
+        DrawEntry(vg, theme, m_layout.Get(), v, selected, image, name.c_str(), e.GetAuthor(), e.GetDisplayVersion());
     });
 }
 
@@ -165,6 +299,15 @@ void Menu::OnFocusGained() {
 }
 
 void Menu::SetIndex(s64 index) {
+    if (m_entries_current.empty()) {
+        m_index = 0;
+        m_list->SetYoff(0);
+        RemoveAction(Button::R3);
+        SetTitleSubHeading("");
+        SetSubHeading("0 / 0");
+        return;
+    }
+
     m_index = index;
     if (!m_index) {
         m_list->SetYoff(0);
@@ -200,7 +343,39 @@ void Menu::SetIndex(s64 index) {
 
 void Menu::InstallHomebrew() {
     const auto& nro = GetEntry();
-    InstallHomebrew(nro.path, nro_get_icon(nro.path, nro.icon_size, nro.icon_offset));
+    const auto path = nro.path;
+    auto icon = nro_get_icon(nro.path, nro.icon_size, nro.icon_offset);
+    ShowForwarderForm(path, std::move(icon));
+}
+
+void Menu::CustomizeHomebrew() {
+    const auto path = GetEntry().path;
+    auto icon = nro_get_icon(path, GetEntry().icon_size, GetEntry().icon_offset);
+    if (icon.empty()) {
+        App::Notify("This homebrew does not contain a customizable icon"_i18n);
+        return;
+    }
+
+    forwarder::Config editor{};
+    editor.values.title = GetEntry().GetName();
+    editor.values.icon = std::move(icon);
+    editor.icon_source = "NRO Icon"_i18n;
+    editor.steam_query = GetEntry().GetName();
+    editor.screen_title = "Customize Homebrew"_i18n;
+    editor.title_label = "Homebrew Name"_i18n;
+    editor.submit_label = "Save Changes"_i18n;
+    editor.show_forwarder_options = false;
+    editor.on_create = [path](const forwarder::Values& values) {
+        if (R_FAILED(nro_update_info(path, values.title, values.icon))) {
+            App::Notify("Failed to save NRO information"_i18n);
+            return false;
+        }
+
+        SignalChange();
+        App::Notify("Homebrew name and icon saved successfully."_i18n);
+        return true;
+    };
+    forwarder::Show(std::move(editor));
 }
 
 void Menu::ScanHomebrew() {
@@ -210,6 +385,12 @@ void Menu::ScanHomebrew() {
     {
         SCOPED_TIMESTAMP("nro scan");
         nro_scan("/switch", m_entries);
+
+        for (const auto& path : LoadSearchPaths()) {
+            std::vector<NroEntry> scanned;
+            nro_scan_depth(path, scanned, 2);
+            AppendUniqueEntries(m_entries, scanned);
+        }
     }
 
     struct IniUser {
@@ -238,6 +419,8 @@ void Menu::ScanHomebrew() {
                 user->ini->timestamp = ini_parse_getl(Value, 0);
             } else if (!strcmp(Key, "hidden")) {
                 user->ini->hidden = ini_parse_getbool(Value, false);
+            } else if (!strcmp(Key, "cpu_cores")) {
+                user->ini->core_mode = ini_parse_getl(Value, 3) == 4 ? CpuCoreMode::Four : CpuCoreMode::Three;
             }
         }
 
@@ -367,7 +550,10 @@ void Menu::Sort() {
 }
 
 void Menu::SortAndFindLastFile(bool scan) {
-    const auto path = GetEntry().path;
+    fs::FsPath path;
+    if (!m_entries_current.empty()) {
+        path = GetEntry().path;
+    }
 
     if (scan) {
         ScanHomebrew();
@@ -375,6 +561,10 @@ void Menu::SortAndFindLastFile(bool scan) {
         Sort();
     }
     SetIndex(0);
+
+    if (path.empty()) {
+        return;
+    }
 
     s64 index = -1;
     for (u64 i = 0; i < m_entries_current.size(); i++) {
@@ -416,16 +606,58 @@ void Menu::OnLayoutChange() {
     grid::Menu::OnLayoutChange(m_list, m_layout.Get());
 }
 
-Result Menu::InstallHomebrew(const fs::FsPath& path, const std::vector<u8>& icon) {
+Result Menu::InstallHomebrew(const fs::FsPath& path, const std::vector<u8>& icon, ForwarderAddressSpace address_space) {
     OwoConfig config{};
     config.nro_path = path.toString();
     R_TRY(nro_get_nacp(path, config.nacp));
     config.icon = icon;
+    config.address_space = address_space;
     return App::Install(config);
 }
 
-Result Menu::InstallHomebrewFromPath(const fs::FsPath& path) {
-    return InstallHomebrew(path, nro_get_icon(path));
+Result Menu::InstallHomebrewFromPath(const fs::FsPath& path, ForwarderAddressSpace address_space) {
+    return InstallHomebrew(path, nro_get_icon(path), address_space);
+}
+
+void Menu::ShowForwarderForm(const fs::FsPath& path, std::vector<u8> icon) {
+    NroEntry nro{};
+    NacpStruct nacp{};
+    if (R_FAILED(nro_parse(path, nro)) || R_FAILED(nro_get_nacp(path, nacp))) {
+        App::Notify("Failed to parse nro"_i18n);
+        return;
+    }
+
+    if (icon.empty()) {
+        icon = nro_get_icon(path, nro.icon_size, nro.icon_offset);
+    }
+
+    forwarder::Config editor{};
+    editor.values.title = nro.GetName();
+    editor.values.author = nro.GetAuthor();
+    editor.values.version = nacp.display_version;
+    editor.values.icon = std::move(icon);
+    editor.icon_source = "NRO Icon"_i18n;
+    editor.on_create = [path, nacp](const forwarder::Values& values) mutable {
+        OwoConfig config{};
+        config.nro_path = path.toString();
+        config.name = values.title;
+        config.author = values.author;
+        config.nacp = nacp;
+        config.icon = values.icon;
+        config.profile_selection = values.profile_selection;
+        config.address_space = values.address_space;
+        config.core_mode = values.core_mode;
+        config.screenshot = values.screenshot;
+        config.video_capture = values.video_capture;
+        config.svc_debug_mode = values.svc_debug_mode;
+
+        if (R_FAILED(App::Install(config))) {
+            App::Notify("Failed to install forwarder"_i18n);
+            return false;
+        }
+        return true;
+    };
+    forwarder::Show(std::move(editor));
 }
 
 void Menu::DisplayOptions() {
@@ -487,6 +719,39 @@ void Menu::DisplayOptions() {
 
         });
         #endif
+
+        auto customize_entry = options->Add<SidebarEntryCallback>("Customize Homebrew"_i18n, [this](){
+            CustomizeHomebrew();
+        }, true, "Change the name and icon embedded in the selected NRO."_i18n);
+        customize_entry->Depends([this](){ return GetEntry().is_nacp_valid; }, "This NRO does not contain editable application information."_i18n);
+
+        if (App::CanSetCpuCores()) {
+            SidebarEntryArray::Items core_items;
+            core_items.push_back("3 (Default)"_i18n);
+            core_items.push_back("4 (Advanced)"_i18n);
+            options->Add<SidebarEntryArray>("CPU Cores"_i18n, core_items, [this](s64& index_out){
+                if (index_out == 1) {
+                    index_out = GetEntry().hbini.core_mode == CpuCoreMode::Four ? 1 : 0;
+                    App::Push<OptionBox>(
+                        "4 CPU Cores\n\nCore 3 is shared with system services. Only enable this for homebrew that manages thread affinity correctly; unrestricted use can cause system lag or instability."_i18n,
+                        "Back"_i18n,
+                        "Enable"_i18n,
+                        0,
+                        [this](auto index) {
+                            if (index && *index == 1) {
+                                GetEntry().hbini.core_mode = CpuCoreMode::Four;
+                                ini_putl(GetEntry().path, "cpu_cores", 4, App::PLAYLOG_PATH);
+                                App::PopToMenu();
+                            }
+                        }
+                    );
+                } else {
+                    GetEntry().hbini.core_mode = CpuCoreMode::Three;
+                    ini_putl(GetEntry().path, "cpu_cores", 3, App::PLAYLOG_PATH);
+                }
+            }, GetEntry().hbini.core_mode == CpuCoreMode::Four ? 1 : 0,
+                "Three cores reserves core 3 for system services. Four cores should only be used by homebrew that manages thread affinity correctly."_i18n);
+        }
 
         options->Add<SidebarEntryBool>("Hide"_i18n, GetEntry().hbini.hidden, [this](bool& v_out){
             ini_putl(GetEntry().path, "hidden", v_out, App::PLAYLOG_PATH);

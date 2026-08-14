@@ -5,6 +5,8 @@
 #include "ui/option_box.hpp"
 #include "ui/progress_box.hpp"
 #include "ui/error_box.hpp"
+#include "ui/scrollable_text.hpp"
+#include "ui/nvg_util.hpp"
 
 #include "ui/menus/homebrew.hpp"
 #include "ui/menus/filebrowser.hpp"
@@ -25,15 +27,21 @@
 #include "defines.hpp"
 #include "i18n.hpp"
 #include "threaded_file_transfer.hpp"
+#include "nacp_compat.hpp"
 
 #include <cstring>
 #include <yyjson.h>
 #include <iomanip>
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <optional>
+#include <string_view>
 
 namespace sphaira::ui::menu::main {
 namespace {
 
-constexpr const char* GITHUB_URL{"https://api.github.com/repos/ITotalJustice/sphaira/releases/latest"};
+constexpr const char* GITHUB_URL{"https://api.github.com/repos/NaGaa95/sphaira/releases/latest"};
 constexpr fs::FsPath CACHE_PATH{"/switch/sphaira/cache/sphaira_latest.json"};
 
 // paths where sphaira can be installed, used when updating
@@ -41,6 +49,247 @@ constexpr const fs::FsPath SPHAIRA_PATHS[]{
     "/hbmenu.nro",
     "/switch/sphaira.nro",
     "/switch/sphaira/sphaira.nro",
+};
+
+auto Trim(std::string_view value) -> std::string_view {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) {
+        value.remove_suffix(1);
+    }
+    return value;
+}
+
+auto Lower(std::string_view value) -> std::string {
+    std::string result{value};
+    std::ranges::transform(result, result.begin(), [](char c){
+        return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    });
+    return result;
+}
+
+auto EndsWithCaseInsensitive(std::string_view value, std::string_view suffix) -> bool {
+    return value.size() >= suffix.size()
+        && !strncasecmp(value.data() + value.size() - suffix.size(), suffix.data(), suffix.size());
+}
+
+auto IsSphairaNacp(const NacpStruct& nacp) -> bool {
+    for (const auto& language : NacpLanguageEntries(nacp)) {
+        if (!strncasecmp(language.name, "sphaira", 7)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+auto ReadNotes(yyjson_val* value) -> std::string {
+    if (!value) {
+        return {};
+    }
+    if (yyjson_is_str(value)) {
+        const auto text = yyjson_get_str(value);
+        return text ? text : "";
+    }
+    if (!yyjson_is_arr(value)) {
+        return {};
+    }
+
+    std::string notes;
+    size_t index{}, count{};
+    yyjson_val* item{};
+    yyjson_arr_foreach(value, index, count, item) {
+        if (const auto text = yyjson_get_str(item); text && *text) {
+            if (!notes.empty()) {
+                notes += '\n';
+            }
+            notes += "- ";
+            notes += text;
+        }
+    }
+    return notes;
+}
+
+auto ReadLocalizedNotes(yyjson_val* object, std::string_view language) -> std::string {
+    if (!object || !yyjson_is_obj(object)) {
+        return {};
+    }
+
+    auto value = yyjson_obj_getn(object, language.data(), language.size());
+    if (!value && language.find('-') != std::string_view::npos) {
+        const auto base = language.substr(0, language.find('-'));
+        value = yyjson_obj_getn(object, base.data(), base.size());
+    }
+    if (!value) {
+        value = yyjson_obj_get(object, "en");
+    }
+    return ReadNotes(value);
+}
+
+// Supports the language-keyed changelog format used by the supplied NRO. It
+// also accepts an object containing language keys directly, which makes the
+// same format convenient for a GitHub release body.
+auto ParseLocalizedNotesJson(std::string_view input, std::string_view version, std::string_view language) -> std::string {
+    const auto document = yyjson_read(input.data(), input.size(), YYJSON_READ_NOFLAG);
+    if (!document) {
+        return {};
+    }
+    ON_SCOPE_EXIT(yyjson_doc_free(document));
+
+    const auto root = yyjson_doc_get_root(document);
+    if (!root || !yyjson_is_obj(root)) {
+        return {};
+    }
+
+    const auto versions = yyjson_obj_get(root, "versions");
+    if (versions && yyjson_is_arr(versions)) {
+        const auto wanted = App::GetVersionFromString(std::string{version}.c_str());
+        size_t index{}, count{};
+        yyjson_val* entry{};
+        yyjson_arr_foreach(versions, index, count, entry) {
+            const auto version_value = yyjson_obj_get(entry, "version");
+            const auto entry_version = version_value ? yyjson_get_str(version_value) : nullptr;
+            if (!entry_version) {
+                continue;
+            }
+            const auto parsed = App::GetVersionFromString(entry_version);
+            if ((wanted && parsed == wanted) || (!wanted && version == entry_version)) {
+                return ReadLocalizedNotes(entry, language);
+            }
+        }
+        return {};
+    }
+
+    return ReadLocalizedNotes(root, language);
+}
+
+auto ParseLanguageHeading(std::string_view line) -> std::optional<std::string> {
+    line = Trim(line);
+    if (line.starts_with("<!--") && line.ends_with("-->")) {
+        line.remove_prefix(4);
+        line.remove_suffix(3);
+        line = Trim(line);
+        if (const auto colon = line.find(':'); colon != std::string_view::npos
+            && Lower(Trim(line.substr(0, colon))) == "lang") {
+            line = Trim(line.substr(colon + 1));
+        } else {
+            return {};
+        }
+    } else {
+        while (!line.empty() && line.front() == '#') {
+            line.remove_prefix(1);
+        }
+        line = Trim(line);
+        if (line.size() >= 2 && line.front() == '[' && line.back() == ']') {
+            line.remove_prefix(1);
+            line.remove_suffix(1);
+        }
+    }
+
+    auto code = Lower(Trim(line));
+    static constexpr std::array<std::string_view, 15> languages{
+        "en", "ja", "fr", "de", "it", "es", "zh-cn", "ko", "nl",
+        "pt", "ru", "zh-tw", "se", "vi", "uk",
+    };
+    if (std::ranges::find(languages, code) == languages.end()) {
+        return {};
+    }
+    if (code == "zh-cn") return "zh-CN";
+    if (code == "zh-tw") return "zh-TW";
+    return code;
+}
+
+auto LocalizeReleaseNotes(std::string_view notes, std::string_view version) -> std::string {
+    if (notes.empty()) {
+        return "No changelog available."_i18n;
+    }
+
+    const auto language = i18n::GetLanguageCode();
+    if (const auto json_notes = ParseLocalizedNotesJson(notes, version, language); !json_notes.empty()) {
+        return json_notes;
+    }
+
+    // Optional Markdown format:
+    //   ## [en]
+    //   English notes
+    //   ## [fr]
+    //   French notes
+    // Automatic language uses the resolved console language here.
+    std::string selected;
+    std::string english;
+    std::string active_language;
+    bool found_language_section{};
+    for (std::size_t offset{}; offset <= notes.size();) {
+        const auto end = notes.find('\n', offset);
+        const auto line = notes.substr(offset, end == std::string_view::npos ? notes.size() - offset : end - offset);
+        if (const auto heading = ParseLanguageHeading(line)) {
+            active_language = *heading;
+            found_language_section = true;
+        } else if (!active_language.empty()) {
+            auto& output = active_language == language ? selected : (active_language == "en" ? english : selected);
+            if (active_language == language || active_language == "en") {
+                output.append(line);
+                output.push_back('\n');
+            }
+        }
+        if (end == std::string_view::npos) {
+            break;
+        }
+        offset = end + 1;
+    }
+
+    if (found_language_section) {
+        auto result = !selected.empty() ? std::move(selected) : std::move(english);
+        while (!result.empty() && std::isspace(static_cast<unsigned char>(result.back()))) {
+            result.pop_back();
+        }
+        if (!result.empty()) {
+            return result;
+        }
+    }
+    return std::string{notes};
+}
+
+class UpdateInfoMenu final : public MenuBase {
+public:
+    UpdateInfoMenu(std::string version, std::string notes, bool update_available, std::function<void()> on_update)
+    : MenuBase{"Update Checker"_i18n, MenuFlag_None}
+    , m_version{std::move(version)}
+    , m_update_available{update_available}
+    , m_on_update{std::move(on_update)} {
+        SetAction(Button::B, Action{"Back"_i18n, [this](){ SetPop(); }});
+        if (m_update_available) {
+            SetAction(Button::A, Action{"Update Now"_i18n, [this](){
+                if (m_on_update) {
+                    m_on_update();
+                }
+            }});
+        }
+        m_notes = std::make_unique<ScrollableText>(notes, 0.f, 205.f, 385.f, 1000.f, 20.f);
+        SetTitleSubHeading(m_version.empty() ? "v" APP_DISPLAY_VERSION : m_version);
+    }
+
+    auto GetShortTitle() const -> const char* override { return "Update"; }
+
+    void Update(Controller* controller, TouchInfo* touch) override {
+        MenuBase::Update(controller, touch);
+        m_notes->Update(controller, touch);
+    }
+
+    void Draw(NVGcontext* vg, Theme* theme) override {
+        MenuBase::Draw(vg, theme);
+        const auto status = m_update_available ? "New version available"_i18n : "You are already on the latest version."_i18n;
+        gfx::drawText(vg, 110.f, 125.f, 25.f, theme->GetColour(ThemeEntryID_TEXT), status.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        gfx::drawText(vg, 110.f, 166.f, 20.f, theme->GetColour(ThemeEntryID_TEXT_INFO), "Changelog"_i18n.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        gfx::drawRect(vg, 110.f, 187.f, 1040.f, 1.f, theme->GetColour(ThemeEntryID_LINE_SEPARATOR));
+        m_notes->Draw(vg, theme);
+    }
+
+private:
+    std::string m_version;
+    bool m_update_available{};
+    std::function<void()> m_on_update;
+    std::unique_ptr<ScrollableText> m_notes;
 };
 
 template<typename T>
@@ -71,12 +320,10 @@ const MiscMenuEntry MISC_MENU_ENTRIES[] = {
         "You can backup and restore saves.\n\n"
         "Experimental support for backing up system saves is possible." },
 
-#if 0
     { .name = "Themezer", .title = "Themezer", .func = MiscMenuFuncGenerator<ui::menu::themezer::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
         "Download themes from themezer.net. "
         "Themes are downloaded to /themes/sphaira\n"
         "To install the themes, NXThemesInstaller needs to be installed (can be downloaded via the AppStore)." },
-#endif
 
     { .name = "GitHub", .title = "GitHub", .func = MiscMenuFuncGenerator<ui::menu::gh::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
         "Download releases directly from GitHub. "
@@ -107,57 +354,112 @@ const MiscMenuEntry MISC_MENU_ENTRIES[] = {
 };
 
 auto InstallUpdate(ProgressBox* pbox, const std::string url, const std::string version) -> Result {
-    static fs::FsPath zip_out{"/switch/sphaira/cache/update.zip"};
+    static const fs::FsPath zip_out{"/switch/sphaira/cache/update.zip"};
+    static const fs::FsPath staged_nro{"/switch/sphaira/cache/update.nro.tmp"};
+    static const fs::FsPath backup_nro{"/switch/sphaira/cache/update.nro.backup"};
 
     fs::FsNativeSd fs;
     R_TRY(fs.GetFsOpenResult());
 
-    // 1. download the zip
+    const auto exe_path = App::GetExePath();
+    const bool direct_nro = EndsWithCaseInsensitive(url, ".nro");
+    const auto& download_path = direct_nro ? staged_nro : zip_out;
+    fs.DeleteFile(staged_nro);
+    fs.DeleteFile(zip_out);
+    fs.DeleteFile(backup_nro);
+    ON_SCOPE_EXIT({
+        fs.DeleteFile(staged_nro);
+        fs.DeleteFile(zip_out);
+    });
+
+    // 1. Download to a staging path. Never overwrite the running executable
+    // before the complete update has been validated.
     if (!pbox->ShouldExit()) {
         pbox->NewTransfer(i18n::Reorder("Downloading ", version));
         log_write("starting download: %s\n", url.c_str());
 
         const auto result = curl::Api().ToFile(
             curl::Url{url},
-            curl::Path{zip_out},
+            curl::Path{download_path},
             curl::OnProgress{pbox->OnDownloadProgressCallback()}
         );
 
         R_UNLESS(result.success, Result_MainFailedToDownloadUpdate);
     }
+    R_TRY(pbox->ShouldExitResult());
 
-    ON_SCOPE_EXIT(fs.DeleteFile(zip_out));
-
-    // 2. extract the zip
-    if (!pbox->ShouldExit()) {
-        const auto exe_path = App::GetExePath();
-        bool found_exe{};
-
+    // 2. Extract only sphaira.nro from archives. Other release files cannot
+    // write to arbitrary SD-card paths during self-update.
+    bool found_exe{direct_nro};
+    if (!direct_nro) {
         R_TRY(thread::TransferUnzipAll(pbox, zip_out, &fs, "/", [&](const fs::FsPath& name, fs::FsPath& path) -> bool {
-            if (std::strstr(path, "sphaira.nro")) {
-                path = exe_path;
+            if (name.ends_with("sphaira.nro")) {
+                path = staged_nro;
                 found_exe = true;
+                return true;
             }
-            return true;
+            return false;
         }));
+    }
+    R_TRY(pbox->ShouldExitResult());
+    R_UNLESS(found_exe, Result_MainFailedToDownloadUpdate);
 
-        // check if we have sphaira installed in other locations and update them.
-        if (found_exe) {
-            for (auto& path : SPHAIRA_PATHS) {
-                log_write("[UPD] checking path: %s\n", path.s);
-                // skip if we already updated this path.
-                if (exe_path == path) {
-                    log_write("[UPD] skipped as already updated\n");
-                    continue;
-                }
+    // 3. Validate the embedded NACP and expected release version.
+    NacpStruct staged_nacp{};
+    R_UNLESS(R_SUCCEEDED(nro_get_nacp(staged_nro, staged_nacp)), Result_MainDownloadedUpdateInvalid);
+    R_UNLESS(IsSphairaNacp(staged_nacp), Result_MainDownloadedUpdateInvalid);
+    const auto expected_version = App::GetVersionFromString(version.c_str());
+    const auto staged_version = App::GetVersionFromString(staged_nacp.display_version);
+    R_UNLESS(staged_version && (!expected_version || staged_version == expected_version), Result_MainDownloadedUpdateInvalid);
 
-                // check that this is really sphaira.
-                log_write("[UPD] checking nacp\n");
-                NacpStruct nacp;
-                if (R_SUCCEEDED(nro_get_nacp(path, nacp)) && !std::strcmp(nacp.lang[0].name, "sphaira")) {
-                    log_write("[UPD] found, updating\n");
-                    pbox->NewTransfer(path);
-                    R_TRY(pbox->CopyFile(&fs, exe_path, path));
+    // 4. Keep a recovery copy while replacing the running NRO.
+    pbox->NewTransfer("Backing up current version"_i18n);
+    R_TRY(pbox->CopyFile(&fs, exe_path, backup_nro));
+    pbox->NewTransfer("Installing validated update"_i18n);
+    const auto install_result = pbox->CopyFile(&fs, staged_nro, exe_path);
+    if (R_FAILED(install_result)) {
+        log_write("[UPD] install failed, restoring backup\n");
+        const auto restore_result = pbox->CopyFile(&fs, backup_nro, exe_path);
+        if (R_FAILED(restore_result)) {
+            log_write("[UPD] backup restore failed: 0x%X\n", R_VALUE(restore_result));
+        }
+        R_THROW(Result_MainFailedToInstallUpdate);
+    }
+
+    // Read the file back from its final location before deleting the backup.
+    // This catches interrupted or corrupted SD-card writes while recovery is
+    // still possible.
+    NacpStruct installed_nacp{};
+    const auto installed_nacp_result = nro_get_nacp(exe_path, installed_nacp);
+    const auto installed_version = R_SUCCEEDED(installed_nacp_result)
+        ? App::GetVersionFromString(installed_nacp.display_version)
+        : 0;
+    if (R_FAILED(installed_nacp_result) || !IsSphairaNacp(installed_nacp) || installed_version != staged_version) {
+        log_write("[UPD] installed update failed verification, restoring backup\n");
+        const auto restore_result = pbox->CopyFile(&fs, backup_nro, exe_path);
+        if (R_FAILED(restore_result)) {
+            log_write("[UPD] backup restore failed: 0x%X\n", R_VALUE(restore_result));
+        }
+        R_THROW(Result_MainFailedToInstallUpdate);
+    }
+    fs.DeleteFile(backup_nro);
+
+    // 5. Update known secondary installations, but only when their NACP
+    // identifies them as Sphaira.
+    for (const auto& path : SPHAIRA_PATHS) {
+        if (exe_path == path) {
+            continue;
+        }
+        NacpStruct nacp{};
+        if (R_SUCCEEDED(nro_get_nacp(path, nacp))) {
+            if (IsSphairaNacp(nacp)) {
+                pbox->NewTransfer(path);
+                const auto secondary_result = pbox->CopyFile(&fs, staged_nro, path);
+                if (R_FAILED(secondary_result)) {
+                    // The active installation is already valid. A stale or
+                    // locked secondary copy must not turn that success into a
+                    // failed update.
+                    log_write("[UPD] failed to update secondary path %s: 0x%X\n", path.s, R_VALUE(secondary_result));
                 }
             }
         }
@@ -237,70 +539,7 @@ auto GetMenuMenuEntries() -> std::span<const MiscMenuEntry> {
 }
 
 MainMenu::MainMenu() {
-    curl::Api().ToFileAsync(
-        curl::Url{GITHUB_URL},
-        curl::Path{CACHE_PATH},
-        curl::Flags{curl::Flag_Cache},
-        curl::StopToken{this->GetToken()},
-        curl::Header{
-            { "Accept", "application/vnd.github+json" },
-        },
-        curl::OnComplete{[this](auto& result){
-            log_write("inside github download\n");
-            m_update_state = UpdateState::Error;
-            ON_SCOPE_EXIT( log_write("update status: %u\n", (u8)m_update_state) );
-
-            if (!result.success) {
-                return false;
-            }
-
-            auto json = yyjson_read_file(CACHE_PATH, YYJSON_READ_NOFLAG, nullptr, nullptr);
-            R_UNLESS(json, false);
-            ON_SCOPE_EXIT(yyjson_doc_free(json));
-
-            auto root = yyjson_doc_get_root(json);
-            R_UNLESS(root, false);
-
-            auto tag_key = yyjson_obj_get(root, "tag_name");
-            R_UNLESS(tag_key, false);
-
-            const auto version = yyjson_get_str(tag_key);
-            R_UNLESS(version, false);
-            if (!App::IsVersionNewer(APP_VERSION, version)) {
-                m_update_state = UpdateState::None;
-                return true;
-            }
-
-            auto body_key = yyjson_obj_get(root, "body");
-            R_UNLESS(body_key, false);
-
-            const auto body = yyjson_get_str(body_key);
-            R_UNLESS(body, false);
-
-            auto assets = yyjson_obj_get(root, "assets");
-            R_UNLESS(assets, false);
-
-            auto idx0 = yyjson_arr_get(assets, 0);
-            R_UNLESS(idx0, false);
-
-            auto url_key = yyjson_obj_get(idx0, "browser_download_url");
-            R_UNLESS(url_key, false);
-
-            const auto url = yyjson_get_str(url_key);
-            R_UNLESS(url, false);
-
-            m_update_version = version;
-            m_update_url = url;
-            m_update_description = body;
-            m_update_state = UpdateState::Update;
-            log_write("found url: %s\n", url);
-            log_write("found body: %s\n", body);
-            App::Notify("Update avaliable: "_i18n + m_update_version);
-            App::Notify("Download via the Network options!"_i18n);
-
-            return true;
-        }
-    });
+    CheckForUpdates(false);
 
     this->SetActions(
         std::make_pair(Button::START, Action{App::Exit}),
@@ -348,26 +587,6 @@ MainMenu::MainMenu() {
                 auto options = std::make_unique<Sidebar>("Network Options"_i18n, Sidebar::Side::LEFT);
                 ON_SCOPE_EXIT(App::Push(std::move(options)));
 
-                if (m_update_state == UpdateState::Update) {
-                    options->Add<SidebarEntryCallback>("Download update: "_i18n + m_update_version, [this](){
-                        App::Push<ProgressBox>(0, "Downloading "_i18n, "Sphaira v" + m_update_version, [this](auto pbox) -> Result {
-                            return InstallUpdate(pbox, m_update_url, m_update_version);
-                        }, [this](Result rc){
-                            App::PushErrorBox(rc, "Failed to download update"_i18n);
-
-                            if (R_SUCCEEDED(rc)) {
-                                m_update_state = UpdateState::None;
-                                App::Notify(i18n::Reorder("Updated to ", m_update_version));
-                                App::Push<OptionBox>(
-                                    "Press OK to restart Sphaira"_i18n, "OK"_i18n, [](auto){
-                                        App::ExitRestart();
-                                    }
-                                );
-                            }
-                        });
-                    });
-                }
-
                 options->Add<SidebarEntryCallback>("FTP"_i18n, [](){ App::DisplayFtpOptions(); },
                     i18n::get("ftp_settings_info",
                         "Enable / modify the FTP server settings such as port, user/pass and the folders that are shown.\n\n"
@@ -391,9 +610,8 @@ MainMenu::MainMenu() {
                         "NXlink is used to send .nro's from PC to the switch\n\n"
                         "If you are not a developer, you can disable this option."));
 
-            },  i18n::get("nxlink_toggle_info",
-                    "Toggle FTP, MTP, HDD and NXlink\n\n"
-                    "If Sphaira has a update available, you can download it from this menu"));
+            },  i18n::get("network_options_info",
+                    "Toggle FTP, MTP, HDD and NXlink"));
 
             options->Add<SidebarEntryCallback>("Theme"_i18n, [](){
                 App::DisplayThemeOptions();
@@ -412,6 +630,18 @@ MainMenu::MainMenu() {
             },  i18n::get("advanced_options_info",
                     "Change the advanced options. "
                     "Please view the info boxes to better understand each option."));
+
+            // Keep update controls in the main options list, directly below
+            // Advanced Options (not inside its submenu).
+            if (m_update_state == UpdateState::Update) {
+                options->Add<SidebarEntryCallback>("Update available: "_i18n + m_update_version, [this](){
+                    ShowUpdateInfo();
+                }, true, "View the changelog and install the available update."_i18n);
+            }
+
+            options->Add<SidebarEntryCallback>("Check for Updates"_i18n, [this](){
+                CheckForUpdates(true);
+            }, true, "Check for Sphaira updates and view the changelog."_i18n);
         }}
     ));
 
@@ -433,6 +663,166 @@ MainMenu::MainMenu() {
 
 MainMenu::~MainMenu() {
 
+}
+
+void MainMenu::CheckForUpdates(bool show_result) {
+    const auto generation = ++m_update_generation;
+    m_update_state = UpdateState::Pending;
+    if (show_result) {
+        App::Notify("Checking for updates"_i18n);
+    }
+
+    const auto queued = curl::Api().ToFileAsync(
+        curl::Url{GITHUB_URL},
+        curl::Path{CACHE_PATH},
+        curl::Flags{curl::Flag_Cache},
+        curl::StopToken{this->GetToken()},
+        curl::Header{
+            { "Accept", "application/vnd.github+json" },
+            { "X-GitHub-Api-Version", "2022-11-28" },
+        },
+        curl::OnComplete{[this, generation, show_result](auto& result){
+            if (generation != m_update_generation) {
+                return;
+            }
+
+            const bool parsed = result.success && ParseUpdateMetadata(CACHE_PATH);
+            if (!parsed) {
+                m_update_state = UpdateState::Error;
+            }
+            log_write("update status: %u http: %ld\n", static_cast<u8>(m_update_state), result.code);
+
+            if (show_result) {
+                ShowUpdateInfo();
+            } else if (m_update_state == UpdateState::Update) {
+                App::Notify("Update available: "_i18n + m_update_version);
+                App::Notify("Open Menu Options to view the changelog."_i18n);
+            }
+        }}
+    );
+
+    if (!queued) {
+        m_update_state = UpdateState::Error;
+        if (show_result) {
+            ShowUpdateInfo();
+        }
+    }
+}
+
+auto MainMenu::ParseUpdateMetadata(const fs::FsPath& path) -> bool {
+    auto document = yyjson_read_file(path, YYJSON_READ_NOFLAG, nullptr, nullptr);
+    if (!document) {
+        return false;
+    }
+    ON_SCOPE_EXIT(yyjson_doc_free(document));
+
+    const auto root = yyjson_doc_get_root(document);
+    if (!root || !yyjson_is_obj(root)) {
+        return false;
+    }
+
+    const auto tag_value = yyjson_obj_get(root, "tag_name");
+    const auto version = tag_value ? yyjson_get_str(tag_value) : nullptr;
+    if (!version || !*version) {
+        return false;
+    }
+
+    std::string body;
+    if (const auto body_value = yyjson_obj_get(root, "body"); body_value && yyjson_is_str(body_value)) {
+        if (const auto value = yyjson_get_str(body_value)) {
+            body = value;
+        }
+    }
+
+    m_update_version = version;
+    m_update_description = LocalizeReleaseNotes(body, m_update_version);
+    m_update_url.clear();
+
+    if (!App::IsVersionNewer(APP_VERSION, version)) {
+        m_update_state = UpdateState::None;
+        return true;
+    }
+
+    const auto assets = yyjson_obj_get(root, "assets");
+    if (!assets || !yyjson_is_arr(assets)) {
+        return false;
+    }
+
+    int best_score{};
+    size_t index{}, count{};
+    yyjson_val* asset{};
+    yyjson_arr_foreach(assets, index, count, asset) {
+        if (!asset || !yyjson_is_obj(asset)) {
+            continue;
+        }
+        const auto name_value = yyjson_obj_get(asset, "name");
+        const auto url_value = yyjson_obj_get(asset, "browser_download_url");
+        const auto name = name_value ? yyjson_get_str(name_value) : nullptr;
+        const auto url = url_value ? yyjson_get_str(url_value) : nullptr;
+        if (!name || !url || !*url) {
+            continue;
+        }
+
+        const auto lower_name = Lower(name);
+        const bool sphaira_asset = lower_name.find("sphaira") != std::string::npos;
+        int score{};
+        if (EndsWithCaseInsensitive(name, ".nro")) {
+            score = sphaira_asset ? 4 : 3;
+        } else if (EndsWithCaseInsensitive(name, ".zip")) {
+            score = sphaira_asset ? 2 : 1;
+        }
+        if (score > best_score) {
+            best_score = score;
+            m_update_url = url;
+        }
+    }
+
+    if (m_update_url.empty()) {
+        return false;
+    }
+
+    m_update_state = UpdateState::Update;
+    log_write("found update version: %s url: %s\n", m_update_version.c_str(), m_update_url.c_str());
+    return true;
+}
+
+void MainMenu::ShowUpdateInfo() {
+    if (m_update_state == UpdateState::Pending) {
+        App::Notify("Checking for updates"_i18n);
+        return;
+    }
+    if (m_update_state == UpdateState::Error) {
+        App::Push<OptionBox>("Failed to check for updates"_i18n, "OK"_i18n);
+        return;
+    }
+
+    App::Push<UpdateInfoMenu>(
+        m_update_version,
+        m_update_description.empty() ? "No changelog available."_i18n : m_update_description,
+        m_update_state == UpdateState::Update,
+        [this](){ StartUpdateInstall(); }
+    );
+}
+
+void MainMenu::StartUpdateInstall() {
+    if (m_update_state != UpdateState::Update || m_update_url.empty()) {
+        return;
+    }
+
+    App::Push<ProgressBox>(0, "Downloading "_i18n, "Sphaira " + m_update_version, [this](auto pbox) -> Result {
+        return InstallUpdate(pbox, m_update_url, m_update_version);
+    }, [this](Result rc){
+        App::PushErrorBox(rc, "Failed to install update"_i18n);
+        if (R_SUCCEEDED(rc)) {
+            m_update_state = UpdateState::None;
+            App::Notify("Update complete. Restarting Sphaira."_i18n);
+            App::Push<OptionBox>(
+                "Press OK to restart Sphaira"_i18n, "OK"_i18n, [](auto){
+                    App::ExitRestart();
+                }
+            );
+        }
+    });
 }
 
 void MainMenu::Update(Controller* controller, TouchInfo* touch) {

@@ -306,7 +306,8 @@ int Device::ftp_stat(const std::string& path, struct stat* st, bool is_dir) {
     std::memset(st, 0, sizeof(*st));
 
     std::vector<char> chunk;
-    const auto [success, response_code] = ftp_quote({"MLST " + path}, is_dir, &chunk);
+    const std::string cmd = "MLST " + path;
+    const auto [success, response_code] = ftp_quote(std::span<const std::string>{&cmd, 1}, is_dir, &chunk);
     if (!success) {
         return -EIO;
     }
@@ -331,7 +332,7 @@ int Device::ftp_stat(const std::string& path, struct stat* st, bool is_dir) {
 
 int Device::ftp_remove_file_folder(const std::string& path, bool is_dir) {
     const auto cmd = (is_dir ? "RMD " : "DELE ") + path;
-    const auto [success, response_code] = ftp_quote({cmd}, is_dir);
+    const auto [success, response_code] = ftp_quote(std::span<const std::string>{&cmd, 1}, is_dir);
 
     if (!success) {
         return -EIO;
@@ -385,7 +386,8 @@ int Device::ftp_rename(const std::string& old_path, const std::string& new_path,
 
 int Device::ftp_mkdir(const std::string& path) {
     std::vector<char> chunk;
-    const auto [success, response_code] = ftp_quote({"MKD " + path}, true);
+    const std::string cmd = "MKD " + path;
+    const auto [success, response_code] = ftp_quote(std::span<const std::string>{&cmd, 1}, true);
     if (!success) {
         return -EIO;
     }
@@ -421,7 +423,8 @@ bool Device::Mount() {
 
     // issue FEAT command to see if we support MLST/MLSD.
     std::vector<char> chunk;
-    const auto [success, response_code] = ftp_quote({"FEAT"}, true, &chunk);
+    const std::string cmd = "FEAT";
+    const auto [success, response_code] = ftp_quote(std::span<const std::string>{&cmd, 1}, true, &chunk);
     if (!success || response_code != 211) {
         log_write("[FTP] FEAT command failed with response code: %ld\n", response_code);
         return false;
@@ -440,7 +443,8 @@ bool Device::Mount() {
     if (view.find("UTF8") != std::string_view::npos) {
         // it doesn't matter if this fails tbh.
         // also, i am not sure if this persists between logins or not...
-        ftp_quote({"OPTS UTF8 ON"}, true);
+        const std::string cmd_opts = "OPTS UTF8 ON";
+        ftp_quote(std::span<const std::string>{&cmd_opts, 1}, true);
     }
 
     return this->mounted = true;

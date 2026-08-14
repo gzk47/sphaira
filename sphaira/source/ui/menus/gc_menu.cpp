@@ -96,17 +96,6 @@ auto GetXciSizeFromRomSize(u8 rom_size) -> s64 {
     return 0;
 }
 
-struct DebugEventInfo {
-    u32 event_type;
-    u32 flags;
-    u64 thread_id;
-    u64 title_id;
-    u64 process_id;
-    char process_name[12];
-    u32 mmu_flags;
-    u8 _0x30[0x10];
-};
-
 auto GetDumpTypeStr(u8 type) -> const char* {
     switch (type) {
         case DumpFileType_TrimmedXCI:
@@ -126,11 +115,16 @@ auto GetDumpTypeStr(u8 type) -> const char* {
 }
 
 auto BuildXciName(const ApplicationEntry& e) -> fs::FsPath {
-    fs::FsPath name_buf = e.lang_entry.name;
-    title::utilsReplaceIllegalCharacters(name_buf, true);
+    const auto export_name = title::MakeExportTitleName(
+        e.lang_entry.name, e.english_name, App::GetApp()->m_dump_fix_filenames.Get()
+    );
 
     fs::FsPath path;
-    std::snprintf(path, sizeof(path), "%s [%016lX][v%u]", name_buf.s, e.app_id, e.version);
+    if (export_name.empty()) {
+        std::snprintf(path, sizeof(path), "[%016lX][v%u]", e.app_id, e.version);
+    } else {
+        std::snprintf(path, sizeof(path), "%.*s [%016lX][v%u]", static_cast<int>(export_name.size()), export_name.data(), e.app_id, e.version);
+    }
     return path;
 }
 
@@ -1090,6 +1084,7 @@ Result Menu::LoadControlData(ApplicationEntry& e) {
 
     e.icon = data->icon;
     e.lang_entry = data->lang;
+    e.english_name = title::GetEnglishTitleName(e.app_id);
     R_SUCCEED();
 }
 
@@ -1261,7 +1256,7 @@ Result Menu::GcGetSecurityInfo(GameCardSecurityInformation& out) {
         if (R_SUCCEEDED(svcDebugActiveProcess(&handle, pids[i]))) {
             ON_SCOPE_EXIT(svcCloseHandle(handle));
 
-            if (R_FAILED(svcGetDebugEvent(&event_info, handle)) || title_id != event_info.title_id) {
+            if (R_FAILED(svcGetDebugEvent(&event_info, handle)) || title_id != event_info.info.create_process.program_id) {
                 continue;
             }
 

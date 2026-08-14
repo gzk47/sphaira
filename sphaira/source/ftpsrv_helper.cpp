@@ -3,6 +3,7 @@
 #include "app.hpp"
 #include "fs.hpp"
 #include "log.hpp"
+#include "ui/menus/homebrew.hpp"
 #include "utils/thread.hpp"
 
 #include <algorithm>
@@ -44,6 +45,18 @@ void ftp_log_callback(enum FTP_API_LOG_TYPE type, const char* msg) {
 
 void ftp_progress_callback(void) {
     App::NotifyFlashLed();
+}
+
+void ftp_nro_change_callback(const char* path) {
+    if (!path) {
+        return;
+    }
+
+    const auto length = std::strlen(path);
+    if (length >= 4 && !strcasecmp(path + length - 4, ".nro")) {
+        log_write("[FTP] NRO changed: %s\n", path);
+        ui::menu::homebrew::SignalChange();
+    }
 }
 
 InstallSharedData g_shared_data{};
@@ -511,6 +524,8 @@ bool Init() {
     auto app = App::GetApp();
     g_ftpsrv_config.log_callback = ftp_log_callback;
     g_ftpsrv_config.progress_callback = ftp_progress_callback;
+    g_ftpsrv_config.upload_callback = ftp_nro_change_callback;
+    g_ftpsrv_config.delete_callback = ftp_nro_change_callback;
     g_ftpsrv_config.anon = app->m_ftp_anon.Get();
     std::strncpy(g_ftpsrv_config.user, app->m_ftp_user.Get().c_str(), sizeof(g_ftpsrv_config.user) - 1);
     std::strncpy(g_ftpsrv_config.pass, app->m_ftp_pass.Get().c_str(), sizeof(g_ftpsrv_config.pass) - 1);

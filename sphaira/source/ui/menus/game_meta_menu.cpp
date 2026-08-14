@@ -4,6 +4,7 @@
 #include "ui/nvg_util.hpp"
 #include "ui/sidebar.hpp"
 #include "ui/option_box.hpp"
+#include "ui/progress_box.hpp"
 
 #include "yati/nx/ns.hpp"
 #include "yati/nx/nca.hpp"
@@ -52,6 +53,10 @@ Result GetMiniNacpFromContentId(NcmContentStorage* cs, const NcmContentMetaKey& 
 Menu::Menu(Entry& entry) : MenuBase{entry.GetName(), MenuFlag_None}, m_entry{entry} {
     this->SetActions(
         std::make_pair(Button::L2, Action{"Select"_i18n, [this](){
+            if (static_cast<size_t>(m_index) >= m_entries.size()) {
+                return;
+            }
+
             // if both set, select all.
             if (App::GetApp()->m_controller.GotHeld(Button::R2)) {
                 const auto set = m_selected_count != m_entries.size();
@@ -77,7 +82,9 @@ Menu::Menu(Entry& entry) : MenuBase{entry.GetName(), MenuFlag_None}, m_entry{ent
             }
         }}),
         std::make_pair(Button::A, Action{"View Content"_i18n, [this](){
-            App::Push<meta_nca::Menu>(m_entry, GetEntry());
+            if (static_cast<size_t>(m_index) < m_entries.size()) {
+                App::Push<meta_nca::Menu>(m_entry, GetEntry());
+            }
         }}),
         std::make_pair(Button::B, Action{"Back"_i18n, [this](){
             SetPop();
@@ -86,7 +93,7 @@ Menu::Menu(Entry& entry) : MenuBase{entry.GetName(), MenuFlag_None}, m_entry{ent
             auto options = std::make_unique<Sidebar>("Content Options"_i18n, Sidebar::Side::RIGHT);
             ON_SCOPE_EXIT(App::Push(std::move(options)));
 
-            if (!m_entries.empty()) {
+            if (static_cast<size_t>(m_index) < m_entries.size()) {
                 options->Add<SidebarEntryCallback>("Export NSP"_i18n, [this](){
                     DumpGames(false);
                 });
@@ -124,6 +131,10 @@ Menu::Menu(Entry& entry) : MenuBase{entry.GetName(), MenuFlag_None}, m_entry{ent
                     });
                 }
             }
+
+            options->Add<SidebarEntryCallback>("Update version list"_i18n, [this](){
+                DownloadAndRefreshAvailable();
+            });
         }})
     );
 
@@ -143,21 +154,38 @@ Menu::Menu(Entry& entry) : MenuBase{entry.GetName(), MenuFlag_None}, m_entry{ent
     SetTitleSubHeading(subtitle);
 
     Scan();
+    m_prompt_version_update = nx_versions::ShouldPromptForUpdate();
 }
 
 Menu::~Menu() {
 }
 
 void Menu::Update(Controller* controller, TouchInfo* touch) {
+    if (m_prompt_version_update) {
+        m_prompt_version_update = false;
+        App::Push<OptionBox>(
+            "Version list is missing or outdated. Download it now?"_i18n,
+            "No"_i18n, "Download"_i18n, 0, [this](auto op_index){
+                if (op_index && *op_index) {
+                    DownloadAndRefreshAvailable();
+                }
+            }
+        );
+        return;
+    }
+
     if (m_dirty) {
         m_dirty = false;
         Scan();
     }
 
     MenuBase::Update(controller, touch);
-    m_list->OnUpdate(controller, touch, m_index, m_entries.size(), [this](bool touch, auto i) {
+    const auto total = m_entries.size() + m_available_entries.size();
+    m_list->OnUpdate(controller, touch, m_index, total, [this](bool touch, auto i) {
         if (touch && m_index == i) {
-            FireAction(Button::A);
+            if (static_cast<size_t>(m_index) < m_entries.size()) {
+                FireAction(Button::A);
+            }
         } else {
             App::PlaySoundEffect(SoundEffect::Focus);
             SetIndex(i);
@@ -168,76 +196,96 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
 void Menu::Draw(NVGcontext* vg, Theme* theme) {
     MenuBase::Draw(vg, theme);
 
+    const auto total = m_entries.size() + m_available_entries.size();
+
     // draw left-side grid background.
     gfx::drawRect(vg, 30, 90, 375, 555, theme->GetColour(ThemeEntryID_GRID));
 
     // draw the game icon (maybe remove this or reduce it's size).
-    const auto& e = m_entries[m_index];
     gfx::drawImage(vg, 90, 130, 256, 256, m_entry.image ? m_entry.image : App::GetDefaultImage());
 
-    nvgSave(vg);
-        nvgIntersectScissor(vg, 50, 90, 325, 555);
-
-        char req_vers_buf[128];
-        const auto ver = e.content_meta.extened.application.required_system_version;
-        switch (e.status.meta_type) {
-            case NcmContentMetaType_Application:  std::snprintf(req_vers_buf, sizeof(req_vers_buf), "Required System Version: %u.%u.%u"_i18n.c_str(), SYSVER_MAJOR(ver), SYSVER_MINOR(ver), SYSVER_MICRO(ver)); break;
-            case NcmContentMetaType_Patch:        std::snprintf(req_vers_buf, sizeof(req_vers_buf), "Required System Version: %u.%u.%u"_i18n.c_str(), SYSVER_MAJOR(ver), SYSVER_MINOR(ver), SYSVER_MICRO(ver)); break;
-            case NcmContentMetaType_AddOnContent: std::snprintf(req_vers_buf, sizeof(req_vers_buf), "Required Application Version: v%u"_i18n.c_str(), ver >> 16); break;
-        }
-
-        if (e.missing_count) {
-            gfx::drawTextArgs(vg, 50, 415, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "Content Count: %u (%u missing)"_i18n.c_str(), e.content_meta.header.content_count, e.missing_count);
-        } else {
-            gfx::drawTextArgs(vg, 50, 415, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "Content Count: %u"_i18n.c_str(), e.content_meta.header.content_count);
-        }
-
-        gfx::drawTextArgs(vg, 50, 455, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "Ticket: %s"_i18n.c_str(), i18n::get(TICKET_STR[e.ticket_type]).c_str());
-        gfx::drawTextArgs(vg, 50, 495, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "Key Generation: %u (%s)"_i18n.c_str(), e.key_gen, nca::GetKeyGenStr(e.key_gen));
-        gfx::drawTextArgs(vg, 50, 535, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "%s", req_vers_buf);
-
-        if (e.status.meta_type == NcmContentMetaType_Application || e.status.meta_type == NcmContentMetaType_Patch) {
-            gfx::drawTextArgs(vg, 50, 575, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "Display Version: %s"_i18n.c_str(), e.nacp.display_version);
-        }
-    nvgRestore(vg);
-
-    // exit early if we have no entries (maybe?)
-    if (m_entries.empty()) {
-        // todo: center this.
+    if (!total) {
         gfx::drawTextArgs(vg, SCREEN_WIDTH / 2.f, SCREEN_HEIGHT / 2.f, 36.f, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE, theme->GetColour(ThemeEntryID_TEXT_INFO), "Empty..."_i18n.c_str());
         return;
     }
 
+    const bool is_installed = static_cast<size_t>(m_index) < m_entries.size();
+
+    nvgSave(vg);
+        nvgIntersectScissor(vg, 50, 90, 325, 555);
+
+        if (is_installed) {
+            const auto& e = m_entries[m_index];
+            char req_vers_buf[128];
+            const auto ver = e.content_meta.extened.application.required_system_version;
+            switch (e.status.meta_type) {
+                case NcmContentMetaType_Application:  std::snprintf(req_vers_buf, sizeof(req_vers_buf), "Required System Version: %u.%u.%u"_i18n.c_str(), SYSVER_MAJOR(ver), SYSVER_MINOR(ver), SYSVER_MICRO(ver)); break;
+                case NcmContentMetaType_Patch:        std::snprintf(req_vers_buf, sizeof(req_vers_buf), "Required System Version: %u.%u.%u"_i18n.c_str(), SYSVER_MAJOR(ver), SYSVER_MINOR(ver), SYSVER_MICRO(ver)); break;
+                case NcmContentMetaType_AddOnContent: std::snprintf(req_vers_buf, sizeof(req_vers_buf), "Required Application Version: v%u"_i18n.c_str(), ver >> 16); break;
+            }
+
+            if (e.missing_count) {
+                gfx::drawTextArgs(vg, 50, 415, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "Content Count: %u (%u missing)"_i18n.c_str(), e.content_meta.header.content_count, e.missing_count);
+            } else {
+                gfx::drawTextArgs(vg, 50, 415, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "Content Count: %u"_i18n.c_str(), e.content_meta.header.content_count);
+            }
+
+            gfx::drawTextArgs(vg, 50, 455, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "Ticket: %s"_i18n.c_str(), i18n::get(TICKET_STR[e.ticket_type]).c_str());
+            gfx::drawTextArgs(vg, 50, 495, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "Key Generation: %u (%s)"_i18n.c_str(), e.key_gen, nca::GetKeyGenStr(e.key_gen));
+            gfx::drawTextArgs(vg, 50, 535, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "%s", req_vers_buf);
+
+            if (e.status.meta_type == NcmContentMetaType_Application || e.status.meta_type == NcmContentMetaType_Patch) {
+                gfx::drawTextArgs(vg, 50, 575, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "Display Version: %s"_i18n.c_str(), e.nacp.display_version);
+            }
+        } else {
+            const auto& e = m_available_entries[static_cast<size_t>(m_index) - m_entries.size()];
+            const auto status = e.installed ? "Update Available"_i18n : "Not Installed"_i18n;
+            gfx::drawTextArgs(vg, 50, 415, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "%s", status.c_str());
+            gfx::drawTextArgs(vg, 50, 455, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "Available Version: v%u (%u)"_i18n.c_str(), e.version >> 16, e.version);
+        }
+    nvgRestore(vg);
+
     constexpr float text_xoffset{15.f};
 
-    m_list->Draw(vg, theme, m_entries.size(), [this](auto* vg, auto* theme, auto& v, auto i) {
+    m_list->Draw(vg, theme, total, [this, total](auto* vg, auto* theme, auto& v, auto i) {
         const auto& [x, y, w, h] = v;
-        auto& e = m_entries[i];
 
         auto text_id = ThemeEntryID_TEXT;
         if (m_index == i) {
             text_id = ThemeEntryID_TEXT_SELECTED;
             gfx::drawRectOutline(vg, theme, 4.f, v);
-        } else {
-            if (i != m_entries.size() - 1) {
-                gfx::drawRect(vg, x, y + h, w, 1.f, theme->GetColour(ThemeEntryID_LINE_SEPARATOR));
+        } else if (i + 1 < total) {
+            gfx::drawRect(vg, x, y + h, w, 1.f, theme->GetColour(ThemeEntryID_LINE_SEPARATOR));
+        }
+
+        if (i < m_entries.size()) {
+            auto& e = m_entries[i];
+            gfx::drawTextArgs(vg, x + text_xoffset, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%s", i18n::get(ncm::GetReadableMetaTypeStr(e.status.meta_type)).c_str());
+            gfx::drawTextArgs(vg, x + text_xoffset + 150, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%016lX", e.status.application_id);
+            gfx::drawTextArgs(vg, x + text_xoffset + 400, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "v%u (%u)", e.status.version >> 16, e.status.version);
+
+            if (!e.checked) {
+                e.checked = true;
+                GetNcmSizeOfMetaStatus(e);
             }
-        }
 
-        gfx::drawTextArgs(vg, x + text_xoffset, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%s", i18n::get(ncm::GetReadableMetaTypeStr(e.status.meta_type)).c_str());
-        gfx::drawTextArgs(vg, x + text_xoffset + 150, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "%016lX", e.status.application_id);
-        gfx::drawTextArgs(vg, x + text_xoffset + 400, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(text_id), "v%u (%u)", e.status.version >> 16, e.status.version);
+            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) + 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT_INFO), "%s", i18n::get(ncm::GetReadableStorageIdStr(e.status.storageID)).c_str());
+            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(ThemeEntryID_TEXT_INFO), "%s", utils::formatSizeStorage(e.size).c_str());
 
-        if (!e.checked) {
-            e.checked = true;
-            GetNcmSizeOfMetaStatus(e);
-        }
+            if (e.selected) {
+                gfx::drawText(vg, x + text_xoffset - 80 / 2, y + (h / 2.f) - (24.f / 2), 24.f, "\uE14B", nullptr, NVG_ALIGN_CENTER | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT_SELECTED));
+            }
+        } else {
+            const auto& e = m_available_entries[i - m_entries.size()];
+            const auto colour = m_index == static_cast<s64>(i)
+                ? theme->GetColour(ThemeEntryID_TEXT_SELECTED)
+                : theme->GetColour(ThemeEntryID_TEXT_INFO);
+            const auto status = e.installed ? "Update Available"_i18n : "Not Installed"_i18n;
 
-        gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) + 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT_INFO), "%s", i18n::get(ncm::GetReadableStorageIdStr(e.status.storageID)).c_str());
-        gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f) - 3, 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_BOTTOM, theme->GetColour(ThemeEntryID_TEXT_INFO), "%s", utils::formatSizeStorage(e.size).c_str());
-
-        if (e.selected) {
-            gfx::drawText(vg, x + text_xoffset - 80 / 2, y + (h / 2.f) - (24.f / 2), 24.f, "\uE14B", nullptr, NVG_ALIGN_CENTER | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT_SELECTED));
+            gfx::drawTextArgs(vg, x + text_xoffset, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, colour, "%s", i18n::get(ncm::GetReadableMetaTypeStr(e.meta_type)).c_str());
+            gfx::drawTextArgs(vg, x + text_xoffset + 150, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, colour, "%016lX", e.application_id);
+            gfx::drawTextArgs(vg, x + text_xoffset + 400, y + (h / 2.f), 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, colour, "v%u (%u)", e.version >> 16, e.version);
+            gfx::drawTextArgs(vg, x + w - text_xoffset, y + (h / 2.f), 16.f, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE, colour, "%s", status.c_str());
         }
     });
 }
@@ -266,12 +314,38 @@ void Menu::Scan() {
         }
     }
 
+    LoadAvailable();
     SetIndex(0);
 }
 
+void Menu::LoadAvailable() {
+    nx_versions::InstalledVersions installed;
+    installed.reserve(m_entries.size());
+    for (const auto& entry : m_entries) {
+        installed[entry.status.application_id] = entry.status.version;
+    }
+
+    m_available_entries = nx_versions::GetAvailable(m_entry.app_id, installed);
+}
+
+void Menu::DownloadAndRefreshAvailable() {
+    App::Push<ProgressBox>(0, "Downloading "_i18n, "Version List"_i18n, [](auto pbox) -> Result {
+        return nx_versions::Download(pbox);
+    }, [this](Result rc) {
+        if (R_SUCCEEDED(rc)) {
+            LoadAvailable();
+            const auto total = m_entries.size() + m_available_entries.size();
+            SetIndex(total ? std::min(m_index, static_cast<s64>(total) - 1) : 0);
+        } else if (rc != Result_TransferCancelled) {
+            App::PushErrorBox(rc, "Failed to update version list"_i18n);
+        }
+    });
+}
+
 void Menu::UpdateSubheading() {
-    const auto index = m_entries.empty() ? 0 : m_index + 1;
-    this->SetSubHeading(std::to_string(index) + " / " + std::to_string(m_entries.size()));
+    const auto total = m_entries.size() + m_available_entries.size();
+    const auto index = total ? m_index + 1 : 0;
+    this->SetSubHeading(std::to_string(index) + " / " + std::to_string(total));
 }
 
 Result Menu::GetNcmSizeOfMetaStatus(MetaEntry& entry) const {

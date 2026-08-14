@@ -534,6 +534,7 @@ enum class SphairaResult : Result {
 
     NroBadMagic,
     NroBadSize,
+    CoreUnavailable,
 
     AppFailedMusicDownload,
     CurlFailedEasyInit,
@@ -584,11 +585,14 @@ enum class SphairaResult : Result {
     GhdlEmptyAsset,
     GhdlFailedToDownloadAsset,
     GhdlFailedToDownloadAssetJson,
+    GhdlUnsafeArchivePath,
 
     ThemezerFailedToDownloadThemeMeta,
     ThemezerFailedToDownloadTheme,
 
     MainFailedToDownloadUpdate,
+    MainDownloadedUpdateInvalid,
+    MainFailedToInstallUpdate,
 
     UsbDsBadDeviceSpeed,
 
@@ -675,6 +679,9 @@ enum class SphairaResult : Result {
     NszTooManyBlocks,
     // set when nca finished but not all blocks were handled.
     NszMissingBlocks,
+
+    NxVersionsFailedToDownload,
+    NxVersionsInvalidDatabase,
 };
 
 #define MAKE_SPHAIRA_RESULT_ENUM(x) Result_##x =  MAKERESULT(Module_Sphaira, (Result)SphairaResult::x)
@@ -714,6 +721,7 @@ enum : Result {
     MAKE_SPHAIRA_RESULT_ENUM(FsFailedStdioOpendir),
     MAKE_SPHAIRA_RESULT_ENUM(NroBadMagic),
     MAKE_SPHAIRA_RESULT_ENUM(NroBadSize),
+    MAKE_SPHAIRA_RESULT_ENUM(CoreUnavailable),
     MAKE_SPHAIRA_RESULT_ENUM(AppFailedMusicDownload),
     MAKE_SPHAIRA_RESULT_ENUM(CurlFailedEasyInit),
     MAKE_SPHAIRA_RESULT_ENUM(DumpFailedNetworkUpload),
@@ -753,9 +761,12 @@ enum : Result {
     MAKE_SPHAIRA_RESULT_ENUM(GhdlEmptyAsset),
     MAKE_SPHAIRA_RESULT_ENUM(GhdlFailedToDownloadAsset),
     MAKE_SPHAIRA_RESULT_ENUM(GhdlFailedToDownloadAssetJson),
+    MAKE_SPHAIRA_RESULT_ENUM(GhdlUnsafeArchivePath),
     MAKE_SPHAIRA_RESULT_ENUM(ThemezerFailedToDownloadThemeMeta),
     MAKE_SPHAIRA_RESULT_ENUM(ThemezerFailedToDownloadTheme),
     MAKE_SPHAIRA_RESULT_ENUM(MainFailedToDownloadUpdate),
+    MAKE_SPHAIRA_RESULT_ENUM(MainDownloadedUpdateInvalid),
+    MAKE_SPHAIRA_RESULT_ENUM(MainFailedToInstallUpdate),
     MAKE_SPHAIRA_RESULT_ENUM(UsbDsBadDeviceSpeed),
 
     MAKE_SPHAIRA_RESULT_ENUM(NspBadMagic),
@@ -821,6 +832,9 @@ enum : Result {
     MAKE_SPHAIRA_RESULT_ENUM(NszFailedCompressStream2),
     MAKE_SPHAIRA_RESULT_ENUM(NszTooManyBlocks),
     MAKE_SPHAIRA_RESULT_ENUM(NszMissingBlocks),
+
+    MAKE_SPHAIRA_RESULT_ENUM(NxVersionsFailedToDownload),
+    MAKE_SPHAIRA_RESULT_ENUM(NxVersionsInvalidDatabase),
 };
 
 #undef MAKE_SPHAIRA_RESULT_ENUM

@@ -18,6 +18,9 @@
 #include "owo.hpp"
 #include "defines.hpp"
 #include "app.hpp"
+#include "fs.hpp"
+#include "nro.hpp"
+#include "nacp_compat.hpp"
 #include "ui/progress_box.hpp"
 #include "i18n.hpp"
 #include "log.hpp"
@@ -41,6 +44,8 @@ constexpr const u8 HBL_MAIN_DATA[]{
 constexpr const u8 HBL_NPDM_DATA[]{
     #embed <exefs/main.npdm>
 };
+
+bool g_core_launch_pending{};
 
 // stdio-like wrapper for std::vector
 struct BufHelper {
@@ -142,12 +147,18 @@ struct NpdmPatch {
     char title_name[0x10]{"Application"};
     char product_code[0x10]{};
     u64 tid;
+    ForwarderAddressSpace address_space{ForwarderAddressSpace::Bit36};
+    CpuCoreMode core_mode{CpuCoreMode::Three};
+    ForwarderSvcDebugMode svc_debug_mode{ForwarderSvcDebugMode::Automatic};
 };
 
 struct NcapPatch {
     std::string name;
     std::string author;
     u64 tid;
+    bool profile_selection{};
+    bool screenshot{true};
+    bool video_capture{true};
 };
 
 typedef struct romfs_dirent_ctx {
@@ -428,8 +439,23 @@ auto npdm_patch_kc(std::vector<u8>& npdm, u32 off, u32 size, u32 bitmask, u32 va
     return false;
 }
 
+constexpr auto npdm_kernel_flags(CpuCoreMode mode) -> u32 {
+    const u32 lowest_priority = mode == CpuCoreMode::Four ? 63 : 59;
+    const u32 highest_priority = 28;
+    const u32 lowest_cpu = 0;
+    const u32 highest_cpu = mode == CpuCoreMode::Four ? 3 : 2;
+    const u32 descriptor = (((highest_cpu << 8) | lowest_cpu) << 6 | highest_priority) << 6 | lowest_priority;
+    return descriptor << 4;
+}
+
+static_assert((npdm_kernel_flags(CpuCoreMode::Three) | 0x7) == 0x020073B7);
+static_assert((npdm_kernel_flags(CpuCoreMode::Four) | 0x7) == 0x030073F7);
+
 // todo: manually build npdm
-void patch_npdm(std::vector<u8>& npdm, const NpdmPatch& patch) {
+auto patch_npdm(std::vector<u8>& npdm, const NpdmPatch& patch) -> bool {
+    constexpr u8 ADDRESS_SPACE_SHIFT = 1;
+    constexpr u8 ADDRESS_SPACE_MASK = 0x7 << ADDRESS_SPACE_SHIFT;
+
     npdm::Meta meta{};
     npdm::Aci0 aci0{};
     npdm::Acid acid{};
@@ -440,20 +466,41 @@ void patch_npdm(std::vector<u8>& npdm, const NpdmPatch& patch) {
     // apply patch
     std::memcpy(meta.title_name, &patch.title_name, sizeof(meta.title_name));
     std::memcpy(meta.product_code, &patch.product_code, sizeof(patch.product_code));
+    meta.flags = (meta.flags & ~ADDRESS_SPACE_MASK) | (static_cast<u8>(patch.address_space) << ADDRESS_SPACE_SHIFT);
     aci0.program_id = patch.tid;
     acid.program_id_min = patch.tid;
     acid.program_id_max = patch.tid;
 
-    // patch debug flags based on ams version
-    // SEE: https://github.com/ITotalJustice/sphaira/issues/67
-    u64 ver{};
-    splInitialize();
-    ON_SCOPE_EXIT(splExit());
-    const auto SplConfigItem_ExosphereVersion = (SplConfigItem)65000;
-    splGetConfig(SplConfigItem_ExosphereVersion, &ver);
-    ver >>= 40;
+    const auto kernel_flags = npdm_kernel_flags(patch.core_mode);
+    const auto aci0_core_patched = npdm_patch_kc(npdm, meta.aci0_offset + aci0.kac_offset, aci0.kac_size, 3, kernel_flags);
+    const auto acid_core_patched = npdm_patch_kc(npdm, meta.acid_offset + acid.kac_offset, acid.kac_size, 3, kernel_flags);
 
-    if (ver >= MAKEHOSVERSION(1,8,0)) {
+    const auto enable_svc_debug = [&patch](){
+        if (patch.svc_debug_mode == ForwarderSvcDebugMode::Enabled) {
+            return true;
+        }
+        if (patch.svc_debug_mode == ForwarderSvcDebugMode::Disabled) {
+            return false;
+        }
+
+        // Atmosphere 1.8.0 updated the NPDM MiscFlags layout for HOS 19.0.0.
+        // Preserve Sphaira's original behavior by selecting the new ForceDebug
+        // bit automatically when that version (or newer) is detected.
+        u64 ver{};
+        if (R_FAILED(splInitialize())) {
+            return false;
+        }
+        ON_SCOPE_EXIT(splExit());
+
+        const auto SplConfigItem_ExosphereVersion = (SplConfigItem)65000;
+        if (R_FAILED(splGetConfig(SplConfigItem_ExosphereVersion, &ver))) {
+            return false;
+        }
+        ver >>= 40;
+        return ver >= MAKEHOSVERSION(1,8,0);
+    }();
+
+    if (enable_svc_debug) {
         npdm_patch_kc(npdm, meta.aci0_offset + aci0.kac_offset, aci0.kac_size, 16, BIT(19));
         npdm_patch_kc(npdm, meta.acid_offset + acid.kac_offset, acid.kac_size, 16, BIT(19));
     }
@@ -461,29 +508,30 @@ void patch_npdm(std::vector<u8>& npdm, const NpdmPatch& patch) {
     std::memcpy(npdm.data(), &meta, sizeof(meta));
     std::memcpy(npdm.data() + meta.aci0_offset, &aci0, sizeof(aci0));
     std::memcpy(npdm.data() + meta.acid_offset, &acid, sizeof(acid));
+    return aci0_core_patched && acid_core_patched;
 }
 
 void patch_nacp(NacpStruct& nacp, const NcapPatch& patch) {
     // patch title
     if (!patch.name.empty()) {
-        for (auto& lang : nacp.lang) {
+        for (auto& lang : NacpLanguageEntries(nacp)) {
             std::strncpy(lang.name, patch.name.c_str(), sizeof(lang.name)-1);
         }
     }
 
     // patch author
-    if (!patch.name.empty()) {
-        for (auto& lang : nacp.lang) {
+    if (!patch.author.empty()) {
+        for (auto& lang : NacpLanguageEntries(nacp)) {
             std::strncpy(lang.author, patch.author.c_str(), sizeof(lang.author)-1);
         }
     }
 
     // misc
-    nacp.startup_user_account = 0x00; // skip user select prompt
+    nacp.startup_user_account = patch.profile_selection ? 0x01 : 0x00;
     nacp.user_account_switch_lock = 0x00; // allow account switch
     nacp.add_on_content_registration_type = 0x01; // on demand
-    nacp.screenshot = 0; // 0x0 = true
-    nacp.video_capture = 0x2; // auto
+    nacp.screenshot = patch.screenshot ? 0x0 : 0x1;
+    nacp.video_capture = patch.video_capture ? 0x2 : 0x0; // auto or disabled
     nacp.logo_type = 0x2; // Nintendo
     nacp.logo_handling = 0x0; // auto
     nacp.data_loss_confirmation = 0x0; // disable as we don't use saves
@@ -894,7 +942,10 @@ auto install_forwader_internal(ui::ProgressBox* pbox, OwoConfig& config, NcmStor
 
         NpdmPatch npdm_patch;
         npdm_patch.tid = tid;
-        patch_npdm(exefs[1].data, npdm_patch);
+        npdm_patch.address_space = config.address_space;
+        npdm_patch.core_mode = config.core_mode;
+        npdm_patch.svc_debug_mode = config.svc_debug_mode;
+        R_UNLESS(patch_npdm(exefs[1].data, npdm_patch), Result_CoreUnavailable);
 
         nca_entries.emplace_back(
             create_program_nca(tid, keys, exefs, romfs, logo)
@@ -913,6 +964,9 @@ auto install_forwader_internal(ui::ProgressBox* pbox, OwoConfig& config, NcmStor
         nacp_patch.tid = tid;
         nacp_patch.name = config.name;
         nacp_patch.author = config.author;
+        nacp_patch.profile_selection = config.profile_selection;
+        nacp_patch.screenshot = config.screenshot;
+        nacp_patch.video_capture = config.video_capture;
         patch_nacp(config.nacp, nacp_patch);
 
         FileEntries romfs;
@@ -994,6 +1048,101 @@ auto install_forwader_internal(ui::ProgressBox* pbox, OwoConfig& config, NcmStor
 }
 
 } // namespace
+
+auto prepare_core_launch(const std::string& nro_path, const std::string& args, CpuCoreMode core_mode) -> Result {
+    R_UNLESS(App::CanSetCpuCores(), Result_CoreUnavailable);
+    R_UNLESS(!nro_path.empty() && !args.empty(), Result_OwoBadArgs);
+
+    u64 program_id{};
+    R_TRY(svcGetInfo(&program_id, InfoType_ProgramId, CUR_PROCESS_HANDLE, 0));
+    R_UNLESS(program_id, Result_CoreUnavailable);
+
+    R_TRY(splCryptoInitialize());
+    ON_SCOPE_EXIT(splCryptoExit());
+
+    keys::Keys keys;
+    R_TRY(keys::parse_keys(keys, false));
+
+    FileEntries exefs;
+    add_file_entry(exefs, "main", HBL_MAIN_DATA);
+    add_file_entry(exefs, "main.npdm", HBL_NPDM_DATA);
+
+    NpdmPatch npdm_patch;
+    npdm_patch.tid = program_id;
+    npdm_patch.core_mode = core_mode;
+    R_UNLESS(patch_npdm(exefs[1].data, npdm_patch), Result_CoreUnavailable);
+
+    auto return_path = App::GetExePath().toString();
+    if (!return_path.starts_with("sdmc:")) {
+        return_path = "sdmc:" + return_path;
+    }
+    const auto return_args = nro_add_arg(return_path);
+
+    R_TRY(lrInitialize());
+    ON_SCOPE_EXIT(lrExit());
+
+    LrLocationResolver resolver{};
+    NcmStorageId redirect_storage = NcmStorageId_None;
+    char original_path[FS_MAX_PATH]{};
+    constexpr NcmStorageId storage_ids[]{
+        NcmStorageId_SdCard,
+        NcmStorageId_BuiltInUser,
+        NcmStorageId_GameCard,
+        NcmStorageId_BuiltInSystem,
+    };
+    for (const auto storage_id : storage_ids) {
+        LrLocationResolver candidate{};
+        if (R_SUCCEEDED(lrOpenLocationResolver(storage_id, &candidate))) {
+            if (R_SUCCEEDED(lrLrResolveProgramPath(&candidate, program_id, original_path))) {
+                resolver = candidate;
+                redirect_storage = storage_id;
+                break;
+            }
+            serviceClose(&candidate.s);
+        }
+    }
+    R_UNLESS(redirect_storage != NcmStorageId_None, Result_CoreUnavailable);
+    ON_SCOPE_EXIT(serviceClose(&resolver.s));
+
+    constexpr const char* nca_sd_path = "/config/sphaira/core-launch/program.nca";
+    const std::string nca_loader_path = "@Sdcard:" + std::string{nca_sd_path};
+
+    FileEntries romfs;
+    add_file_entry(romfs, "/nextArgv", args.data(), args.size());
+    add_file_entry(romfs, "/nextNroPath", nro_path.data(), nro_path.size());
+    add_file_entry(romfs, "/returnArgv", return_args.data(), return_args.size());
+    add_file_entry(romfs, "/returnNroPath", return_path.data(), return_path.size());
+    add_file_entry(romfs, "/redirectStorage", &redirect_storage, sizeof(redirect_storage));
+    add_file_entry(romfs, "/redirectProgramId", &program_id, sizeof(program_id));
+    add_file_entry(romfs, "/redirectPath", original_path, std::strlen(original_path));
+    const auto program = create_program_nca(program_id, keys, exefs, romfs, {});
+    fs::FsNativeSd sd;
+    R_TRY(sd.CreateDirectoryRecursively("/config/sphaira/core-launch"));
+    R_TRY(sd.write_entire_file(nca_sd_path, program.data));
+    R_TRY(sd.Commit());
+
+    R_TRY(lrLrRedirectProgramPath(&resolver, program_id, nca_loader_path.c_str()));
+
+    char redirected_path[FS_MAX_PATH]{};
+    const auto resolve_result = lrLrResolveProgramPath(&resolver, program_id, redirected_path);
+    if (R_FAILED(resolve_result) || nca_loader_path != redirected_path) {
+        lrLrRedirectProgramPath(&resolver, program_id, original_path);
+        return R_FAILED(resolve_result) ? resolve_result : Result_CoreUnavailable;
+    }
+
+    const auto launch_result = appletRequestLaunchApplication(0, nullptr);
+    if (R_FAILED(launch_result)) {
+        lrLrRedirectProgramPath(&resolver, program_id, original_path);
+        return launch_result;
+    }
+
+    g_core_launch_pending = true;
+    R_SUCCEED();
+}
+
+auto core_launch_pending() -> bool {
+    return g_core_launch_pending;
+}
 
 auto install_forwarder(ui::ProgressBox* pbox, OwoConfig& config, NcmStorageId storage_id) -> Result {
     return install_forwader_internal(pbox, config, storage_id);

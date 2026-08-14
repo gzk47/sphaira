@@ -64,7 +64,7 @@ void SidebarEntryBase::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, 
             gfx::drawRect(vg, info_box, theme->GetColour(ThemeEntryID_SIDEBAR), 5);
 
             float y = info_box.y + info_pad;
-            m_scolling_title.Draw(vg, true, x, y, end_w, title_font_size, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), m_title.c_str());
+            m_scolling_info_title.Draw(vg, true, x, y, end_w, title_font_size, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), m_title.c_str());
 
             y += pad_after_title;
             gfx::drawTextBox(vg, x, y, info_font_size, end_w, theme->GetColour(ThemeEntryID_TEXT), info.c_str());
@@ -78,30 +78,51 @@ auto SidebarEntryBase::OnFocusGained() noexcept -> void {
 
 auto SidebarEntryBase::OnFocusLost() noexcept -> void {
     Widget::OnFocusLost();
+    m_scolling_title.Reset();
+    m_scolling_info_title.Reset();
     m_scolling_value.Reset();
 }
 
 void SidebarEntryBase::DrawEntry(NVGcontext* vg, Theme* theme, const std::string& left, const std::string& right, bool use_selected) {
     const auto colour_id = IsEnabled() ? ThemeEntryID_TEXT : ThemeEntryID_TEXT_INFO;
 
-    // scrolling text
+    constexpr float font_size = 20.f;
+    constexpr float padding = 15.f;
+    constexpr float column_gap = 20.f;
+    const float ypos = m_pos.y + (m_pos.h / 2.f);
+    const float label_x = m_pos.x + padding;
+    const float content_width = std::max(0.f, m_pos.w - padding * 2.f);
+
+    // Entries without a value use the full row. Long translated labels remain
+    // clipped to the sidebar and scroll while focused.
+    if (right.empty()) {
+        m_scolling_title.Draw(vg, HasFocus(), label_x, ypos, content_width, font_size,
+            NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(colour_id), left);
+        return;
+    }
+
     float bounds[4];
-    nvgFontSize(vg, 20);
+    nvgFontSize(vg, font_size);
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    nvgTextBounds(vg, 0, 0, left.c_str(), nullptr, bounds);
-    const float start_x = bounds[2] + 50;
-    const float max_off = m_pos.w - start_x - 15.f;
-
     nvgTextBounds(vg, 0, 0, right.c_str(), nullptr, bounds);
+    const float value_text_width = std::max(0.f, bounds[2] - bounds[0]);
 
-    const Vec2 key_text_pos{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f)};
-    gfx::drawText(vg, key_text_pos, 20.f, theme->GetColour(colour_id), left.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    // Reserve a dedicated value column so On/Off and other values can never be
+    // covered by a long label. Values are capped at 45% of the available row.
+    const float value_width = std::clamp(value_text_width, 48.f, content_width * 0.45f);
+    const float value_x = m_pos.x + m_pos.w - padding - value_width;
+    const float label_width = std::max(0.f, value_x - column_gap - label_x);
+
+    m_scolling_title.Draw(vg, HasFocus(), label_x, ypos, label_width, font_size,
+        NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(colour_id), left);
 
     const auto value_id = use_selected ? ThemeEntryID_TEXT_SELECTED : ThemeEntryID_TEXT;
-    const float xpos = m_pos.x + m_pos.w - 15.f - std::min(max_off, bounds[2]);
-    const float ypos = m_pos.y + (m_pos.h / 2.f);
-
-    m_scolling_value.Draw(vg, HasFocus(), xpos, ypos, max_off, 20.f, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(value_id), right);
+    const float value_draw_x = value_text_width < value_width
+        ? value_x + value_width - value_text_width
+        : value_x;
+    const float value_clip_width = m_pos.x + m_pos.w - padding - value_draw_x;
+    m_scolling_value.Draw(vg, HasFocus(), value_draw_x, ypos, value_clip_width, font_size,
+        NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, theme->GetColour(value_id), right);
 }
 
 SidebarEntryBool::SidebarEntryBool(const std::string& title, bool option, const Callback& cb, const std::string& info, const std::string& true_str, const std::string& false_str)
@@ -228,9 +249,7 @@ SidebarEntryCallback::SidebarEntryCallback(const std::string& title, const Callb
 
 void SidebarEntryCallback::Draw(NVGcontext* vg, Theme* theme, const Vec4& root_pos, bool left) {
     SidebarEntryBase::Draw(vg, theme, root_pos, left);
-
-    const auto colour_id = IsEnabled() ? ThemeEntryID_TEXT : ThemeEntryID_TEXT_INFO;
-    gfx::drawText(vg, Vec2{m_pos.x + 15.f, m_pos.y + (m_pos.h / 2.f)}, 20.f, theme->GetColour(colour_id), m_title.c_str(), NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    SidebarEntryBase::DrawEntry(vg, theme, m_title, {}, false);
 }
 
 SidebarEntryArray::SidebarEntryArray(const std::string& title, const Items& items, std::string& index, const std::string& info)
@@ -430,10 +449,24 @@ auto Sidebar::Update(Controller* controller, TouchInfo* touch) -> void {
 
 auto Sidebar::Draw(NVGcontext* vg, Theme* theme) -> void {
     gfx::drawRect(vg, m_pos, theme->GetColour(ThemeEntryID_SIDEBAR));
-    gfx::drawText(vg, m_title_pos, m_title_size, theme->GetColour(ThemeEntryID_TEXT), m_title.c_str());
+    constexpr float header_padding = 30.f;
+    constexpr float header_gap = 16.f;
+    const auto header_right = m_pos.x + m_pos.w - header_padding;
+    auto title_width = std::max(0.f, header_right - m_title_pos.x);
     if (!m_sub.empty()) {
-        gfx::drawTextArgs(vg, m_pos.x + m_pos.w - 30.f, m_title_pos.y + 10.f, 16, NVG_ALIGN_TOP | NVG_ALIGN_RIGHT, theme->GetColour(ThemeEntryID_TEXT_INFO), m_sub.c_str());
+        float bounds[4]{};
+        nvgFontSize(vg, 16.f);
+        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+        nvgTextBounds(vg, 0.f, 0.f, m_sub.c_str(), nullptr, bounds);
+        const auto available_width = std::max(0.f, header_right - m_title_pos.x);
+        const auto sub_width = std::min(std::max(0.f, bounds[2] - bounds[0]), available_width * 0.4f);
+        const auto sub_x = header_right - sub_width;
+        title_width = std::max(0.f, sub_x - header_gap - m_title_pos.x);
+        m_scroll_sub.Draw(vg, true, sub_x, m_title_pos.y + 10.f, sub_width, 16.f,
+            NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT_INFO), m_sub);
     }
+    m_scroll_title.Draw(vg, true, m_title_pos.x, m_title_pos.y, title_width, m_title_size,
+        NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), m_title);
     gfx::drawRect(vg, m_top_bar, theme->GetColour(ThemeEntryID_LINE));
     gfx::drawRect(vg, m_bottom_bar, theme->GetColour(ThemeEntryID_LINE));
     gfx::drawTextArgs(vg, m_pos.x + 30, 675, 18.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "%zu / %zu", m_index + 1, m_items.size());

@@ -23,4 +23,9 @@ auto ImageLoadFromFile(const fs::FsPath& file, u32 flags = ImageFlag_None) -> Im
 auto ImageResize(std::span<const u8> data, int inx, int iny, int outx, int outy) -> ImageResult;
 auto ImageConvertToJpg(std::span<const u8> data, int x, int y) -> ImageResult;
 
+// NRO icons are displayed at 256x256. Images up to 1024x1024 are accepted
+// for compatibility, then downscaled before being kept in memory or uploaded.
+auto ImageLoadIcon(std::span<const u8> data) -> ImageResult;
+auto ImageNormalizeIcon(std::span<const u8> data) -> std::vector<u8>;
+
 } // namespace sphaira

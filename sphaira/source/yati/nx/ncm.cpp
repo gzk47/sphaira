@@ -4,6 +4,7 @@
 #include <bit>
 #include <cstring>
 #include <cstdlib>
+#include <limits>
 
 namespace sphaira::ncm {
 namespace {
@@ -185,24 +186,32 @@ Result SetRequiredSystemVersion(NcmContentMetaDatabase *db, const NcmContentMeta
     }
 
     // get the old data size.
-    u64 size;
+    u64 size{};
     R_TRY(ncmContentMetaDatabaseGetSize(db, &size, key));
 
     // fetch the old data.
-    u64 out_size;
-    std::vector<u8> data;
+    constexpr auto bad_meta = MAKERESULT(Module_Libnx, LibnxError_BadInput);
+    R_UNLESS(size <= std::numeric_limits<size_t>::max(), bad_meta);
+
+    u64 out_size{};
+    std::vector<u8> data(static_cast<size_t>(size));
     R_TRY(ncmContentMetaDatabaseGet(db, key, &out_size, data.data(), data.size()));
 
-    // ensure that we have enough data.
-    R_UNLESS(data.size() == out_size, 0x1);
-    R_UNLESS(data.size() >= offsetof(ContentMeta, extened.application.required_application_version), 0x1);
+    // Ensure that the returned metadata contains the required system version field.
+    constexpr auto version_offset = offsetof(ContentMeta, extened.application.required_system_version);
+    constexpr auto extended_version_end = offsetof(NcmApplicationMetaExtendedHeader, required_system_version) + sizeof(version);
+    R_UNLESS(out_size == data.size() && data.size() >= version_offset + sizeof(version), bad_meta);
+
+    NcmContentMetaHeader header{};
+    std::memcpy(&header, data.data(), sizeof(header));
+    R_UNLESS(header.extended_header_size >= extended_version_end, bad_meta);
 
     // patch the version.
-    auto content_meta = (ContentMeta*)data.data();
-    content_meta->extened.application.required_system_version = version;
+    std::memcpy(data.data() + version_offset, &version, sizeof(version));
 
     // write the new data back.
-    return ncmContentMetaDatabaseSet(db, key, data.data(), data.size());
+    R_TRY(ncmContentMetaDatabaseSet(db, key, data.data(), data.size()));
+    return ncmContentMetaDatabaseCommit(db);
 }
 
 Result GetFsPathFromContentId(NcmContentStorage* cs, const NcmContentMetaKey& key, const NcmContentId& id, u64* out_program_id, fs::FsPath* out_path) {

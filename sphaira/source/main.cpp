@@ -2,10 +2,16 @@
 #include <memory>
 #include "app.hpp"
 #include "log.hpp"
+#include "owo.hpp"
 #include "ui/menus/main_menu.hpp"
+#include "utils/core.hpp"
 
 int main(int argc, char** argv) {
     if (!argc || !argv) {
+        return 1;
+    }
+
+    if (R_FAILED(sphaira::utils::SetCurrentThreadSafeAffinity())) {
         return 1;
     }
 
@@ -90,6 +96,10 @@ void userAppExit(void) {
 
     sphaira::App::SetBoostMode(false);
     appletUnlockExit();
+
+    if (sphaira::core_launch_pending()) {
+        svcExitProcess();
+    }
 }
 
 } // extern "C"

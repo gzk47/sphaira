@@ -141,17 +141,82 @@ struct FsProxy final : FsProxyBase {
         R_SUCCEED();
     }
 
+    Result GetDirectoryEntry(const fs::FsPath& path, FsDirectoryEntry* out) {
+        const std::string_view path_view{path.s};
+        const auto slash = path_view.find_last_of('/');
+        R_UNLESS(slash != std::string_view::npos && slash + 1 < path_view.size(), FsError_PathNotFound);
+
+        const auto name = path_view.substr(slash + 1);
+        const fs::FsPath parent = slash ? path_view.substr(0, slash) : std::string_view{"/"};
+
+        fs::Dir dir;
+        R_TRY(m_fs->OpenDirectory(parent, FsDirOpenMode_ReadDirs | FsDirOpenMode_ReadFiles, &dir));
+
+        constexpr size_t EntryCount = 16;
+        FsDirectoryEntry entries[EntryCount];
+        while (true) {
+            s64 count{};
+            R_TRY(dir.Read(&count, EntryCount, entries));
+            if (!count) {
+                break;
+            }
+
+            for (s64 i = 0; i < count; i++) {
+                if (fs::FsPath::path_equal(name, entries[i].name)) {
+                    *out = entries[i];
+                    R_SUCCEED();
+                }
+            }
+        }
+
+        R_THROW(FsError_PathNotFound);
+    }
+
+    Result GetFileSize(const fs::FsPath& path, s64* out) {
+        fs::File file;
+        R_TRY(m_fs->OpenFile(path, FsOpenMode_Read, &file));
+        return file.GetSize(out);
+    }
+
     Result GetEntryAttributes(const char *path, haze::FileAttr *out) override {
+        const auto fixed_path = FixPath(path);
+        FsDirectoryEntry directory_entry{};
+        bool has_directory_entry{};
+
         FsDirEntryType type;
-        R_TRY(m_fs->GetEntryType(FixPath(path), &type));
+        const auto type_result = m_fs->GetEntryType(fixed_path, &type);
+        if (R_FAILED(type_result)) {
+            log_write("[MTP] GetEntryType(%s) failed: 0x%X\n", fixed_path.s, type_result);
+            R_UNLESS(m_fs->IsNative(), type_result);
+            R_TRY(GetDirectoryEntry(fixed_path, &directory_entry));
+            has_directory_entry = true;
+            type = static_cast<FsDirEntryType>(directory_entry.type);
+        }
 
         if (type == FsDirEntryType_File) {
             out->type = haze::FileAttrType_FILE;
 
-            // it doesn't matter if this fails.
             s64 size{};
             FsTimeStampRaw timestamp{};
-            R_TRY(m_fs->FileGetSizeAndTimestamp(FixPath(path), &timestamp, &size));
+            if (m_fs->IsNative()) {
+                const auto timestamp_result = m_fs->GetFileTimeStampRaw(fixed_path, &timestamp);
+                if (R_FAILED(timestamp_result)) {
+                    log_write("[MTP] GetFileTimeStampRaw(%s) failed: 0x%X\n", fixed_path.s, timestamp_result);
+                }
+
+                const auto size_result = GetFileSize(fixed_path, &size);
+                if (R_FAILED(size_result)) {
+                    log_write("[MTP] GetFileSize(%s) failed: 0x%X\n", fixed_path.s, size_result);
+                    if (!has_directory_entry) {
+                        R_TRY(GetDirectoryEntry(fixed_path, &directory_entry));
+                        has_directory_entry = true;
+                    }
+                    R_UNLESS(directory_entry.type == FsDirEntryType_File, FsError_PathNotFound);
+                    size = directory_entry.file_size;
+                }
+            } else {
+                R_TRY(m_fs->FileGetSizeAndTimestamp(fixed_path, &timestamp, &size));
+            }
 
             out->size = size;
             if (timestamp.is_valid) {

@@ -375,8 +375,9 @@ void Menu::DumpNcas() {
     const auto entries = GetSelectedEntries();
     App::PopToMenu();
 
-    fs::FsPath name_buf = m_entry.GetName();
-    title::utilsReplaceIllegalCharacters(name_buf, true);
+    const auto fix_filenames = App::GetApp()->m_dump_fix_filenames.Get();
+    const auto english_name = fix_filenames ? title::GetEnglishTitleName(m_entry.app_id) : std::string{};
+    const auto export_name = title::MakeExportTitleName(m_entry.GetName(), english_name, fix_filenames);
 
     char version[sizeof(NacpStruct::display_version) + 1]{};
     if (m_meta_entry.status.meta_type == NcmContentMetaType_Patch) {
@@ -388,8 +389,15 @@ void Menu::DumpNcas() {
         char nca_name[64];
         std::snprintf(nca_name, sizeof(nca_name), "%s%s", utils::hexIdToStr(e.content_id).str, e.content_type == NcmContentType_Meta ? ".cnmt.nca" : ".nca");
 
+        fs::FsPath folder;
+        if (export_name.empty()) {
+            std::snprintf(folder, sizeof(folder), "%s[%016lX][v%u][%s]", version, m_meta_entry.status.application_id, m_meta_entry.status.version, ncm::GetMetaTypeShortStr(m_meta_entry.status.meta_type));
+        } else {
+            std::snprintf(folder, sizeof(folder), "%.*s %s[%016lX][v%u][%s]", static_cast<int>(export_name.size()), export_name.data(), version, m_meta_entry.status.application_id, m_meta_entry.status.version, ncm::GetMetaTypeShortStr(m_meta_entry.status.meta_type));
+        }
+
         fs::FsPath path;
-        std::snprintf(path, sizeof(path), "/dumps/NCA/%s %s[%016lX][v%u][%s]/%s", name_buf.s, version, m_meta_entry.status.application_id, m_meta_entry.status.version, ncm::GetMetaTypeShortStr(m_meta_entry.status.meta_type), nca_name);
+        std::snprintf(path, sizeof(path), "/dumps/NCA/%s/%s", folder.s, nca_name);
 
         paths.emplace_back(path);
     }

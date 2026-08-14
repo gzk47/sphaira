@@ -76,6 +76,7 @@ private:
     DependsCallback m_depends_callback{};
     DependsClickCallback m_depends_click{};
     ScrollingText m_scolling_title{};
+    ScrollingText m_scolling_info_title{};
     ScrollingText m_scolling_value{};
     bool m_dirty{};
 };
@@ -266,6 +267,8 @@ private:
     Vec4 m_bottom_bar{};
     Vec2 m_title_pos{};
     Vec4 m_base_pos{};
+    ScrollingText m_scroll_title{};
+    ScrollingText m_scroll_sub{};
 
     OnExitWhenChangedCallback m_on_exit_when_changed{};
 
