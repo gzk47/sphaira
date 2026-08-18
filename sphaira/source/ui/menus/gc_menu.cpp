@@ -598,7 +598,7 @@ Menu::Menu(u32 flags) : MenuBase{"GameCard"_i18n, flags} {
                         if (R_SUCCEEDED(rc)) {
                             App::Notify("Gc install success!"_i18n);
                         }
-                    });
+                    }, ui::ProgressBoxOption::ScreenToggle);
                 }
             } else if (m_option_index == 1) {
                 auto options = std::make_unique<Sidebar>("Select content to dump"_i18n, Sidebar::Side::RIGHT);
@@ -693,12 +693,12 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
 
     gfx::drawTextArgs(vg, 490, 135, 23.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "System memory %.1f GB"_i18n.c_str(), size_nand_gb);
     gfx::drawRect(vg, 480, 170, STORAGE_BAR_W, STORAGE_BAR_H, theme->GetColour(ThemeEntryID_TEXT));
-    gfx::drawRect(vg, 480 + 1, 170 + 1, STORAGE_BAR_W - 2, STORAGE_BAR_H - 2, theme->GetColour(ThemeEntryID_BACKGROUND));
+    gfx::drawRect(vg, 480 + 1, 170 + 1, STORAGE_BAR_W - 2, STORAGE_BAR_H - 2, theme->GetColour(ThemeEntryID_PROGRESSBAR_BACKGROUND));
     gfx::drawRect(vg, 480 + 2, 170 + 2, STORAGE_BAR_W - (((double)m_size_free_nand / (double)m_size_total_nand) * STORAGE_BAR_W) - 4, STORAGE_BAR_H - 4, theme->GetColour(ThemeEntryID_TEXT));
 
     gfx::drawTextArgs(vg, 870, 135, 23.f, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "microSD card %.1f GB"_i18n.c_str(), size_sd_gb);
     gfx::drawRect(vg, 860, 170, STORAGE_BAR_W, STORAGE_BAR_H, theme->GetColour(ThemeEntryID_TEXT));
-    gfx::drawRect(vg, 860 + 1, 170 + 1, STORAGE_BAR_W - 2, STORAGE_BAR_H - 2, theme->GetColour(ThemeEntryID_BACKGROUND));
+    gfx::drawRect(vg, 860 + 1, 170 + 1, STORAGE_BAR_W - 2, STORAGE_BAR_H - 2, theme->GetColour(ThemeEntryID_PROGRESSBAR_BACKGROUND));
     gfx::drawRect(vg, 860 + 2, 170 + 2, STORAGE_BAR_W - (((double)m_size_free_sd / (double)m_size_total_sd) * STORAGE_BAR_W) - 4, STORAGE_BAR_H - 4, theme->GetColour(ThemeEntryID_TEXT));
 
     gfx::drawRect(vg, 30, 90, 375, 555, theme->GetColour(ThemeEntryID_GRID));

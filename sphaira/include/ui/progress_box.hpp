@@ -13,12 +13,19 @@ using ProgressBoxCallback = std::function<Result(ProgressBox*)>;
 using ProgressBoxDoneCallback = std::function<void(Result rc)>;
 // using CancelCallback = std::function<void()>;
 
+enum class ProgressBoxOption : u8 {
+    None,
+    ScreenToggle,
+};
+
 struct ProgressBox final : Widget {
     ProgressBox(
         int image,
         const std::string& action,
         const std::string& title,
-        const ProgressBoxCallback& callback, const ProgressBoxDoneCallback& done = nullptr
+        const ProgressBoxCallback& callback,
+        const ProgressBoxDoneCallback& done = nullptr,
+        ProgressBoxOption option = ProgressBoxOption::None
     );
     ~ProgressBox();
 
@@ -72,6 +79,7 @@ struct ProgressBox final : Widget {
 
 private:
     void FreeImage();
+    auto GetFooterButtons() const -> Widget::uiButtons;
 
 public:
     struct ThreadData {
@@ -107,6 +115,7 @@ private:
 
     int m_image{};
     bool m_own_image{};
+    bool m_screen_toggle_enabled{};
 };
 
 // this is a helper function that does many things.

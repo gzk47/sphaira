@@ -1376,6 +1376,7 @@ void MountCurlDevice::curl_set_common_options(CURL* curl, const std::string& url
     // NOTE: port, user and pass are set in the curl_url.
     curl_easy_reset(curl);
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, sphaira::curl::USER_AGENT);
     curl_easy_setopt(curl, CURLOPT_AUTOREFERER, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 15L);

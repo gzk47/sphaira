@@ -126,11 +126,12 @@ public:
                 App::PlaySoundEffect(SoundEffect::Focus);
                 m_title_focused = false;
                 m_icon_focused = true;
+                return;
             } else if (controller->GotDown(Button::RIGHT)) {
                 App::PlaySoundEffect(SoundEffect::Focus);
                 m_title_focused = false;
+                return;
             }
-            return;
         }
 
         if (m_icon_focused) {
@@ -138,11 +139,12 @@ public:
                 App::PlaySoundEffect(SoundEffect::Focus);
                 m_icon_focused = false;
                 m_title_focused = true;
+                return;
             } else if (controller->GotDown(Button::RIGHT)) {
                 App::PlaySoundEffect(SoundEffect::Focus);
                 m_icon_focused = false;
+                return;
             }
-            return;
         }
 
         if (controller->GotDown(Button::LEFT)) {
@@ -152,8 +154,15 @@ public:
             return;
         }
 
+        if ((m_title_focused || m_icon_focused)
+            && !touch->is_clicked && !touch->is_scroll && !touch->is_end) {
+            return;
+        }
+
         m_list->OnUpdate(controller, touch, m_index, m_rows.size(), [this](bool touched, s64 index){
             if (touched && m_index == index) {
+                m_icon_focused = false;
+                m_title_focused = false;
                 FireAction(Button::A);
             } else {
                 App::PlaySoundEffect(SoundEffect::Focus);

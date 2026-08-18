@@ -81,7 +81,7 @@ constexpr std::string_view IMAGE_EXTENSIONS[] = {
     "png", "jpg", "jpeg", "bmp", "gif",
 };
 constexpr std::string_view INSTALL_EXTENSIONS[] = {
-    "nsp", "xci", "nsz", "xcz",
+    "nsp", "xci", "nsz", "xcz", "msp",
 };
 constexpr std::string_view NSP_EXTENSIONS[] = {
     "nsp", "nsz",
@@ -848,7 +848,7 @@ void FsView::InstallFiles() {
                 R_SUCCEED();
             }, [this](Result rc){
                 App::PushErrorBox(rc, "File install failed!"_i18n);
-            });
+            }, ui::ProgressBoxOption::ScreenToggle);
         }
     });
 }

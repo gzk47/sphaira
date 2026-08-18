@@ -682,6 +682,16 @@ enum class SphairaResult : Result {
 
     NxVersionsFailedToDownload,
     NxVersionsInvalidDatabase,
+
+    NspInvalidHeader,
+    MspMissingManifest,
+    MspInvalidManifest,
+    MspInvalidTitleId,
+    MspInvalidVersion,
+    MspInvalidPatchset,
+    MspInvalidEntry,
+    MspDuplicateEntry,
+    MspNoPayload,
 };
 
 #define MAKE_SPHAIRA_RESULT_ENUM(x) Result_##x =  MAKERESULT(Module_Sphaira, (Result)SphairaResult::x)
@@ -835,6 +845,16 @@ enum : Result {
 
     MAKE_SPHAIRA_RESULT_ENUM(NxVersionsFailedToDownload),
     MAKE_SPHAIRA_RESULT_ENUM(NxVersionsInvalidDatabase),
+
+    MAKE_SPHAIRA_RESULT_ENUM(NspInvalidHeader),
+    MAKE_SPHAIRA_RESULT_ENUM(MspMissingManifest),
+    MAKE_SPHAIRA_RESULT_ENUM(MspInvalidManifest),
+    MAKE_SPHAIRA_RESULT_ENUM(MspInvalidTitleId),
+    MAKE_SPHAIRA_RESULT_ENUM(MspInvalidVersion),
+    MAKE_SPHAIRA_RESULT_ENUM(MspInvalidPatchset),
+    MAKE_SPHAIRA_RESULT_ENUM(MspInvalidEntry),
+    MAKE_SPHAIRA_RESULT_ENUM(MspDuplicateEntry),
+    MAKE_SPHAIRA_RESULT_ENUM(MspNoPayload),
 };
 
 #undef MAKE_SPHAIRA_RESULT_ENUM

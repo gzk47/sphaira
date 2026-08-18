@@ -50,7 +50,7 @@ See `assets/romfs/assoc/` for more examples of file assoc entries.
 
 ## Installing (applications)
 
-Sphaira can install applications (nsp, xci, nsz, xcz) from various sources (sd card, gamecard, ftp, usb).
+Sphaira can install applications and mod packages (nsp, xci, nsz, xcz, msp) from various sources (sd card, gamecard, ftp, usb).
 
 For informantion about the install options, [see the wiki](https://github.com/ITotalJustice/sphaira/wiki/Install).
 

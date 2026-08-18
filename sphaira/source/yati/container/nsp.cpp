@@ -1,6 +1,7 @@
 #include "yati/container/nsp.hpp"
 #include "defines.hpp"
 #include "log.hpp"
+#include <limits>
 #include <memory>
 #include <cstring>
 
@@ -22,6 +23,28 @@ struct Pfs0FileTableEntry {
     u32 name_offset;
     u32 padding;
 };
+
+constexpr u32 MAX_PFS0_FILES = 0x10000;
+constexpr u32 MAX_PFS0_STRING_TABLE_SIZE = 16 * 1024 * 1024;
+
+bool CheckedAdd(u64 lhs, u64 rhs, u64& out) {
+    if (rhs > std::numeric_limits<u64>::max() - lhs) {
+        return false;
+    }
+    out = lhs + rhs;
+    return true;
+}
+
+Result ReadExact(source::Base* source, void* data, s64 offset, s64 size) {
+    if (!size) {
+        R_SUCCEED();
+    }
+
+    u64 bytes_read{};
+    R_TRY(source->Read(data, offset, size, &bytes_read));
+    R_UNLESS(bytes_read == static_cast<u64>(size), Result_NspInvalidHeader);
+    R_SUCCEED();
+}
 
 // stdio-like wrapper for std::vector
 struct BufHelper {
@@ -58,34 +81,63 @@ struct BufHelper {
 } // namespace
 
 Result Nsp::GetCollections(Collections& out) {
-    return GetCollections(out, 0);
+    return GetCollections(out, 0, -1);
 }
 
 Result Nsp::GetCollections(Collections& out, s64 off) {
-    u64 bytes_read;
+    return GetCollections(out, off, -1);
+}
 
-    // get header
+Result Nsp::GetCollections(Collections& out, s64 off, s64 container_size) {
+    R_UNLESS(off >= 0, Result_NspInvalidHeader);
+    u64 container_end{};
+    if (container_size >= 0) {
+        R_UNLESS(CheckedAdd(static_cast<u64>(off), static_cast<u64>(container_size), container_end), Result_NspInvalidHeader);
+        R_UNLESS(container_end <= static_cast<u64>(std::numeric_limits<s64>::max()), Result_NspInvalidHeader);
+    }
+
     Pfs0Header header{};
-    R_TRY(m_source->Read(std::addressof(header), off, sizeof(header), std::addressof(bytes_read)));
+    R_TRY(ReadExact(m_source, std::addressof(header), off, sizeof(header)));
     R_UNLESS(header.magic == PFS0_MAGIC, Result_NspBadMagic);
-    off += bytes_read;
+    R_UNLESS(header.total_files <= MAX_PFS0_FILES, Result_NspInvalidHeader);
+    R_UNLESS(header.string_table_size <= MAX_PFS0_STRING_TABLE_SIZE, Result_NspInvalidHeader);
 
-    // get file table
+    const auto table_size = static_cast<u64>(header.total_files) * sizeof(Pfs0FileTableEntry);
+    u64 table_offset{};
+    u64 strings_offset{};
+    u64 data_offset{};
+    R_UNLESS(CheckedAdd(static_cast<u64>(off), sizeof(header), table_offset), Result_NspInvalidHeader);
+    R_UNLESS(CheckedAdd(table_offset, table_size, strings_offset), Result_NspInvalidHeader);
+    R_UNLESS(CheckedAdd(strings_offset, header.string_table_size, data_offset), Result_NspInvalidHeader);
+    R_UNLESS(data_offset <= static_cast<u64>(std::numeric_limits<s64>::max()), Result_NspInvalidHeader);
+    R_UNLESS(container_size < 0 || data_offset <= container_end, Result_NspInvalidHeader);
+    m_data_offset = data_offset;
+
     std::vector<Pfs0FileTableEntry> file_table(header.total_files);
-    R_TRY(m_source->Read(file_table.data(), off, file_table.size() * sizeof(Pfs0FileTableEntry), std::addressof(bytes_read)))
-    off += bytes_read;
+    R_TRY(ReadExact(m_source, file_table.data(), table_offset, table_size));
 
-    // get string table
     std::vector<char> string_table(header.string_table_size);
-    R_TRY(m_source->Read(string_table.data(), off, string_table.size(), std::addressof(bytes_read)))
-    off += bytes_read;
+    R_TRY(ReadExact(m_source, string_table.data(), strings_offset, string_table.size()));
 
+    out.clear();
     out.reserve(header.total_files);
-    for (u32 i = 0; i < header.total_files; i++) {
+    for (const auto& file : file_table) {
+        R_UNLESS(file.name_offset < string_table.size(), Result_NspInvalidHeader);
+        const auto name = string_table.data() + file.name_offset;
+        const auto name_size = string_table.size() - file.name_offset;
+        R_UNLESS(std::memchr(name, '\0', name_size), Result_NspInvalidHeader);
+
+        u64 file_offset{};
+        u64 file_end{};
+        R_UNLESS(CheckedAdd(data_offset, file.data_offset, file_offset), Result_NspInvalidHeader);
+        R_UNLESS(CheckedAdd(file_offset, file.data_size, file_end), Result_NspInvalidHeader);
+        R_UNLESS(file_end <= static_cast<u64>(std::numeric_limits<s64>::max()), Result_NspInvalidHeader);
+        R_UNLESS(container_size < 0 || file_end <= container_end, Result_NspInvalidHeader);
+
         CollectionEntry entry;
-        entry.name = string_table.data() + file_table[i].name_offset;
-        entry.offset = off + file_table[i].data_offset;
-        entry.size = file_table[i].data_size;
+        entry.name = name;
+        entry.offset = file_offset;
+        entry.size = file.data_size;
         out.emplace_back(entry);
     }
 

@@ -62,7 +62,7 @@ void ftp_nro_change_callback(const char* path) {
 InstallSharedData g_shared_data{};
 
 const char* SUPPORTED_EXT[] = {
-    ".nsp", ".xci", ".nsz", ".xcz",
+    ".nsp", ".xci", ".nsz", ".xcz", ".msp",
 };
 
 struct VfsUserData {

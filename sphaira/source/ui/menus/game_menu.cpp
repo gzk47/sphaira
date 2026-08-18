@@ -5,6 +5,7 @@
 #include "defines.hpp"
 #include "i18n.hpp"
 #include "image.hpp"
+#include "nx_versions.hpp"
 #include "swkbd.hpp"
 
 #include "utils/utils.hpp"
@@ -518,6 +519,12 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
             }
             LaunchEntry(m_entries[m_index]);
         }}),
+        std::make_pair(Button::Y, Action{"View Content"_i18n, [this](){
+            if (m_entries.empty()) {
+                return;
+            }
+            App::Push<meta::Menu>(m_entries[m_index]);
+        }}),
         std::make_pair(Button::X, Action{"Options"_i18n, [this](){
             auto options = std::make_unique<Sidebar>("Game Options"_i18n, Sidebar::Side::RIGHT);
             ON_SCOPE_EXIT(App::Push(std::move(options)));
@@ -534,18 +541,33 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
                 }, true);
             }
 
-            if (m_entries.size()) {
+            if (!m_all_entries.empty()) {
                 options->Add<SidebarEntryCallback>("Sort By"_i18n, [this](){
                     auto options = std::make_unique<Sidebar>("Sort Options"_i18n, Sidebar::Side::RIGHT);
                     ON_SCOPE_EXIT(App::Push(std::move(options)));
 
+                    // the play statistic sorts are hidden when play statistics
+                    // are disabled, as there is no data to sort by.
                     SidebarEntryArray::Items sort_items;
-                    sort_items.push_back("Updated"_i18n);
-                    sort_items.push_back("Title"_i18n);
-                    sort_items.push_back("Title ID"_i18n);
-                    sort_items.push_back("Last played"_i18n);
-                    sort_items.push_back("Total playtime"_i18n);
-                    sort_items.push_back("Publisher"_i18n);
+                    std::vector<s64> sort_map;
+                    const auto add_sort = [&](const std::string& name, SortType type) {
+                        sort_items.push_back(name);
+                        sort_map.push_back(type);
+                    };
+
+                    add_sort("Updated"_i18n, SortType_Updated);
+                    add_sort("Title"_i18n, SortType_Title);
+                    add_sort("Title ID"_i18n, SortType_TitleID);
+                    if (IsPlayStatsEnabled()) {
+                        add_sort("Last played"_i18n, SortType_LastPlayed);
+                        add_sort("Total playtime"_i18n, SortType_TotalPlayTime);
+                    }
+                    add_sort("Publisher"_i18n, SortType_Publisher);
+
+                    auto sort_index = std::distance(sort_map.begin(), std::ranges::find(sort_map, m_sort.Get()));
+                    if (sort_index >= (s64)sort_map.size()) {
+                        sort_index = 0;
+                    }
 
                     SidebarEntryArray::Items order_items;
                     order_items.push_back("Descending"_i18n);
@@ -556,14 +578,15 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
                     layout_items.push_back("Icon"_i18n);
                     layout_items.push_back("Grid"_i18n);
 
-                    options->Add<SidebarEntryArray>("Sort"_i18n, sort_items, [this](s64& index_out){
-                        if (index_out == SortType_TotalPlayTime) {
+                    options->Add<SidebarEntryArray>("Sort"_i18n, sort_items, [this, sort_map](s64& index_out){
+                        const auto sort = sort_map[index_out];
+                        if (sort == SortType_TotalPlayTime) {
                             LoadPlaytime();
                         } else {
-                            m_sort.Set(index_out);
+                            m_sort.Set(sort);
                             SortAndFindLastFile(false);
                         }
-                    }, m_sort.Get());
+                    }, sort_index);
 
                     options->Add<SidebarEntryArray>("Order"_i18n, order_items, [this](s64& index_out){
                         m_order.Set(index_out);
@@ -579,12 +602,15 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
                         m_hide_forwarders.Set(v_out);
                         m_dirty = true;
                     });
-                });
 
-                options->Add<SidebarEntryCallback>("View application content"_i18n, [this](){
-                    App::Push<meta::Menu>(m_entries[m_index]);
+                    options->Add<SidebarEntryBool>("Missing updates or DLC"_i18n, m_missing_content_filter, [this](bool& enable){
+                        App::PopToMenu();
+                        SetMissingContentFilter(enable);
+                    });
                 });
+            }
 
+            if (m_entries.size()) {
                 options->Add<SidebarEntryCallback>("Launch random game"_i18n, [this](){
                     const auto random_index = randomGet64() % std::size(m_entries);
                     auto& e = m_entries[random_index];
@@ -638,30 +664,36 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
                     App::PopToMenu();
                 });
 
-                options->Add<SidebarEntryCallback>("Create contents folder"_i18n, [this](){
-                    const auto rc = fs::FsNativeSd().CreateDirectory(title::GetContentsPath(m_entries[m_index].app_id));
-                    App::PushErrorBox(rc, "Folder create failed!"_i18n);
+                options->Add<SidebarEntryBool>("Play statistics"_i18n, m_play_stats.Get(), [this](bool& v_out){
+                    SetPlayStatsEnabled(v_out);
+                }, "Shows playtime and enables the play statistic sorts. Disable for faster list refreshes and fewer SD card writes on large libraries."_i18n);
 
-                    if (R_SUCCEEDED(rc)) {
-                        App::Notify("Folder created!"_i18n);
-                    }
-                });
+                if (!m_entries.empty()) {
+                    options->Add<SidebarEntryCallback>("Create contents folder"_i18n, [this](){
+                        const auto rc = fs::FsNativeSd().CreateDirectory(title::GetContentsPath(m_entries[m_index].app_id));
+                        App::PushErrorBox(rc, "Folder create failed!"_i18n);
 
-                options->Add<SidebarEntryCallback>("Create save"_i18n, [this](){
-                    ui::PopupList::Items items{};
-                    const auto accounts = App::GetAccountList();
-                    for (auto& p : accounts) {
-                        items.emplace_back(p.nickname);
-                    }
-
-                    App::Push<ui::PopupList>(
-                        "Select user to create save for"_i18n, items, [this, accounts](auto op_index){
-                            if (op_index) {
-                                CreateSaves(accounts[*op_index].uid);
-                            }
+                        if (R_SUCCEEDED(rc)) {
+                            App::Notify("Folder created!"_i18n);
                         }
-                    );
-                });
+                    });
+
+                    options->Add<SidebarEntryCallback>("Create save"_i18n, [this](){
+                        ui::PopupList::Items items{};
+                        const auto accounts = App::GetAccountList();
+                        for (auto& p : accounts) {
+                            items.emplace_back(p.nickname);
+                        }
+
+                        App::Push<ui::PopupList>(
+                            "Select user to create save for"_i18n, items, [this, accounts](auto op_index){
+                                if (op_index) {
+                                    CreateSaves(accounts[*op_index].uid);
+                                }
+                            }
+                        );
+                    });
+                }
 
                 options->Add<SidebarEntryCallback>("Delete title cache"_i18n, [this](){
                     App::Push<OptionBox>(
@@ -684,9 +716,11 @@ Menu::Menu(u32 flags) : grid::Menu{"Games"_i18n, flags} {
     ns::Initialize();
     es::Initialize();
     title::Init();
-    m_pdm_initialized = R_SUCCEEDED(pdmqryInitialize());
-    if (!m_pdm_initialized) {
-        log_write("[PDM] failed to initialize pdm:qry; play statistics will be unavailable\n");
+    if (m_play_stats.Get()) {
+        m_pdm_initialized = R_SUCCEEDED(pdmqryInitialize());
+        if (!m_pdm_initialized) {
+            log_write("[PDM] failed to initialize pdm:qry; play statistics will be unavailable\n");
+        }
     }
 
     fsOpenGameCardDetectionEventNotifier(std::addressof(m_gc_event_notifier));
@@ -784,6 +818,13 @@ void Menu::OnFocusGained() {
     MenuBase::OnFocusGained();
     if (m_all_entries.empty()) {
         ScanHomebrew();
+    } else if (m_missing_content_scanned && m_missing_content_catalog_revision != nx_versions::GetCatalogRevision()) {
+        const bool was_filtered = m_missing_content_filter;
+        InvalidateMissingContentCache();
+        if (was_filtered) {
+            Filter();
+            SortAndFindLastFile(false);
+        }
     }
 }
 
@@ -804,6 +845,14 @@ void Menu::SetIndex(s64 index) {
     char title_id[33];
     std::snprintf(title_id, sizeof(title_id), "%016lX", entry.app_id);
 
+    // play statistics are disabled, the entries carry no playtime and no
+    // worker is running, so there is nothing to display or request.
+    if (!m_play_stats.Get()) {
+        SetTitleSubHeading(title_id);
+        this->SetSubHeading(std::to_string(m_index + 1) + " / " + std::to_string(m_entries.size()));
+        return;
+    }
+
     std::string title_info = title_id;
     if (!entry.user_playtimes.empty()) {
         bool showed_profile{};
@@ -814,18 +863,18 @@ void Menu::SetIndex(s64 index) {
                 }
 
                 const u64 total_minutes = entry.user_playtimes[i] / 60000000000ULL;
-                title_info += " | P" + std::to_string(i + 1) + " " + std::to_string(total_minutes / 60) + "h " + std::to_string(total_minutes % 60) + "m";
+                title_info += " | P" + std::to_string(i + 1) + " " + std::to_string(total_minutes / 60) + "h "_i18n + std::to_string(total_minutes % 60) + "m"_i18n;
                 showed_profile = true;
             }
         }
 
         if (!showed_profile) {
             const u64 total_minutes = entry.playtime / 60000000000ULL;
-            title_info += " | " + std::to_string(total_minutes / 60) + "h " + std::to_string(total_minutes % 60) + "m";
+            title_info += " | " + std::to_string(total_minutes / 60) + "h "_i18n + std::to_string(total_minutes % 60) + "m"_i18n;
         }
     } else if (entry.playtime_cached) {
         const u64 total_minutes = entry.playtime / 60000000000ULL;
-        title_info += " | " + std::to_string(total_minutes / 60) + "h " + std::to_string(total_minutes % 60) + "m";
+        title_info += " | " + std::to_string(total_minutes / 60) + "h "_i18n + std::to_string(total_minutes % 60) + "m"_i18n;
     } else {
         title_info += " | " + "No statistics"_i18n;
     }
@@ -844,6 +893,7 @@ void Menu::ScanHomebrew() {
 
     constexpr auto ENTRY_CHUNK_COUNT = 1000;
     const auto hide_forwarders = m_hide_forwarders.Get();
+    const auto play_stats = m_play_stats.Get();
     TimeStamp ts;
 
     App::SetBoostMode(true);
@@ -853,7 +903,7 @@ void Menu::ScanHomebrew() {
     m_entries.reserve(ENTRY_CHUNK_COUNT);
     g_change_signalled = false;
 
-    if (m_accounts.empty()) {
+    if (play_stats && m_accounts.empty()) {
         m_accounts = App::GetAccountList();
     }
 
@@ -884,6 +934,12 @@ void Menu::ScanHomebrew() {
             auto& entry = m_entries.emplace_back(e.application_id, e.last_event);
             batch_ids.push_back(entry.app_id);
 
+            // the cached playtime lookup is a full scan of playlog.ini per
+            // entry (and per user), skip it entirely when disabled.
+            if (!play_stats) {
+                continue;
+            }
+
             char section[33];
             std::snprintf(section, sizeof(section), "%016lX", entry.app_id);
             entry.playtime_cached_last_played = static_cast<u64>(ini_getl(section, "last_played", 0, App::PLAYLOG_PATH));
@@ -909,7 +965,7 @@ void Menu::ScanHomebrew() {
             }
         }
 
-        if (m_pdm_initialized && !batch_ids.empty()) {
+        if (play_stats && m_pdm_initialized && !batch_ids.empty()) {
             std::vector<PdmLastPlayTime> play_times(batch_ids.size());
             s32 play_time_count{};
             if (R_SUCCEEDED(pdmqryQueryLastPlayTime(true, play_times.data(), batch_ids.data(), batch_ids.size(), &play_time_count))) {
@@ -944,18 +1000,29 @@ void Menu::ScanHomebrew() {
 }
 
 void Menu::Filter() {
-    if (m_search_query.empty()) {
+    if (m_search_query.empty() && !m_missing_content_filter) {
         m_entries = m_all_entries;
         return;
     }
 
     auto query = m_search_query;
-    std::ranges::transform(query, query.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
+    if (!query.empty()) {
+        std::ranges::transform(query, query.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+    }
 
     m_entries.clear();
     for (auto& entry : m_all_entries) {
+        if (m_missing_content_filter && !m_missing_content_app_ids.contains(entry.app_id)) {
+            continue;
+        }
+
+        if (query.empty()) {
+            m_entries.push_back(entry);
+            continue;
+        }
+
         LoadControlEntry(entry);
         auto name = std::string{entry.GetName()};
         std::ranges::transform(name, name.begin(), [](unsigned char ch) {
@@ -969,8 +1036,14 @@ void Menu::Filter() {
 }
 
 void Menu::Sort() {
-    const auto sort = m_sort.Get();
+    auto sort = m_sort.Get();
     const auto order = m_order.Get();
+
+    // guards against a stale sort being loaded from the config.
+    if (!m_play_stats.Get() && (sort == SortType_LastPlayed || sort == SortType_TotalPlayTime)) {
+        sort = SortType_Updated;
+        m_sort.Set(sort);
+    }
 
     switch (sort) {
         case SortType_Updated:
@@ -1051,7 +1124,7 @@ void Menu::SyncEntryToMaster(const Entry& entry) {
 }
 
 void Menu::StartPlaytimeWorker() {
-    if (!m_pdm_initialized || m_playtime_worker) {
+    if (!m_play_stats.Get() || !m_pdm_initialized || m_playtime_worker) {
         return;
     }
 
@@ -1111,8 +1184,175 @@ void Menu::ApplyPlaytimeResults() {
     }
 }
 
+void Menu::SetPlayStatsEnabled(bool enable) {
+    if (enable == m_play_stats.Get() && enable == m_pdm_initialized) {
+        return;
+    }
+
+    m_play_stats.Set(enable);
+
+    if (enable) {
+        if (!m_pdm_initialized) {
+            m_pdm_initialized = R_SUCCEEDED(pdmqryInitialize());
+            if (!m_pdm_initialized) {
+                log_write("[PDM] failed to initialize pdm:qry; play statistics will be unavailable\n");
+                App::Notify("Play statistics unavailable"_i18n);
+            }
+        }
+    } else {
+        // the worker must go before pdm:qry is closed, as it queries from
+        // its own thread.
+        StopPlaytimeWorker(false);
+
+        if (m_pdm_initialized) {
+            pdmqryExit();
+            m_pdm_initialized = false;
+        }
+
+        // fall back to a sort that does not need play statistics.
+        const auto sort = m_sort.Get();
+        if (sort == SortType_LastPlayed || sort == SortType_TotalPlayTime) {
+            m_sort.Set(SortType_Updated);
+        }
+    }
+
+    // rebuild the list so the stale playtime data is dropped / repopulated.
+    m_dirty = true;
+}
+
+void Menu::SetMissingContentFilter(bool enable) {
+    if (!enable) {
+        m_missing_content_filter = false;
+        Filter();
+        SortAndFindLastFile(false);
+        ClearSelection();
+        return;
+    }
+
+    const auto state = nx_versions::GetCatalogState();
+    if (state == nx_versions::CatalogState::Current) {
+        StartMissingContentScan();
+        return;
+    }
+
+    App::Push<OptionBox>(
+        "Version list is missing or outdated. Download it now?"_i18n,
+        "No"_i18n, "Download"_i18n, 0, [this, state](auto op_index){
+            if (!op_index) {
+                return;
+            }
+
+            if (*op_index) {
+                DownloadAndScanMissingContent();
+            } else if (state == nx_versions::CatalogState::Stale) {
+                StartMissingContentScan();
+            }
+        }
+    );
+}
+
+void Menu::StartMissingContentScan() {
+    const auto catalog_revision = nx_versions::GetCatalogRevision();
+    if (m_missing_content_scanned && m_missing_content_catalog_revision == catalog_revision) {
+        m_missing_content_filter = true;
+        Filter();
+        SortAndFindLastFile(false);
+        ClearSelection();
+        return;
+    }
+
+    auto app_ids = std::make_shared<std::vector<u64>>();
+    app_ids->reserve(m_all_entries.size());
+    for (const auto& entry : m_all_entries) {
+        app_ids->push_back(entry.app_id);
+    }
+
+    auto missing_content = std::make_shared<std::unordered_set<u64>>();
+    App::Push<ProgressBox>(0, "Scanning "_i18n, "Missing updates or DLC"_i18n,
+        [app_ids, missing_content](auto pbox) -> Result {
+            missing_content->reserve(app_ids->size());
+
+            nx_versions::InstalledVersions installed;
+            installed.reserve(app_ids->size() * 4);
+            title::MetaEntries meta_entries;
+            size_t attempted_queries{};
+            size_t successful_queries{};
+            Result last_error{};
+
+            pbox->UpdateTransfer(0, app_ids->size());
+            for (size_t i = 0; i < app_ids->size(); i++) {
+                R_TRY(pbox->ShouldExitResult());
+
+                const auto app_id = (*app_ids)[i];
+                if (nx_versions::HasEntries(app_id)) {
+                    attempted_queries++;
+                    meta_entries.clear();
+                    const auto rc = title::GetMetaEntries(app_id, meta_entries);
+                    if (R_SUCCEEDED(rc)) {
+                        successful_queries++;
+                        for (const auto& meta : meta_entries) {
+                            const auto [it, inserted] = installed.try_emplace(meta.application_id, meta.version);
+                            if (!inserted) {
+                                it->second = std::max(it->second, meta.version);
+                            }
+                        }
+
+                        if (nx_versions::HasAvailable(app_id, installed)) {
+                            missing_content->insert(app_id);
+                        }
+                    } else {
+                        last_error = rc;
+                        log_write("[nx_versions] failed to query metadata for %016lX: 0x%X\n", app_id, rc);
+                    }
+                }
+
+                pbox->SetTitle(std::to_string(i + 1) + " / " + std::to_string(app_ids->size()));
+                pbox->UpdateTransfer(i + 1, app_ids->size());
+            }
+
+            if (attempted_queries && !successful_queries) {
+                return last_error;
+            }
+
+            R_SUCCEED();
+        },
+        [this, missing_content, catalog_revision](Result rc) {
+            if (R_SUCCEEDED(rc)) {
+                m_missing_content_app_ids = std::move(*missing_content);
+                m_missing_content_catalog_revision = catalog_revision;
+                m_missing_content_scanned = true;
+                m_missing_content_filter = true;
+                Filter();
+                SortAndFindLastFile(false);
+                ClearSelection();
+            } else if (rc != Result_TransferCancelled) {
+                App::PushErrorBox(rc, "An error occurred"_i18n);
+            }
+        }
+    );
+}
+
+void Menu::DownloadAndScanMissingContent() {
+    App::Push<ProgressBox>(0, "Downloading "_i18n, "Version List"_i18n, [](auto pbox) -> Result {
+        return nx_versions::Download(pbox);
+    }, [this](Result rc) {
+        if (R_SUCCEEDED(rc)) {
+            StartMissingContentScan();
+        } else if (rc != Result_TransferCancelled) {
+            App::PushErrorBox(rc, "Failed to update version list"_i18n);
+        }
+    });
+}
+
+void Menu::InvalidateMissingContentCache() {
+    m_missing_content_filter = false;
+    m_missing_content_scanned = false;
+    m_missing_content_catalog_revision = 0;
+    m_missing_content_app_ids.clear();
+}
+
 void Menu::LoadPlaytime() {
-    if (!m_pdm_initialized) {
+    if (!m_play_stats.Get() || !m_pdm_initialized) {
         App::Notify("Play statistics unavailable"_i18n);
         return;
     }
@@ -1219,6 +1459,7 @@ void Menu::FreeEntries() {
 
     m_entries.clear();
     m_all_entries.clear();
+    InvalidateMissingContentCache();
 }
 
 void Menu::OnLayoutChange() {

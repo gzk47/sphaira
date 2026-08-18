@@ -620,7 +620,17 @@ auto GetEnglishTitleName(u64 app_id) -> std::string {
     }
 
     NormalizeNacpLangData(nacp);
-    for (const auto language : {SetLanguage_ENUS, SetLanguage_ENGB}) {
+
+    // nacp entries are NOT indexed by SetLanguage, they use their own order
+    // (see g_nacpLanguageTable in libnx). SetLanguage_ENUS would read
+    // BritishEnglish and SetLanguage_ENGB would read Korean.
+    // slot 0 is also where NormalizeNacpLangData() stores the fallback name.
+    enum NacpLanguage {
+        NacpLanguage_AmericanEnglish = 0,
+        NacpLanguage_BritishEnglish = 1,
+    };
+
+    for (const auto language : {NacpLanguage_AmericanEnglish, NacpLanguage_BritishEnglish}) {
         const auto& entry = NacpLanguageEntries(nacp)[language];
         if (entry.name[0]) {
             return {std::begin(entry.name), std::find(std::begin(entry.name), std::end(entry.name), '\0')};
@@ -631,18 +641,35 @@ auto GetEnglishTitleName(u64 app_id) -> std::string {
 }
 
 auto MakeExportTitleName(std::string_view current_name, std::string_view english_name, bool fix_name) -> std::string {
-    std::string name{fix_name ? english_name : current_name};
-    if (name.empty()) {
-        return {};
+    const auto sanitise = [](std::string_view src, bool ascii_only) -> std::string {
+        std::string name{src};
+        if (name.empty()) {
+            return {};
+        }
+
+        utilsReplaceIllegalCharacters(name.data(), ascii_only);
+        name.resize(std::strlen(name.c_str()));
+
+        const auto usable = std::ranges::any_of(name, [](unsigned char c) {
+            return c != '_' && c != ' ' && c != '.';
+        });
+        return usable ? name : std::string{};
+    };
+
+    if (fix_name) {
+        // the english title is preferred as it's always ascii safe.
+        if (auto name = sanitise(english_name, true); !name.empty()) {
+            return name;
+        }
+
+        // the english title isn't always available (title has no english nacp
+        // entry, the control nca failed to parse, sys-tweak override, ...).
+        // fallback to the displayed name rather than losing the name entirely.
+        // if that has no ascii safe characters either, fall back to the title id.
+        return sanitise(current_name, true);
     }
 
-    utilsReplaceIllegalCharacters(name.data(), fix_name);
-    name.resize(std::strlen(name.c_str()));
-
-    const auto usable = std::ranges::any_of(name, [](unsigned char c) {
-        return c != '_' && c != ' ' && c != '.';
-    });
-    return usable ? name : std::string{};
+    return sanitise(current_name, false);
 }
 
 // taken from nxdumptool.

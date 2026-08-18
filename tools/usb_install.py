@@ -13,7 +13,7 @@ except:
     has_rar_support: bool = False
 
 # list of installable exts that sphaira supports.
-INSTALLABLE_EXTS = (".nsp", ".xci", ".nsz", ".xcz")
+INSTALLABLE_EXTS = (".nsp", ".xci", ".nsz", ".xcz", ".msp")
 # list of supported extensions passed via args.
 ACCEPTED_EXTS = INSTALLABLE_EXTS + tuple(".rar")
 

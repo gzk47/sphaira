@@ -381,7 +381,7 @@
     "参考: 読み取り専用です。\nゲームの設置や削除はできません。"
   ],
   "install_mtp_info": [
-    "名前: Install (NSP, XCI, NSZ, XCZ)\n\nインストールフォルダーを表示します。\n",
+    "名前: Install (NSP, XCI, NSZ, XCZ, MSP)\n\nインストールフォルダーを表示します。\n",
     "このフォルダーはMTP経由でゲームをインストールする際に使われます。\n",
     "参考: 「MTPインストール」を通し、ファイルをフォルダーへドラッグ&ドロップしてください。"
   ],
@@ -420,7 +420,7 @@
   "Select export location": "抽出先を選択",
   "Please launch MTP install menu before trying to install": "インストールする前にMTPインストールメニューを起動してください。",
   "Album": "アルバム",
-  "Install (NSP, XCI, NSZ, XCZ)": "インストール (NSP、XCI、NSZ、XCZ)",
+  "Install (NSP, XCI, NSZ, XCZ, MSP)": "インストール (NSP、XCI、NSZ、XCZ、MSP)",
   " (Read Only)": " (読み取り専用)",
   "Unknown": "不明",
   "Application": "アプリケーション",
@@ -500,9 +500,14 @@
   "Layout": "レイアウト",
   "Search": "検索",
   "Enter title name...": "タイトル名を入力してください...",
+  "Missing updates or DLC": "未導入のアップデート・DLC",
+  "h ": "時間 ",
+  "m": "分",
   "Updating play statistics": "プレイ統計の更新",
   "Failed to update play statistics!": "プレイ統計を更新できませんでした。",
   "Play statistics unavailable": "プレイ統計は利用できません",
+  "Play statistics": "プレイ統計",
+  "Shows playtime and enables the play statistic sorts. Disable for faster list refreshes and fewer SD card writes on large libraries.": "プレイ時間を表示し、プレイ統計による並べ替えを有効にします。無効にすると、大きなライブラリでのリスト更新が速くなり、SDカードへの書き込みが減ります。",
   "No statistics": "統計はありません",
   "Empty!": "何も見つかりません",
   "Filter: %s | Sort: %s | Order: %s": "フィルター: %s | 並べ替え: %s | 順番: %s",
@@ -607,7 +612,7 @@
   "Selected store: ": "選択した店舗: ",
   "Add Custom Store...": "カスタム ストアを追加...",
   "Delete Current Store": "現在のストアを削除",
-  "Delete custom store '": "カスタム ストアを削除します '",
+  "Delete custom store ": " カスタム ストアを削除します",
   "Store Name": "店名",
   "Enter a name for the store": "ストアの名前を入力してください",
   "Store URL": "ストアURL",
@@ -883,7 +888,7 @@
   "Failed to load image": "画像を読み込めませんでした",
   "Install failed!": "FTPインストールに失敗しました!",
   "Install success!": "FTPインストール完了しました!",
-  "Drag'n'Drop (NSP, XCI, NSZ, XCZ) to the install folder": "Install (NSP, XCI, NSZ, XCZ)",
+  "Drag'n'Drop (NSP, XCI, NSZ, XCZ, MSP) to the install folder": "Install (NSP, XCI, NSZ, XCZ, MSP)",
   "Failed to install, press B to exit...": "FTP経由でインストールできませんでした、を押して終了します。",
   "Irs": "Joy-Con IR カメラ",
   "0 (Sideways)": "0 (横)",
@@ -1147,5 +1152,6 @@
   "Homebrew search path added.": "Homebrew検索パスを追加しました。",
   "Homebrew search path removed.": "Homebrew検索パスを削除しました。",
   "Failed to add Homebrew search path": "Homebrew検索パスを追加できませんでした",
-  "Failed to remove Homebrew search path": "Homebrew検索パスを削除できませんでした"
+  "Failed to remove Homebrew search path": "Homebrew検索パスを削除できませんでした",
+  "Screen Off": "画面オフ"
 }

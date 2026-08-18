@@ -557,7 +557,7 @@ void Dump(const std::shared_ptr<BaseSource>& source, const DumpLocation& locatio
         if (on_exit) {
             on_exit(rc);
         }
-    });
+    }, ui::ProgressBoxOption::ScreenToggle);
 }
 
 void Dump(const std::shared_ptr<BaseSource>& source, const std::vector<fs::FsPath>& paths, const OnExit& on_exit, u32 location_flags) {

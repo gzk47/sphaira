@@ -289,7 +289,7 @@ void Menu::BeforeChange() {
 }
 
 void Menu::UpdateStatus() {
-    SetTitleSubHeading(i18n::Reorder("Line: ", std::to_string(m_index + 1)) + " / " + std::to_string(m_lines.size()));
+    SetTitleSubHeading("Line: "_i18n + std::to_string(m_index + 1) + " / " + std::to_string(m_lines.size()));
     SetSubHeading(m_dirty ? "Modified - use Line actions to save"_i18n : "UTF-8 text editor"_i18n);
 }
 

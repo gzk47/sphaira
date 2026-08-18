@@ -29,6 +29,7 @@ option::OptionString g_versions_url{"nx_versions", "url", DEFAULT_VERSIONS_URL};
 std::vector<CatalogEntry> g_catalog;
 bool g_catalog_loaded{};
 bool g_update_prompted{};
+u64 g_catalog_revision{};
 
 auto Parse(std::span<const u8> data) -> std::vector<CatalogEntry> {
     std::vector<CatalogEntry> catalog;
@@ -103,6 +104,7 @@ void LoadCatalog() {
     if (R_SUCCEEDED(fs::FsNativeSd().read_entire_file(CACHE_PATH, data))) {
         g_catalog = Parse(data);
     }
+    g_catalog_revision++;
 }
 
 auto IsCacheStale() -> bool {
@@ -115,19 +117,28 @@ auto IsCacheStale() -> bool {
     return now < timestamp.modified || now - timestamp.modified >= CACHE_MAX_AGE;
 }
 
+auto NeedsInstall(const CatalogEntry& entry, const InstalledVersions& installed) -> bool {
+    const auto installed_entry = installed.find(entry.content_id);
+    return installed_entry == installed.end() || installed_entry->second < entry.version;
+}
+
+auto FindCatalog(u64 app_id) {
+    return std::lower_bound(g_catalog.cbegin(), g_catalog.cend(), app_id, [](const auto& lhs, u64 rhs) {
+        return lhs.app_id < rhs;
+    });
+}
+
 }
 
 auto GetAvailable(u64 app_id, const InstalledVersions& installed) -> std::vector<AvailableEntry> {
     LoadCatalog();
 
     std::vector<AvailableEntry> available;
-    auto entry = std::lower_bound(g_catalog.begin(), g_catalog.end(), app_id, [](const auto& lhs, u64 rhs) {
-        return lhs.app_id < rhs;
-    });
+    auto entry = FindCatalog(app_id);
 
-    for (; entry != g_catalog.end() && entry->app_id == app_id; ++entry) {
-        const auto installed_entry = installed.find(entry->content_id);
-        if (installed_entry == installed.end() || installed_entry->second < entry->version) {
+    for (; entry != g_catalog.cend() && entry->app_id == app_id; ++entry) {
+        if (NeedsInstall(*entry, installed)) {
+            const auto installed_entry = installed.find(entry->content_id);
             available.push_back({
                 entry->content_id,
                 entry->version,
@@ -138,6 +149,39 @@ auto GetAvailable(u64 app_id, const InstalledVersions& installed) -> std::vector
     }
 
     return available;
+}
+
+auto HasEntries(u64 app_id) -> bool {
+    LoadCatalog();
+    const auto entry = FindCatalog(app_id);
+    return entry != g_catalog.cend() && entry->app_id == app_id;
+}
+
+auto HasAvailable(u64 app_id, const InstalledVersions& installed) -> bool {
+    LoadCatalog();
+    auto entry = FindCatalog(app_id);
+
+    for (; entry != g_catalog.cend() && entry->app_id == app_id; ++entry) {
+        if (NeedsInstall(*entry, installed)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+auto GetCatalogState() -> CatalogState {
+    LoadCatalog();
+    if (g_catalog.empty()) {
+        return CatalogState::Missing;
+    }
+
+    return IsCacheStale() ? CatalogState::Stale : CatalogState::Current;
+}
+
+auto GetCatalogRevision() -> u64 {
+    LoadCatalog();
+    return g_catalog_revision;
 }
 
 auto ShouldPromptForUpdate() -> bool {
@@ -170,6 +214,7 @@ auto Download(ui::ProgressBox* pbox) -> Result {
 
     g_catalog = std::move(catalog);
     g_catalog_loaded = true;
+    g_catalog_revision++;
     R_SUCCEED();
 }
 

@@ -40,10 +40,10 @@ class TestUsbInstall(unittest.TestCase):
 	def setUp(self):
 		import random
 		self.tempdir = tempfile.mkdtemp()
-		# 100 files named test1.nsp, test2.xci, test3.nsz, test4.xcz, ..., cycling extensions, each with random sizes (0-2048 bytes)
-		extensions = ["nsp", "xci", "nsz", "xcz"]
+		# 100 files cycling through all supported install extensions, each with random sizes (0-2048 bytes)
+		extensions = ["nsp", "xci", "nsz", "xcz", "msp"]
 		self.files = [
-			(f"test{i+1}.{extensions[i % 4]}", os.urandom(random.randint(0, 2048))) for i in range(100)
+			(f"test{i+1}.{extensions[i % len(extensions)]}", os.urandom(random.randint(0, 2048))) for i in range(100)
 		]
 		self.filepaths = []
 

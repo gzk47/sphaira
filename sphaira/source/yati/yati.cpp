@@ -3,6 +3,7 @@
 #include "yati/source/stream_file.hpp"
 #include "yati/container/nsp.hpp"
 #include "yati/container/xci.hpp"
+#include "msp.hpp"
 
 #include "yati/nx/ncz.hpp"
 #include "yati/nx/nca.hpp"
@@ -1523,13 +1524,22 @@ Result InstallInternalStream(ui::ProgressBox* pbox, source::Base* source, contai
 
 Result InstallFromFile(ui::ProgressBox* pbox, fs::Fs* fs, const fs::FsPath& path, const ConfigOverride& override) {
     auto source = std::make_unique<source::File>(fs, path);
+    R_TRY(source->GetOpenResult());
+    s64 source_size{-1};
+    if (R_FAILED(source->GetSize(&source_size))) {
+        source_size = -1;
+    }
     // auto source = std::make_unique<source::StreamFile>(fs, path, override); // enable for testing.
-    return InstallFromSource(pbox, source.get(), path, override);
+    return InstallFromSource(pbox, source.get(), path, override, source_size);
 }
 
-Result InstallFromSource(ui::ProgressBox* pbox, source::Base* source, const fs::FsPath& path, const ConfigOverride& override) {
+Result InstallFromSource(ui::ProgressBox* pbox, source::Base* source, const fs::FsPath& path, const ConfigOverride& override, s64 source_size) {
     const auto ext = std::strrchr(path.s, '.');
     R_UNLESS(ext, Result_YatiContainerNotFound);
+
+    if (!strcasecmp(ext, ".msp")) {
+        return msp::Install(pbox, source, source_size);
+    }
 
     std::unique_ptr<container::Base> container;
     if (!strcasecmp(ext, ".nsp") || !strcasecmp(ext, ".nsz")) {

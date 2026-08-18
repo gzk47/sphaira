@@ -116,7 +116,7 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
                 }
 
                 pbox->SetTitle(file_name);
-                const auto rc = yati::InstallFromSource(pbox, m_usb_source.get(), file_name, config_override);
+                const auto rc = yati::InstallFromSource(pbox, m_usb_source.get(), file_name, config_override, file_size);
                 if (R_FAILED(rc)) {
                     m_usb_source->SignalCancel();
                     log_write("exiting usb install\n");
@@ -137,7 +137,7 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
             } else {
                 m_state = State::Failed;
             }
-        });
+        }, ui::ProgressBoxOption::ScreenToggle);
     }
 }
 

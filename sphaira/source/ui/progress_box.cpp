@@ -24,7 +24,7 @@ void threadFunc(void* arg) {
 
 } // namespace
 
-ProgressBox::ProgressBox(int image, const std::string& action, const std::string& title, const ProgressBoxCallback& callback, const ProgressBoxDoneCallback& done)
+ProgressBox::ProgressBox(int image, const std::string& action, const std::string& title, const ProgressBoxCallback& callback, const ProgressBoxDoneCallback& done, ProgressBoxOption option)
 : m_done{done}
 , m_action{action}
 , m_title{title}
@@ -34,7 +34,7 @@ ProgressBox::ProgressBox(int image, const std::string& action, const std::string
         App::SetBoostMode(true);
     }
 
-    SetAction(Button::B, Action{"Back"_i18n, [this](){
+    SetAction(Button::B, Action{[this](){
         App::Push<OptionBox>("Are you sure you wish to cancel?"_i18n, "No"_i18n, "Yes"_i18n, 1, [this](auto op_index){
             if (op_index && *op_index) {
                 RequestExit();
@@ -43,8 +43,15 @@ ProgressBox::ProgressBox(int image, const std::string& action, const std::string
         });
     }});
 
+    if (option == ProgressBoxOption::ScreenToggle && App::AcquireScreenToggle()) {
+        m_screen_toggle_enabled = true;
+        SetAction(Button::Y, Action{[](){
+            App::SetScreenDisabled(true);
+        }});
+    }
+
     m_pos.w = 770.f;
-    m_pos.h = 295.f;
+    m_pos.h = m_screen_toggle_enabled ? 355.f : 295.f;
     m_pos.x = (SCREEN_WIDTH / 2.f) - (m_pos.w / 2.f);
     m_pos.y = (SCREEN_HEIGHT / 2.f) - (m_pos.h / 2.f);
 
@@ -73,6 +80,10 @@ ProgressBox::~ProgressBox() {
     }
 
     FreeImage();
+    if (m_screen_toggle_enabled) {
+        App::ReleaseScreenToggle();
+    }
+
     if (m_done) {
         m_done(m_thread_data.result);
     }
@@ -83,6 +94,15 @@ ProgressBox::~ProgressBox() {
 
 auto ProgressBox::Update(Controller* controller, TouchInfo* touch) -> void {
     Widget::Update(controller, touch);
+
+    if (m_screen_toggle_enabled && touch->is_clicked) {
+        for (const auto& button : GetFooterButtons()) {
+            if (touch->in_range(button.GetPos())) {
+                FireAction(button.m_button);
+                break;
+            }
+        }
+    }
 
     if (ShouldExit()) {
         SetPop();
@@ -128,7 +148,8 @@ auto ProgressBox::Draw(NVGcontext* vg, Theme* theme) -> void {
     // The pop up shape.
     // const Vec4 box = { 255, 145, 770, 430 };
     const auto center_x = m_pos.x + m_pos.w/2;
-    const auto end_y = m_pos.y + m_pos.h;
+    const auto footer_height = m_screen_toggle_enabled ? 60.f : 0.f;
+    const auto end_y = m_pos.y + m_pos.h - footer_height;
     const auto progress_bar_w = m_pos.w - 230;
     const Vec4 prog_bar = { center_x - progress_bar_w / 2, end_y - 95, progress_bar_w, 12 };
 
@@ -190,6 +211,37 @@ auto ProgressBox::Draw(NVGcontext* vg, Theme* theme) -> void {
     }
 
     nvgRestore(vg);
+
+    if (m_screen_toggle_enabled) {
+        gfx::drawRect(vg, m_pos.x, end_y, m_pos.w, 2.f, theme->GetColour(ThemeEntryID_LINE_SEPARATOR));
+        for (auto& button : GetFooterButtons()) {
+            button.Draw(vg, theme);
+        }
+    }
+}
+
+auto ProgressBox::GetFooterButtons() const -> Widget::uiButtons {
+    Widget::uiButtons buttons;
+    const auto y = m_pos.y + m_pos.h - 40.f;
+
+    const auto add_button = [&](Button button, const std::string& hint, float center_x) {
+        Widget::uiButtons entry{uiButton{button, hint}};
+        Widget::SetupUiButtons(entry, {center_x, y});
+
+        auto& item = entry.front();
+        const auto visual_left = item.m_button_pos.x - item.m_button_pos.w;
+        const auto visual_right = item.m_hint_pos.x;
+        const auto offset = center_x - (visual_left + visual_right) / 2.f;
+
+        item.m_button_pos.x += offset;
+        item.m_hint_pos.x += offset;
+        item.SetX(item.GetX() + offset);
+        buttons.emplace_back(std::move(item));
+    };
+
+    add_button(Button::Y, "Screen Off"_i18n, m_pos.x + m_pos.w * 0.25f);
+    add_button(Button::B, "Back"_i18n, m_pos.x + m_pos.w * 0.75f);
+    return buttons;
 }
 
 auto ProgressBox::SetActionName(const std::string& action)  -> ProgressBox& {

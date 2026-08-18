@@ -191,6 +191,12 @@ public:
     static auto IsParitionBaseEmummc() -> bool;
     static auto IsFileBaseEmummc() -> bool;
 
+    static auto AcquireScreenToggle() -> bool;
+    static void ReleaseScreenToggle();
+    static auto IsScreenToggleEnabled() -> bool;
+    static auto IsScreenDisabled() -> bool;
+    static void SetScreenDisabled(bool disable);
+
     static void SetAutoSleepDisabled(bool enable) {
         static Mutex mutex{};
         static int ref_count{};

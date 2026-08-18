@@ -88,14 +88,14 @@ void MenuBase::Draw(NVGcontext* vg, Theme* theme) {
     gfx::drawRect(vg, prog_bar.x, prog_bar.y, ((double)pdata.emmc_free / (double)pdata.emmc_total) * prog_bar.w, prog_bar.h, theme->GetColour(ThemeEntryID_PROGRESSBAR), rounding);
     #else
     gfx::drawRect(vg, storage_x, storage_y + 24, STORAGE_BAR_W, STORAGE_BAR_H, theme->GetColour(ThemeEntryID_TEXT_INFO), rounding);
-    gfx::drawRect(vg, storage_x + 1, storage_y + 24 + 1, STORAGE_BAR_W - 2, STORAGE_BAR_H - 2, theme->GetColour(ThemeEntryID_BACKGROUND), rounding);
+    gfx::drawRect(vg, storage_x + 1, storage_y + 24 + 1, STORAGE_BAR_W - 2, STORAGE_BAR_H - 2, theme->GetColour(ThemeEntryID_PROGRESSBAR_BACKGROUND), rounding);
     gfx::drawRect(vg, storage_x + 2, storage_y + 24 + 2, STORAGE_BAR_W - (((double)pdata.emmc_free / (double)pdata.emmc_total) * STORAGE_BAR_W) - 4, STORAGE_BAR_H - 4, theme->GetColour(ThemeEntryID_TEXT_INFO), rounding);
     #endif
 
     storage_x -= (STORAGE_BAR_W + spacing);
     gfx::drawTextArgs(vg, storage_x, storage_y, storage_font, NVG_ALIGN_LEFT | NVG_ALIGN_TOP, theme->GetColour(ThemeEntryID_TEXT), "microSD %.1f GB"_i18n.c_str(), pdata.sd_free / 1024.0 / 1024.0 / 1024.0);
     gfx::drawRect(vg, storage_x, storage_y + 24, STORAGE_BAR_W, STORAGE_BAR_H, theme->GetColour(ThemeEntryID_TEXT_INFO), rounding);
-    gfx::drawRect(vg, storage_x + 1, storage_y + 24 + 1, STORAGE_BAR_W - 2, STORAGE_BAR_H - 2, theme->GetColour(ThemeEntryID_BACKGROUND), rounding);
+    gfx::drawRect(vg, storage_x + 1, storage_y + 24 + 1, STORAGE_BAR_W - 2, STORAGE_BAR_H - 2, theme->GetColour(ThemeEntryID_PROGRESSBAR_BACKGROUND), rounding);
     gfx::drawRect(vg, storage_x + 2, storage_y + 24 + 2, STORAGE_BAR_W - (((double)pdata.sd_free / (double)pdata.sd_total) * STORAGE_BAR_W) - 4, STORAGE_BAR_H - 4, theme->GetColour(ThemeEntryID_TEXT_INFO), rounding);
     start_x -= (STORAGE_BAR_W + spacing) * 2;
 

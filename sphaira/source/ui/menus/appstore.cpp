@@ -1124,7 +1124,7 @@ Menu::Menu(u32 flags) : grid::Menu{"AppStore"_i18n, flags} {
 
             options->Add<SidebarEntryCallback>("Store Source"_i18n, [this](){
                 ShowStoreSelector();
-            }, true, i18n::Reorder("Current store: ", m_store_sources[m_active_store].name));
+            }, true, "Current store: "_i18n + m_store_sources[m_active_store].name);
 
             if (m_active_store > 0) {
                 options->Add<SidebarEntryCallback>("Delete Current Store"_i18n, [this](){
@@ -1269,7 +1269,7 @@ void Menu::DeleteActiveStore() {
 
     const auto name = m_store_sources[m_active_store].name;
     App::Push<OptionBox>(
-        i18n::Reorder("Delete custom store '", name) + "'?",
+        i18n::Reorder("Delete custom store ", "'" + name + "'") + "?",
         "Back"_i18n,
         "Delete"_i18n,
         0,
@@ -1292,7 +1292,7 @@ void Menu::SwitchStore(s64 index) {
     m_active_store = index;
     SaveStoreSources();
     StartStoreDownload();
-    App::Notify(i18n::Reorder("Selected store: ", m_store_sources[m_active_store].name));
+    App::Notify("Selected store: "_i18n + m_store_sources[m_active_store].name);
 }
 
 void Menu::StartStoreDownload() {

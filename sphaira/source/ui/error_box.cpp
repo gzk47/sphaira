@@ -176,6 +176,15 @@ auto GetCodeMessage(Result rc) -> const char* {
         case Result_NszFailedCompressStream2: return "SphairaError_NszFailedCompressStream2";
         case Result_NszTooManyBlocks: return "SphairaError_NszTooManyBlocks";
         case Result_NszMissingBlocks: return "SphairaError_NszMissingBlocks";
+        case Result_NspInvalidHeader: return "SphairaError_NspInvalidHeader";
+        case Result_MspMissingManifest: return "SphairaError_MspMissingManifest";
+        case Result_MspInvalidManifest: return "SphairaError_MspInvalidManifest";
+        case Result_MspInvalidTitleId: return "SphairaError_MspInvalidTitleId";
+        case Result_MspInvalidVersion: return "SphairaError_MspInvalidVersion";
+        case Result_MspInvalidPatchset: return "SphairaError_MspInvalidPatchset";
+        case Result_MspInvalidEntry: return "SphairaError_MspInvalidEntry";
+        case Result_MspDuplicateEntry: return "SphairaError_MspDuplicateEntry";
+        case Result_MspNoPayload: return "SphairaError_MspNoPayload";
     }
 
     return "";

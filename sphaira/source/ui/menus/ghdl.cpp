@@ -1057,7 +1057,7 @@ void StartSwitchPortInstall(const SwitchPortEntry& port, const GhApiAsset& asset
         destination = "/switch/" + SanitizeFolder(stem);
     }
 
-    const auto prompt = "Install "_i18n + port.name + "\n\n" +
+    const auto prompt = i18n::Reorder("Install ", port.name) + "\n\n" +
         "Destination: "_i18n + destination + "\n\n" +
         "Only the homebrew port is downloaded. Original game data may still be required."_i18n;
     App::Push<OptionBox>(prompt, "Back"_i18n, "Install"_i18n, 1, [port, asset](auto op_index) {

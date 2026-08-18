@@ -170,6 +170,9 @@ constexpr ThemeIdPair THEME_ENTRIES[] = {
 };
 
 constinit App* g_app{};
+Mutex g_screen_toggle_mutex{};
+u32 g_screen_toggle_ref_count{};
+bool g_screen_disabled{};
 
 void deko3d_error_cb(void* userData, const char* context, DkResult result, const char* message) {
     switch (result) {
@@ -1162,6 +1165,19 @@ void App::Update() {
         }
     }
 
+    const bool has_wake_input = m_controller.m_kdown || m_touch_info.is_touching || m_touch_info.is_clicked;
+    if (has_wake_input && App::IsScreenToggleEnabled() && App::IsScreenDisabled()) {
+        App::SetScreenDisabled(false);
+
+        // The input which wakes the display must not activate the hidden UI.
+        m_controller.Reset();
+        m_controller.m_kheld = 0;
+        m_touch_info.is_tap = false;
+        m_touch_info.is_scroll = false;
+        m_touch_info.is_clicked = false;
+        m_touch_info.is_end = false;
+    }
+
     m_widgets.back()->Update(&m_controller, &m_touch_info);
 
     bool popped_at_least1 = false;
@@ -1228,6 +1244,78 @@ void App::Draw() {
 
 auto App::GetApp() -> App* {
     return g_app;
+}
+
+auto App::AcquireScreenToggle() -> bool {
+    SCOPED_MUTEX(&g_screen_toggle_mutex);
+
+    if (!g_screen_toggle_ref_count) {
+        const auto rc = lblInitialize();
+        if (R_FAILED(rc)) {
+            log_write("[SCREEN] lblInitialize() failed: 0x%X\n", R_VALUE(rc));
+            return false;
+        }
+
+        g_screen_disabled = false;
+    }
+
+    g_screen_toggle_ref_count++;
+    return true;
+}
+
+void App::ReleaseScreenToggle() {
+    SCOPED_MUTEX(&g_screen_toggle_mutex);
+
+    if (!g_screen_toggle_ref_count) {
+        return;
+    }
+
+    g_screen_toggle_ref_count--;
+    if (!g_screen_toggle_ref_count) {
+        const auto rc = appletSetLcdBacklightOffEnabled(false);
+        if (R_FAILED(rc)) {
+            log_write("[SCREEN] failed to restore backlight: 0x%X\n", R_VALUE(rc));
+        }
+
+        g_screen_disabled = false;
+        lblExit();
+    }
+}
+
+auto App::IsScreenToggleEnabled() -> bool {
+    SCOPED_MUTEX(&g_screen_toggle_mutex);
+    return g_screen_toggle_ref_count != 0;
+}
+
+auto App::IsScreenDisabled() -> bool {
+    SCOPED_MUTEX(&g_screen_toggle_mutex);
+
+    if (!g_screen_toggle_ref_count) {
+        return false;
+    }
+
+    LblBacklightSwitchStatus status{};
+    if (R_SUCCEEDED(lblGetBacklightSwitchStatus(&status))) {
+        g_screen_disabled = status != LblBacklightSwitchStatus_Enabled;
+    }
+
+    return g_screen_disabled;
+}
+
+void App::SetScreenDisabled(bool disable) {
+    SCOPED_MUTEX(&g_screen_toggle_mutex);
+
+    if (!g_screen_toggle_ref_count) {
+        return;
+    }
+
+    const auto rc = appletSetLcdBacklightOffEnabled(disable);
+    if (R_FAILED(rc)) {
+        log_write("[SCREEN] failed to set backlight state: 0x%X\n", R_VALUE(rc));
+        return;
+    }
+
+    g_screen_disabled = disable;
 }
 
 auto App::GetVg() -> NVGcontext* {

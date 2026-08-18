@@ -12,6 +12,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 #include <span>
 
@@ -81,6 +82,15 @@ private:
     void StopPlaytimeWorker(bool apply_results);
     void ApplyPlaytimeResults();
     void SyncEntryToMaster(const Entry& entry);
+    void SetPlayStatsEnabled(bool enable);
+    void SetMissingContentFilter(bool enable);
+    void StartMissingContentScan();
+    void DownloadAndScanMissingContent();
+    void InvalidateMissingContentCache();
+
+    auto IsPlayStatsEnabled() -> bool {
+        return m_play_stats.Get();
+    }
 
     auto GetSelectedEntries() const {
         std::vector<Entry> out;
@@ -116,6 +126,7 @@ private:
 
     std::vector<Entry> m_entries{};
     std::vector<Entry> m_all_entries{};
+    std::unordered_set<u64> m_missing_content_app_ids{};
     std::string m_search_query{};
     std::vector<AccountProfileBase> m_accounts{};
     s64 m_index{}; // where i am in the array
@@ -124,6 +135,9 @@ private:
     bool m_is_reversed{};
     bool m_dirty{};
     bool m_pdm_initialized{};
+    bool m_missing_content_filter{};
+    bool m_missing_content_scanned{};
+    u64 m_missing_content_catalog_revision{};
     std::unique_ptr<PlaytimeWorker> m_playtime_worker{};
 
     // use for detection game card removal to force a refresh.
@@ -134,6 +148,9 @@ private:
     option::OptionLong m_order{INI_SECTION, "order", OrderType::OrderType_Descending};
     option::OptionLong m_layout{INI_SECTION, "layout", LayoutType::LayoutType_Grid};
     option::OptionBool m_hide_forwarders{INI_SECTION, "hide_forwarders", false};
+    // when disabled, pdm:qry is never opened and playlog.ini is never touched
+    // by this menu, as both add per-entry io whilst navigating the list.
+    option::OptionBool m_play_stats{INI_SECTION, "play_stats", true};
 };
 
 struct NcmMetaData {

@@ -11,6 +11,9 @@
 
 namespace sphaira::curl {
 
+// identifies sphaira in curl requests
+constexpr auto USER_AGENT = "Sphaira/" APP_VERSION;
+
 enum {
     Flag_None = 0,
 

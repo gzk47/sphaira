@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <haze.h>
+#include <limits>
+#include <map>
 
 namespace sphaira::libhaze {
 namespace {
@@ -34,26 +36,23 @@ Mutex g_mutex{};
 InstallSharedData g_shared_data{};
 
 const char* SUPPORTED_EXT[] = {
-    ".nsp", ".xci", ".nsz", ".xcz",
+    ".nsp", ".xci", ".nsz", ".xcz", ".msp",
 };
 
-// ive given up with good names.
-void on_thing() {
-    log_write("[MTP] doing on_thing\n");
+bool StartInstall(std::string path) {
     SCOPED_MUTEX(&g_shared_data.mutex);
-    log_write("[MTP] locked on_thing\n");
-
-    if (!g_shared_data.in_progress) {
-        if (!g_shared_data.current_file.empty()) {
-            log_write("[MTP] pushing new file data\n");
-            if (!g_shared_data.on_start || !g_shared_data.on_start(g_shared_data.current_file.c_str())) {
-                g_shared_data.current_file.clear();
-            } else {
-                log_write("[MTP] success on new file push\n");
-                g_shared_data.in_progress = true;
-            }
-        }
+    if (!g_shared_data.enabled || g_shared_data.in_progress || !g_shared_data.current_file.empty() || !g_shared_data.on_start) {
+        return false;
     }
+
+    g_shared_data.current_file = std::move(path);
+    if (!g_shared_data.on_start(g_shared_data.current_file.c_str())) {
+        g_shared_data.current_file.clear();
+        return false;
+    }
+
+    g_shared_data.in_progress = true;
+    return true;
 }
 
 struct FsProxyBase : haze::FileSystemProxyImpl {
@@ -353,145 +352,243 @@ private:
     std::unique_ptr<fs::Fs> m_fs{};
 };
 
-// fake fs that allows for files to create r/w on the root.
-// folders are not yet supported.
 struct FsProxyVfs : FsProxyBase {
+    struct Entry {
+        std::string path;
+        std::string parent;
+        std::string name;
+        haze::FileAttrType type{};
+        s64 size{};
+    };
+
     struct File {
-        u64 index{};
+        std::shared_ptr<Entry> entry;
         haze::FileOpenMode mode{};
+        bool installing{};
     };
 
     struct Dir {
-        u64 pos{};
+        std::vector<std::string> entries;
+        size_t pos{};
     };
 
     using FsProxyBase::FsProxyBase;
     virtual ~FsProxyVfs() = default;
 
-    auto FixPath(const char* path) const {
-        return FsProxyBase::FixPath("", path);
-    }
+    Result NormalizePath(const char* path, std::string& out_path, std::string& out_key) const {
+        R_UNLESS(path, FsError_PathNotFound);
 
-    auto GetFileName(const char* s) -> const char* {
-        const auto file_name = std::strrchr(s, '/');
-        if (!file_name || file_name[1] == '\0') {
-            return nullptr;
+        std::string_view input{path};
+        while (!input.empty() && input.front() == '/') {
+            input.remove_prefix(1);
         }
-        return file_name + 1;
-    }
 
-    virtual Result GetEntryType(const char *path, haze::FileAttrType *out_entry_type) {
-        if (FixPath(path) == "/") {
-            *out_entry_type = haze::FileAttrType_DIR;
-            R_SUCCEED();
-        } else {
-            const auto file_name = GetFileName(path);
-            R_UNLESS(file_name, FsError_PathNotFound);
-
-            const auto it = std::ranges::find_if(m_entries, [file_name](auto& e){
-                return !strcasecmp(file_name, e.name);
-            });
-            R_UNLESS(it != m_entries.end(), FsError_PathNotFound);
-
-            *out_entry_type = haze::FileAttrType_FILE;
-            R_SUCCEED();
+        const std::string_view storage{GetName()};
+        if (input.size() >= storage.size() && !strncasecmp(input.data(), storage.data(), storage.size()) &&
+            (input.size() == storage.size() || input[storage.size()] == '/')) {
+            input.remove_prefix(storage.size());
         }
-    }
+        while (!input.empty() && input.front() == '/') {
+            input.remove_prefix(1);
+        }
 
-    virtual Result CreateFile(const char* path, s64 size) {
-        const auto file_name = GetFileName(path);
-        R_UNLESS(file_name, FsError_PathNotFound);
+        out_path = "/";
+        while (!input.empty()) {
+            const auto slash = input.find('/');
+            const auto component = input.substr(0, slash);
+            R_UNLESS(!component.empty() && component != "." && component != ".." &&
+                component.find('\\') == std::string_view::npos, FsError_PathNotFound);
 
-        const auto it = std::ranges::find_if(m_entries, [file_name](auto& e){
-            return !strcasecmp(file_name, e.name);
+            const auto separator_size = out_path.size() == 1 ? 0 : 1;
+            R_UNLESS(out_path.size() + separator_size + component.size() < FS_MAX_PATH, FsError_PathNotFound);
+            if (separator_size) {
+                out_path.push_back('/');
+            }
+            out_path.append(component);
+
+            if (slash == std::string_view::npos) {
+                break;
+            }
+            input.remove_prefix(slash + 1);
+            while (!input.empty() && input.front() == '/') {
+                input.remove_prefix(1);
+            }
+        }
+
+        out_key = out_path;
+        std::ranges::transform(out_key, out_key.begin(), [](unsigned char ch) {
+            return ch >= 'A' && ch <= 'Z' ? static_cast<char>(ch + ('a' - 'A')) : static_cast<char>(ch);
         });
-        R_UNLESS(it == m_entries.end(), FsError_PathAlreadyExists);
-
-        FsDirectoryEntry entry{};
-        std::strcpy(entry.name, file_name);
-        entry.type = FsDirEntryType_File;
-        entry.file_size = size;
-
-        m_entries.emplace_back(entry);
         R_SUCCEED();
     }
 
-    virtual Result DeleteFile(const char* path) {
-        const auto file_name = GetFileName(path);
-        R_UNLESS(file_name, FsError_PathNotFound);
+    static auto GetParent(std::string_view path) -> std::string {
+        const auto slash = path.find_last_of('/');
+        if (!slash) {
+            return "/";
+        }
+        return std::string{path.substr(0, slash)};
+    }
 
-        const auto it = std::ranges::find_if(m_entries, [file_name](auto& e){
-            return !strcasecmp(file_name, e.name);
-        });
-        R_UNLESS(it != m_entries.end(), FsError_PathNotFound);
+    static auto GetFileName(std::string_view path) -> std::string {
+        const auto slash = path.find_last_of('/');
+        return std::string{path.substr(slash + 1)};
+    }
 
+    static bool IsSameOrChild(std::string_view path, std::string_view parent) {
+        return path == parent || (path.size() > parent.size() && path.starts_with(parent) && path[parent.size()] == '/');
+    }
+
+    auto FindEntry(const std::string& key) -> std::shared_ptr<Entry> {
+        const auto it = m_entries.find(key);
+        return it == m_entries.end() ? nullptr : it->second;
+    }
+
+    Result VerifyParent(const std::string& parent) {
+        if (parent == "/") {
+            R_SUCCEED();
+        }
+
+        const auto entry = FindEntry(parent);
+        R_UNLESS(entry && entry->type == haze::FileAttrType_DIR, FsError_PathNotFound);
+        R_SUCCEED();
+    }
+
+    Result CreateEntry(const char* path, s64 size, haze::FileAttrType type) {
+        std::string normalized;
+        std::string key;
+        R_TRY(NormalizePath(path, normalized, key));
+        R_UNLESS(key != "/", FsError_PathAlreadyExists);
+
+        const auto parent = GetParent(key);
+        SCOPED_MUTEX(&m_entries_mutex);
+        R_TRY(VerifyParent(parent));
+        R_UNLESS(!m_entries.contains(key), FsError_PathAlreadyExists);
+
+        auto entry = std::make_shared<Entry>();
+        entry->path = std::move(normalized);
+        entry->parent = parent;
+        entry->name = GetFileName(entry->path);
+        entry->type = type;
+        entry->size = size;
+        m_entries.emplace(std::move(key), std::move(entry));
+        R_SUCCEED();
+    }
+
+    Result GetEntryType(const char *path, haze::FileAttrType *out_entry_type) override {
+        std::string normalized;
+        std::string key;
+        R_TRY(NormalizePath(path, normalized, key));
+
+        if (key == "/") {
+            *out_entry_type = haze::FileAttrType_DIR;
+            R_SUCCEED();
+        }
+
+        SCOPED_MUTEX(&m_entries_mutex);
+        const auto entry = FindEntry(key);
+        R_UNLESS(entry, FsError_PathNotFound);
+        *out_entry_type = entry->type;
+        R_SUCCEED();
+    }
+
+    Result CreateFile(const char* path, s64 size) override {
+        R_UNLESS(size >= 0, FsError_NotImplemented);
+        return CreateEntry(path, size, haze::FileAttrType_FILE);
+    }
+
+    Result DeleteFile(const char* path) override {
+        std::string normalized;
+        std::string key;
+        R_TRY(NormalizePath(path, normalized, key));
+
+        SCOPED_MUTEX(&m_entries_mutex);
+        const auto it = m_entries.find(key);
+        R_UNLESS(it != m_entries.end() && it->second->type == haze::FileAttrType_FILE, FsError_PathNotFound);
         m_entries.erase(it);
         R_SUCCEED();
     }
 
-    virtual Result RenameFile(const char *old_path, const char *new_path) {
-        const auto file_name = GetFileName(old_path);
-        R_UNLESS(file_name, FsError_PathNotFound);
+    Result RenameFile(const char *old_path, const char *new_path) override {
+        std::string old_normalized;
+        std::string old_key;
+        std::string new_normalized;
+        std::string new_key;
+        R_TRY(NormalizePath(old_path, old_normalized, old_key));
+        R_TRY(NormalizePath(new_path, new_normalized, new_key));
+        R_UNLESS(new_key != "/", FsError_PathAlreadyExists);
 
-        const auto it = std::ranges::find_if(m_entries, [file_name](auto& e){
-            return !strcasecmp(file_name, e.name);
-        });
-        R_UNLESS(it != m_entries.end(), FsError_PathNotFound);
+        SCOPED_MUTEX(&m_entries_mutex);
+        const auto it = m_entries.find(old_key);
+        R_UNLESS(it != m_entries.end() && it->second->type == haze::FileAttrType_FILE, FsError_PathNotFound);
+        R_TRY(VerifyParent(GetParent(new_key)));
 
-        const auto file_name_new = GetFileName(new_path);
-        R_UNLESS(file_name_new, FsError_PathNotFound);
-
-        const auto new_it = std::ranges::find_if(m_entries, [file_name_new](auto& e){
-            return !strcasecmp(file_name_new, e.name);
-        });
-        R_UNLESS(new_it == m_entries.end(), FsError_PathAlreadyExists);
-
-        std::strcpy(it->name, file_name_new);
+        if (old_key != new_key) {
+            R_UNLESS(!m_entries.contains(new_key), FsError_PathAlreadyExists);
+            const auto entry = it->second;
+            m_entries.erase(it);
+            entry->path = std::move(new_normalized);
+            entry->parent = GetParent(new_key);
+            entry->name = GetFileName(entry->path);
+            m_entries.emplace(std::move(new_key), entry);
+        } else {
+            it->second->path = std::move(new_normalized);
+            it->second->name = GetFileName(it->second->path);
+        }
         R_SUCCEED();
     }
 
-    virtual Result OpenFile(const char *path, haze::FileOpenMode mode, haze::File *out_file) {
-        const auto file_name = GetFileName(path);
-        R_UNLESS(file_name, FsError_PathNotFound);
+    Result OpenFile(const char *path, haze::FileOpenMode mode, haze::File *out_file) override {
+        std::string normalized;
+        std::string key;
+        R_TRY(NormalizePath(path, normalized, key));
 
-        const auto it = std::ranges::find_if(m_entries, [file_name](auto& e){
-            return !strcasecmp(file_name, e.name);
-        });
-        R_UNLESS(it != m_entries.end(), FsError_PathNotFound);
+        std::shared_ptr<Entry> entry;
+        {
+            SCOPED_MUTEX(&m_entries_mutex);
+            entry = FindEntry(key);
+            R_UNLESS(entry && entry->type == haze::FileAttrType_FILE, FsError_PathNotFound);
+        }
 
         auto f = new File();
-        f->index = std::distance(m_entries.begin(), it);
+        f->entry = std::move(entry);
         f->mode = mode;
         out_file->impl = f;
         R_SUCCEED();
     }
 
-    virtual Result GetFileSize(haze::File *file, s64 *out_size) {
+    Result GetFileSize(haze::File *file, s64 *out_size) override {
         auto f = static_cast<File*>(file->impl);
-        *out_size = m_entries[f->index].file_size;
+        R_UNLESS(f && f->entry, FsError_PathNotFound);
+        SCOPED_MUTEX(&m_entries_mutex);
+        *out_size = f->entry->size;
         R_SUCCEED();
     }
 
-    virtual Result SetFileSize(haze::File *file, s64 size) {
+    Result SetFileSize(haze::File *file, s64 size) override {
         auto f = static_cast<File*>(file->impl);
-        m_entries[f->index].file_size = size;
+        R_UNLESS(f && f->entry, FsError_PathNotFound);
+        R_UNLESS(size >= 0, FsError_NotImplemented);
+        SCOPED_MUTEX(&m_entries_mutex);
+        f->entry->size = size;
         R_SUCCEED();
     }
 
-    virtual Result ReadFile(haze::File *file, s64 off, void *buf, u64 read_size, u64 *out_bytes_read) {
+    Result ReadFile(haze::File *file, s64 off, void *buf, u64 read_size, u64 *out_bytes_read) override {
         // stub for now as it may confuse users who think that the returned file is valid.
         // the code below can be used to benchmark mtp reads.
         R_THROW(FsError_NotImplemented);
     }
 
-    virtual Result WriteFile(haze::File *file, s64 off, const void *buf, u64 write_size) {
+    Result WriteFile(haze::File *file, s64 off, const void *buf, u64 write_size) override {
         auto f = static_cast<File*>(file->impl);
-        auto& e = m_entries[f->index];
-        e.file_size = std::max<s64>(e.file_size, off + write_size);
+        R_UNLESS(f && f->entry && off >= 0 && write_size <= static_cast<u64>(std::numeric_limits<s64>::max() - off), FsError_NotImplemented);
+        SCOPED_MUTEX(&m_entries_mutex);
+        f->entry->size = std::max<s64>(f->entry->size, off + write_size);
         R_SUCCEED();
     }
 
-    virtual void CloseFile(haze::File *file) {
+    void CloseFile(haze::File *file) override {
         auto f = static_cast<File*>(file->impl);
         if (f) {
             delete f;
@@ -500,19 +597,109 @@ struct FsProxyVfs : FsProxyBase {
     }
 
     Result CreateDirectory(const char* path) override {
-        R_THROW(FsError_NotImplemented);
+        return CreateEntry(path, 0, haze::FileAttrType_DIR);
     }
 
     Result DeleteDirectoryRecursively(const char* path) override {
-        R_THROW(FsError_NotImplemented);
+        std::string normalized;
+        std::string key;
+        R_TRY(NormalizePath(path, normalized, key));
+        R_UNLESS(key != "/", FsError_NotImplemented);
+
+        SCOPED_MUTEX(&m_entries_mutex);
+        const auto root = FindEntry(key);
+        R_UNLESS(root && root->type == haze::FileAttrType_DIR, FsError_PathNotFound);
+
+        for (auto it = m_entries.begin(); it != m_entries.end();) {
+            if (IsSameOrChild(it->first, key)) {
+                it = m_entries.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        R_SUCCEED();
     }
 
     Result RenameDirectory(const char *old_path, const char *new_path) override {
-        R_THROW(FsError_NotImplemented);
+        std::string old_normalized;
+        std::string old_key;
+        std::string new_normalized;
+        std::string new_key;
+        R_TRY(NormalizePath(old_path, old_normalized, old_key));
+        R_TRY(NormalizePath(new_path, new_normalized, new_key));
+        R_UNLESS(old_key != "/" && new_key != "/", FsError_NotImplemented);
+        R_UNLESS(new_key == old_key || !IsSameOrChild(new_key, old_key), FsError_NotImplemented);
+
+        struct Move {
+            std::string old_key;
+            std::string new_key;
+            std::string new_path;
+            std::shared_ptr<Entry> entry;
+        };
+
+        SCOPED_MUTEX(&m_entries_mutex);
+        const auto root = FindEntry(old_key);
+        R_UNLESS(root && root->type == haze::FileAttrType_DIR, FsError_PathNotFound);
+        R_TRY(VerifyParent(GetParent(new_key)));
+
+        if (old_key != new_key) {
+            R_UNLESS(!m_entries.contains(new_key), FsError_PathAlreadyExists);
+        }
+
+        std::vector<Move> moves;
+        for (const auto& [key, entry] : m_entries) {
+            if (IsSameOrChild(key, old_key)) {
+                const auto key_suffix = std::string_view{key}.substr(old_key.size());
+                const auto path_suffix = std::string_view{entry->path}.substr(root->path.size());
+                R_UNLESS(new_normalized.size() + path_suffix.size() < FS_MAX_PATH, FsError_PathNotFound);
+                moves.push_back({key, new_key + key_suffix, new_normalized + path_suffix, entry});
+            }
+        }
+
+        for (const auto& move : moves) {
+            if (const auto it = m_entries.find(move.new_key); it != m_entries.end() && !IsSameOrChild(it->first, old_key)) {
+                R_THROW(FsError_PathAlreadyExists);
+            }
+        }
+
+        for (const auto& move : moves) {
+            m_entries.erase(move.old_key);
+        }
+        for (auto& move : moves) {
+            move.entry->path = std::move(move.new_path);
+            move.entry->parent = GetParent(move.new_key);
+            move.entry->name = GetFileName(move.entry->path);
+            m_entries.emplace(std::move(move.new_key), std::move(move.entry));
+        }
+        R_SUCCEED();
     }
 
     Result OpenDirectory(const char *path, haze::Dir *out_dir) override {
+        std::string normalized;
+        std::string key;
+        R_TRY(NormalizePath(path, normalized, key));
+
         auto dir = new Dir();
+        {
+            SCOPED_MUTEX(&m_entries_mutex);
+            if (key != "/") {
+                const auto entry = FindEntry(key);
+                if (!entry || entry->type != haze::FileAttrType_DIR) {
+                    delete dir;
+                    R_THROW(FsError_PathNotFound);
+                }
+            }
+
+            for (const auto& [entry_key, entry] : m_entries) {
+                if (entry->parent == key) {
+                    dir->entries.emplace_back(entry->name);
+                }
+            }
+        }
+
+        std::ranges::sort(dir->entries, [](const auto& lhs, const auto& rhs) {
+            return strcasecmp(lhs.c_str(), rhs.c_str()) < 0;
+        });
         out_dir->impl = dir;
         R_SUCCEED();
     }
@@ -520,10 +707,12 @@ struct FsProxyVfs : FsProxyBase {
     Result ReadDirectory(haze::Dir *d, s64 *out_total_entries, size_t max_entries, haze::DirEntry *buf) override {
         auto dir = static_cast<Dir*>(d->impl);
 
-        max_entries = std::min<s64>(m_entries.size() - dir->pos, max_entries);
+        R_UNLESS(dir, FsError_PathNotFound);
+        const auto remaining = dir->entries.size() - std::min(dir->pos, dir->entries.size());
+        max_entries = std::min(remaining, max_entries);
 
         for (size_t i = 0; i < max_entries; i++) {
-            std::strcpy(buf[i].name, m_entries[dir->pos + i].name);
+            std::snprintf(buf[i].name, sizeof(buf[i].name), "%s", dir->entries[dir->pos + i].c_str());
         }
 
         dir->pos += max_entries;
@@ -532,7 +721,9 @@ struct FsProxyVfs : FsProxyBase {
     }
 
     Result GetDirectoryEntryCount(haze::Dir *d, s64 *out_count) override {
-        *out_count = m_entries.size();
+        auto dir = static_cast<Dir*>(d->impl);
+        R_UNLESS(dir, FsError_PathNotFound);
+        *out_count = dir->entries.size();
         R_SUCCEED();
     }
 
@@ -544,8 +735,14 @@ struct FsProxyVfs : FsProxyBase {
         }
     }
 
+    void Reset() {
+        SCOPED_MUTEX(&m_entries_mutex);
+        m_entries.clear();
+    }
+
 protected:
-    std::vector<FsDirectoryEntry> m_entries;
+    Mutex m_entries_mutex{};
+    std::map<std::string, std::shared_ptr<Entry>> m_entries;
 };
 
 struct FsDevNullProxy final : FsProxyVfs {
@@ -574,25 +771,18 @@ struct FsInstallProxy final : FsProxyVfs {
         R_SUCCEED();
     }
 
-    Result IsValidFileType(const char* name) {
+    bool IsValidFileType(const char* name) const {
         const char* ext = std::strrchr(name, '.');
         if (!ext) {
-            R_THROW(FsError_NotImplemented);
+            return false;
         }
 
-        bool found = false;
         for (size_t i = 0; i < std::size(SUPPORTED_EXT); i++) {
             if (!strcasecmp(ext, SUPPORTED_EXT[i])) {
-                found = true;
-                break;
+                return true;
             }
         }
-
-        if (!found) {
-            R_THROW(FsError_NotImplemented);
-        }
-
-        R_SUCCEED();
+        return false;
     }
 
     Result GetTotalSpace(const char *path, s64 *out) override {
@@ -611,37 +801,39 @@ struct FsInstallProxy final : FsProxyVfs {
         }
     }
 
-    Result GetEntryType(const char *path, haze::FileAttrType *out_entry_type) override {
-        R_TRY(FsProxyVfs::GetEntryType(path, out_entry_type));
-        if (*out_entry_type == haze::FileAttrType_FILE) {
-            R_TRY(FailedIfNotEnabled());
-        }
-        R_SUCCEED();
+    Result CreateDirectory(const char* path) override {
+        R_TRY(FailedIfNotEnabled());
+        return FsProxyVfs::CreateDirectory(path);
     }
 
     Result CreateFile(const char* path, s64 size) override {
         R_TRY(FailedIfNotEnabled());
-        R_TRY(IsValidFileType(path));
-        R_TRY(FsProxyVfs::CreateFile(path, size));
-        R_SUCCEED();
+        return FsProxyVfs::CreateFile(path, size);
     }
 
     Result OpenFile(const char *path, haze::FileOpenMode mode, haze::File *out_file) override {
-        R_TRY(FailedIfNotEnabled());
-        R_TRY(IsValidFileType(path));
+        if (mode == haze::FileOpenMode_WRITE) {
+            R_TRY(FailedIfNotEnabled());
+        }
         R_TRY(FsProxyVfs::OpenFile(path, mode, out_file));
         log_write("[MTP] done file open: %s mode: 0x%X\n", path, mode);
 
         if (mode == haze::FileOpenMode_WRITE) {
             auto f = static_cast<File*>(out_file->impl);
-            const auto& e = m_entries[f->index];
+            f->installing = IsValidFileType(f->entry->name.c_str());
+            if (f->installing) {
+                auto install_path = f->entry->path;
+                if (!install_path.empty() && install_path.front() == '/') {
+                    install_path.erase(install_path.begin());
+                }
 
-            // check if we already have this file queued.
-            log_write("[MTP] checking if empty\n");
-            R_UNLESS(g_shared_data.current_file.empty(), FsError_NotImplemented);
-            log_write("[MTP] is empty\n");
-            g_shared_data.current_file = e.name;
-            on_thing();
+                if (!StartInstall(std::move(install_path))) {
+                    FsProxyVfs::CloseFile(out_file);
+                    R_THROW(FsError_NotImplemented);
+                }
+            } else {
+                log_write("[MTP] ignoring unsupported file in install folder: %s\n", f->entry->path.c_str());
+            }
         }
 
         log_write("[MTP] got file: %s\n", path);
@@ -649,13 +841,16 @@ struct FsInstallProxy final : FsProxyVfs {
     }
 
     Result WriteFile(haze::File *file, s64 off, const void *buf, u64 write_size) override {
+        auto f = static_cast<File*>(file->impl);
+        R_UNLESS(f && f->entry, FsError_PathNotFound);
+
         SCOPED_MUTEX(&g_shared_data.mutex);
         if (!g_shared_data.enabled) {
             log_write("[MTP] failing as not enabled\n");
             R_THROW(FsError_NotImplemented);
         }
 
-        if (!g_shared_data.on_write || !g_shared_data.on_write(buf, write_size)) {
+        if (f->installing && (!g_shared_data.on_write || !g_shared_data.on_write(buf, write_size))) {
             log_write("[MTP] failing as not written\n");
             R_THROW(FsError_NotImplemented);
         }
@@ -670,10 +865,9 @@ struct FsInstallProxy final : FsProxyVfs {
             return;
         }
 
-        bool update{};
         {
             SCOPED_MUTEX(&g_shared_data.mutex);
-            if (f->mode == haze::FileOpenMode_WRITE) {
+            if (f->installing) {
                 log_write("[MTP] closing current file\n");
                 if (g_shared_data.on_close) {
                     g_shared_data.on_close();
@@ -681,18 +875,14 @@ struct FsInstallProxy final : FsProxyVfs {
 
                 g_shared_data.in_progress = false;
                 g_shared_data.current_file.clear();
-                update = true;
             }
-        }
-
-        if (update) {
-            on_thing();
         }
 
         FsProxyVfs::CloseFile(file);
     }
 };
 
+std::shared_ptr<FsInstallProxy> g_install_fs{};
 haze::FsEntries g_fs_entries{};
 
 void haze_callback(const haze::CallbackData *data) {
@@ -721,6 +911,10 @@ void haze_callback(const haze::CallbackData *data) {
         case haze::CallbackType_WriteEnd: log_write("[LIBHAZE] Writing File Finished: %s\n", e.file.filename); break;
     }
     #endif
+
+    if ((data->type == haze::CallbackType_OpenSession || data->type == haze::CallbackType_CloseSession) && g_install_fs) {
+        g_install_fs->Reset();
+    }
 
     App::NotifyFlashLed();
 }
@@ -758,7 +952,8 @@ bool Init() {
     }
 
     if (App::GetApp()->m_mtp_show_install.Get()) {
-        g_fs_entries.emplace_back(std::make_shared<FsInstallProxy>("install", "Install (NSP, XCI, NSZ, XCZ)"));
+        g_install_fs = std::make_shared<FsInstallProxy>("install", "Install (NSP, XCI, NSZ, XCZ, MSP)");
+        g_fs_entries.emplace_back(g_install_fs);
     }
 
     if (App::GetApp()->m_mtp_show_mounts.Get()) {
@@ -793,6 +988,7 @@ void Exit() {
     g_is_running = false;
     g_should_exit = true;
     g_fs_entries.clear();
+    g_install_fs.reset();
 
     log_write("[MTP] exitied\n");
 }

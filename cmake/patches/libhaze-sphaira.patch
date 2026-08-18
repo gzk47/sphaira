@@ -1,0 +1,57 @@
+diff --git a/source/ptp_responder_ptp_operations.cpp b/source/ptp_responder_ptp_operations.cpp
+--- a/source/ptp_responder_ptp_operations.cpp
++++ b/source/ptp_responder_ptp_operations.cpp
+@@ -17,12 +17,15 @@
+ #include <haze/ptp_data_builder.hpp>
+ #include <haze/ptp_data_parser.hpp>
+ #include <haze/ptp_responder_types.hpp>
+ #include "haze/threaded_file_transfer.hpp"
++#include <cstdio>
+ 
+ namespace haze {
+ 
+     Result PtpResponder::GetDeviceInfo(PtpDataParser &dp) {
+         PtpDataBuilder db(m_buffers->usb_bulk_write_buffer, std::addressof(m_usb_server));
++        char device_version[0x40];
++        std::snprintf(device_version, sizeof(device_version), "Sphaira/%s (HOS/%s)", SPHAIRA_VERSION, GetFirmwareVersion());
+ 
+         /* Write the device info data. */
+         R_TRY(db.WriteVariableLengthData(m_request_header, [&] () {
+@@ -38,7 +41,7 @@ namespace haze {
+             R_TRY(db.AddArray(SupportedPlaybackFormats, util::size(SupportedPlaybackFormats)));
+             R_TRY(db.AddString(MtpDeviceManufacturer));
+             R_TRY(db.AddString(MtpDeviceModel));
+-            R_TRY(db.AddString(GetFirmwareVersion()));
++            R_TRY(db.AddString(device_version));
+             R_TRY(db.AddString(GetSerialNumber()));
+ 
+             R_SUCCEED();
+@@ -498,7 +501,7 @@ namespace haze {
+             expected_file_size = file_size;
+             log_write("File size from property list: %ld\n", file_size);
+         } else {
+-            if (data_header.length > sizeof(PtpUsbBulkContainer)) {
++            if (data_header.length >= sizeof(PtpUsbBulkContainer)) {
+                 /* Got the real file size. */
+                 file_size = data_header.length - sizeof(PtpUsbBulkContainer);
+                 expected_file_size = file_size;
+diff --git a/source/threaded_file_transfer.cpp b/source/threaded_file_transfer.cpp
+--- a/source/threaded_file_transfer.cpp
++++ b/source/threaded_file_transfer.cpp
+@@ -271,13 +271,13 @@ Result ThreadData::readFuncInternal() {
+ 
+         u64 bytes_read{};
+         R_TRY(this->Read(buf.data() + buf_offset, read_size, std::addressof(bytes_read)));
++
++        // resize to actual read size.
++        buf.resize(buf_offset + bytes_read);
+         if (!bytes_read) {
+             break;
+         }
+ 
+-        // resize to actual read size.
+-        buf.resize(buf_offset + bytes_read);
+-
+         // when we have left slow mode, flush.
+         // todo: check buffer size so that it doesn't grow too large.
+         if (!slow_mode) {

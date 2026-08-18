@@ -43,6 +43,21 @@ struct Dir {
     u32 index;
 };
 
+// truncates to at most len bytes, without splitting a utf-8 sequence.
+auto TruncateUtf8(std::string str, size_t len) -> std::string {
+    if (str.size() <= len) {
+        return str;
+    }
+
+    // walk back over any continuation bytes so the name stays valid utf-8.
+    while (len && (static_cast<unsigned char>(str[len]) & 0xC0) == 0x80) {
+        len--;
+    }
+
+    str.resize(len);
+    return str;
+}
+
 void ParseId(std::string_view path, u64& id_out) {
     id_out = 0;
 
@@ -392,11 +407,16 @@ int Device::devoptab_dirnext(void* fd, char *filename, struct stat *filestat) {
                 const auto english_name = fix_filenames ? title::GetEnglishTitleName(entry.app_id) : std::string{};
                 entry.export_name = title::MakeExportTitleName(result->lang.name, english_name, fix_filenames);
 
-                const int name_max = sizeof(name) - 33;
-                if (entry.export_name.empty()) {
+                // the listed folder keeps the real (localised) title, only the exported
+                // nsp filenames follow the "fix export filenames" option.
+                const auto display_name = TruncateUtf8(
+                    title::MakeExportTitleName(result->lang.name, {}, false), sizeof(name) - 33
+                );
+
+                if (display_name.empty()) {
                     std::snprintf(name, sizeof(name), "[%016lX]", entry.app_id);
                 } else {
-                    std::snprintf(name, sizeof(name), "%.*s [%016lX]", name_max, entry.export_name.c_str(), entry.app_id);
+                    std::snprintf(name, sizeof(name), "%s [%016lX]", display_name.c_str(), entry.app_id);
                 }
             } else {
                 std::snprintf(name, sizeof(name), "[%016lX]", entry.app_id);

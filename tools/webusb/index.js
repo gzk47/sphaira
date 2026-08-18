@@ -552,7 +552,7 @@ class WebUSBFileTransfer {
 
     handleFileSelect(event) {
         const newFiles = Array.from(event.target.files);
-        const allowedExt = ['.nsp', '.xci', '.nsz', '.xcz'];
+        const allowedExt = ['.nsp', '.xci', '.nsz', '.xcz', '.msp'];
 
         if (newFiles.length > 0) {
             let added = 0;

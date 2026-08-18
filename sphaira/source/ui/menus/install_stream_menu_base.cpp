@@ -179,7 +179,7 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
                 m_state = State::Failed;
                 OnDisableInstallMode();
             }
-        });
+        }, ui::ProgressBoxOption::ScreenToggle);
     }
 }
 
@@ -191,7 +191,7 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
     switch (m_state) {
         case State::None:
         case State::Done:
-            gfx::drawTextArgs(vg, SCREEN_WIDTH / 2.f, SCREEN_HEIGHT / 2.f, 36.f, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE, theme->GetColour(ThemeEntryID_TEXT_INFO), "Drag'n'Drop (NSP, XCI, NSZ, XCZ) to the install folder"_i18n.c_str());
+            gfx::drawTextArgs(vg, SCREEN_WIDTH / 2.f, SCREEN_HEIGHT / 2.f, 36.f, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE, theme->GetColour(ThemeEntryID_TEXT_INFO), "Drag'n'Drop (NSP, XCI, NSZ, XCZ, MSP) to the install folder"_i18n.c_str());
             break;
 
         case State::Connected:
