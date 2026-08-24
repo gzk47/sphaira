@@ -88,6 +88,8 @@ public:
     static auto GetNxlinkEnable() -> bool;
     static auto GetHddEnable() -> bool;
     static auto GetWriteProtect() -> bool;
+    static auto GetHddShowSystemFiles() -> bool;
+    static auto GetHddIgnoreHibernation() -> bool;
     static auto GetLogEnable() -> bool;
     static auto GetReplaceHbmenuEnable() -> bool;
     static auto GetInstallEnable() -> bool;
@@ -107,6 +109,11 @@ public:
     static void SetNxlinkEnable(bool enable);
     static void SetHddEnable(bool enable);
     static void SetWriteProtect(bool enable);
+    static void SetHddShowSystemFiles(bool enable);
+    static void SetHddIgnoreHibernation(bool enable);
+    // re-mounts every connected usb device so that changed mount options
+    // (and the ntfs specific ones in particular) take effect right away.
+    static void RemountHdd();
     static void SetLogEnable(bool enable);
     static void SetReplaceHbmenuEnable(bool enable);
     static void SetInstallSysmmcEnable(bool enable);
@@ -306,6 +313,9 @@ public:
     option::OptionBool m_ftp_enabled{INI_SECTION, "ftp_enabled", false};
     option::OptionBool m_hdd_enabled{INI_SECTION, "hdd_enabled", true};
     option::OptionBool m_hdd_write_protect{INI_SECTION, "hdd_write_protect", false};
+    // ntfs only, see App::GetHddMountFlags().
+    option::OptionBool m_hdd_show_system_files{INI_SECTION, "hdd_show_system_files", false};
+    option::OptionBool m_hdd_ignore_hibernation{INI_SECTION, "hdd_ignore_hibernation", false};
 
     option::OptionBool m_log_enabled{INI_SECTION, "log_enabled", false};
     option::OptionBool m_replace_hbmenu{INI_SECTION, "replace_hbmenu", false};

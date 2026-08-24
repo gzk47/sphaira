@@ -6,6 +6,13 @@ option(ENABLE_NSZ "enables exporting to nsz" ON)
 
 # lib options.
 option(ENABLE_LIBUSBHSFS "enables FAT/exFAT hdd mounting" ON)
+# ntfs is provided by ntfs-3g (GPLv2+, compatible with sphaira's GPLv3).
+# needs the portlib: (dkp-)pacman -S switch-ntfs-3g
+option(ENABLE_NTFS "enables NTFS hdd mounting, requires switch-ntfs-3g" ON)
+# ext is provided by lwext4 (GPLv2). off by default, it adds a lot to the final
+# binary size and next to no usb hdd is formatted with it.
+# needs the portlib: (dkp-)pacman -S switch-lwext4
+option(ENABLE_EXT4 "enables EXT2/3/4 hdd mounting, requires switch-lwext4" OFF)
 option(ENABLE_LIBUSBDVD "enables cd/dvd/iso/cue mounting" ON)
 option(ENABLE_FTPSRV "enables MTP server support" ON)
 option(ENABLE_LIBHAZE "enables MTP server support" ON)
@@ -291,9 +298,27 @@ if (ENABLE_NSZ)
 endif()
 
 if (ENABLE_LIBUSBHSFS)
-    # enable this if you want ntfs and ext4 support, at the cost of a huge final binary size.
+    # USBHSFS_GPL turns on both ntfs *and* ext4, they can also be enabled
+    # individually, which is what we do here as ext4 is what costs the most
+    # binary size.
     set(USBHSFS_GPL OFF)
+    set(USBHSFS_NTFS ${ENABLE_NTFS})
+    set(USBHSFS_EXT4 ${ENABLE_EXT4})
     set(USBHSFS_SXOS_DISABLE ON)
+
+    if (ENABLE_NTFS)
+        find_library(ntfs_3g_lib ntfs-3g)
+        if (NOT ntfs_3g_lib)
+            message(FATAL_ERROR "NTFS support is enabled but ntfs-3g is not installed, run '(dkp-)pacman -S switch-ntfs-3g' or configure with -DENABLE_NTFS=OFF")
+        endif()
+    endif()
+
+    if (ENABLE_EXT4)
+        find_library(lwext4_lib lwext4)
+        if (NOT lwext4_lib)
+            message(FATAL_ERROR "EXT4 support is enabled but lwext4 is not installed, run '(dkp-)pacman -S switch-lwext4' or configure with -DENABLE_EXT4=OFF")
+        endif()
+    endif()
 
     FetchContent_Declare(libusbhsfs
         GIT_REPOSITORY https://github.com/ITotalJustice/libusbhsfs.git
@@ -304,6 +329,14 @@ if (ENABLE_LIBUSBHSFS)
 
     target_compile_definitions(sphaira PRIVATE ENABLE_LIBUSBHSFS)
     target_link_libraries(sphaira PRIVATE libusbhsfs)
+
+    if (ENABLE_NTFS)
+        target_compile_definitions(sphaira PRIVATE ENABLE_NTFS)
+    endif()
+
+    if (ENABLE_EXT4)
+        target_compile_definitions(sphaira PRIVATE ENABLE_EXT4)
+    endif()
 else()
     target_sources(sphaira PRIVATE source/ff16/ffunicode.c)
 endif()
