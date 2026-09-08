@@ -22,6 +22,11 @@ jobs:
     steps:
     - uses: actions/checkout@v6
 
+    - name: Update packages
+      run: |
+        sudo -n apt-get update
+        sudo -n apt-get upgrade -y texinfo
+
     - name: Silence all git safe directory warnings
       run: git config --system --add safe.directory '*'
 
