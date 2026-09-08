@@ -56,4 +56,8 @@ void Menu::OnDisableInstallMode() {
     libhaze::DisableInstallMode();
 }
 
+void Menu::OnFinishInstallProgress() {
+    libhaze::FinishInstallProgress();
+}
+
 } // namespace sphaira::ui::menu::mtp

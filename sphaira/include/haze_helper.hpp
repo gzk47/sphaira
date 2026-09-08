@@ -14,5 +14,6 @@ using OnInstallClose = std::function<void()>;
 
 void InitInstallMode(const OnInstallStart& on_start, const OnInstallWrite& on_write, const OnInstallClose& on_close);
 void DisableInstallMode();
+void FinishInstallProgress();
 
 } // namespace sphaira::libhaze

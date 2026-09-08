@@ -808,6 +808,7 @@ struct FsInstallProxy final : FsProxyVfs {
 
     Result CreateFile(const char* path, s64 size) override {
         R_TRY(FailedIfNotEnabled());
+        R_UNLESS(!g_shared_data.in_progress, MAKERESULT(Module_Haze, 20)); // Device busy, another install in progress.
         return FsProxyVfs::CreateFile(path, size);
     }
 
@@ -873,7 +874,6 @@ struct FsInstallProxy final : FsProxyVfs {
                     g_shared_data.on_close();
                 }
 
-                g_shared_data.in_progress = false;
                 g_shared_data.current_file.clear();
             }
         }
@@ -998,12 +998,17 @@ void InitInstallMode(const OnInstallStart& on_start, const OnInstallWrite& on_wr
     g_shared_data.on_start = on_start;
     g_shared_data.on_write = on_write;
     g_shared_data.on_close = on_close;
+    g_shared_data.in_progress = false;
     g_shared_data.enabled = true;
 }
 
 void DisableInstallMode() {
     SCOPED_MUTEX(&g_shared_data.mutex);
     g_shared_data.enabled = false;
+}
+
+void FinishInstallProgress() {
+    g_shared_data.in_progress = false;
 }
 
 } // namespace sphaira::libhaze

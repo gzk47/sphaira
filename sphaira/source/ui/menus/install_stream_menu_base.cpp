@@ -81,11 +81,6 @@ bool Stream::Push(const void* _buf, s64 size) {
     );
 
     while (!m_token.stop_requested()) {
-        if (INSTALL_STATE == InstallState::Finished) {
-            log_write("[Stream::Push] install has finished\n");
-            return true;
-        }
-
         SCOPED_MUTEX(&m_mutex);
         if (m_active && m_buffer.size() >= MAX_BUFFER_SIZE) {
             R_TRY(condvarWait(std::addressof(m_can_write), std::addressof(m_mutex)));
@@ -108,6 +103,12 @@ bool Stream::Push(const void* _buf, s64 size) {
         if (!size) {
             return true;
         }
+    }
+
+    if (INSTALL_STATE == InstallState::Finished)
+    {
+        log_write("[Stream::Push] install has finished\n");
+        return true;
     }
 
     log_write("[Stream::Push] failed to push\n");
@@ -161,8 +162,14 @@ void Menu::Update(Controller* controller, TouchInfo* touch) {
             const auto rc = yati::InstallFromSource(pbox, m_source.get(), m_source->GetPath());
             INSTALL_STATE = InstallState::Finished;
 
+            if (std::string(GetShortTitle()) == "MTP")
+            {
+                OnFinishInstallProgress();
+            }
+
+            m_source->Disable();
+
             if (R_FAILED(rc)) {
-                m_source->Disable();
                 R_THROW(rc);
             }
 
@@ -265,6 +272,11 @@ void Menu::OnInstallClose() {
     log_write("[Menu::OnInstallClose] inside\n");
 
     m_source->Disable();
+
+    if (std::string(GetShortTitle()) == "MTP")
+    {
+        return;
+    }
 
     // wait until the install has finished before returning.
     while (INSTALL_STATE == InstallState::Progress) {

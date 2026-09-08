@@ -399,9 +399,8 @@ endif()
 
 if (ENABLE_LIBHAZE)
     FetchContent_Declare(libhaze
-        GIT_REPOSITORY https://github.com/ITotalJustice/libhaze.git
-        GIT_TAG 81154c1
-        PATCH_COMMAND "${GIT_EXECUTABLE}" apply --ignore-whitespace "${CMAKE_SOURCE_DIR}/cmake/patches/libhaze-sphaira.patch"
+        GIT_REPOSITORY https://github.com/R-YaTian/libhaze.git
+        GIT_TAG 022127f
     )
 
     FetchContent_MakeAvailable(libhaze)
