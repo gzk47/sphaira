@@ -404,7 +404,6 @@ if (ENABLE_LIBHAZE)
     )
 
     FetchContent_MakeAvailable(libhaze)
-    target_compile_definitions(libhaze PRIVATE -DSPHAIRA_VERSION="${sphaira_VERSION}")
     target_compile_definitions(sphaira PRIVATE ENABLE_LIBHAZE)
     target_link_libraries(sphaira PRIVATE haze)
 
