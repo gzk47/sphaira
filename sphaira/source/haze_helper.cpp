@@ -965,7 +965,7 @@ bool Init() {
     }
 
     g_should_exit = false;
-    if (!haze::Initialize(haze_callback, g_fs_entries, App::GetApp()->m_mtp_vid.Get(), App::GetApp()->m_mtp_pid.Get())) {
+    if (!haze::Initialize(haze_callback, g_fs_entries, App::GetApp()->m_mtp_vid.Get(), App::GetApp()->m_mtp_pid.Get(), "Sphaira/" APP_VERSION)) {
         return false;
     }
 
