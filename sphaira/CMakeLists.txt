@@ -308,11 +308,12 @@ else()
     target_sources(sphaira PRIVATE source/ff16/ffunicode.c)
 endif()
 
+find_path(mbedtls_inc mbedtls REQUIRED)
+
 if (ENABLE_LIBUSBDVD)
     FetchContent_Declare(libusbdvd
         GIT_REPOSITORY https://github.com/proconsule/libusbdvd.git
-        GIT_TAG 3cb0613
-        PATCH_COMMAND "${GIT_EXECUTABLE}" apply --ignore-whitespace "${CMAKE_SOURCE_DIR}/cmake/patches/libusbdvd-libnx-usb-enums.patch"
+        GIT_TAG c7598a9
     )
 
     FetchContent_MakeAvailable(libusbdvd)
@@ -321,6 +322,8 @@ if (ENABLE_LIBUSBDVD)
         ${libusbdvd_SOURCE_DIR}/source/usbdvd.cpp
         ${libusbdvd_SOURCE_DIR}/source/usbdvd_scsi.cpp
         ${libusbdvd_SOURCE_DIR}/source/usbdvd_utils.cpp
+        ${libusbdvd_SOURCE_DIR}/source/CSS/usbdvd_css.cpp
+        ${libusbdvd_SOURCE_DIR}/source/CSS/usbdvd_csscache.cpp
         ${libusbdvd_SOURCE_DIR}/source/fs/usbdvd_datadisc.cpp
         ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs/audiocdfs.cpp
         ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs/cdaudio_devoptab.cpp
@@ -333,11 +336,13 @@ if (ENABLE_LIBUSBDVD)
     )
     target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/)
     target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/os/switch)
+    target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/CSS)
     target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs)
     target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs)
     target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/iso9660)
     target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/udf)
     target_include_directories(libusbdvd PUBLIC ${libusbdvd_SOURCE_DIR}/include)
+    target_include_directories(libusbdvd PUBLIC ${mbedtls_inc})
 
     target_compile_definitions(sphaira PRIVATE ENABLE_LIBUSBDVD)
     target_link_libraries(sphaira PRIVATE libusbdvd)
@@ -593,7 +598,6 @@ find_library(minizip_lib minizip REQUIRED)
 find_path(minizip_inc minizip REQUIRED)
 
 find_package(CURL REQUIRED)
-find_path(mbedtls_inc mbedtls REQUIRED)
 find_library(mbedcrypto_lib mbedcrypto REQUIRED)
 
 add_library(fatfs

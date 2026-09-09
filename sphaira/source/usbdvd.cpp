@@ -51,7 +51,7 @@ bool GetMountPoint(location::StdioEntry& out) {
         return false;
     }
 
-    const auto& ctx = g_dvd->usbdvd_drive_ctx;
+    const auto& ctx = g_dvd->usbdvd_ctx;
     const auto& fs = ctx.fs;
 
     // check we have a valid cd mounted.
@@ -61,7 +61,7 @@ bool GetMountPoint(location::StdioEntry& out) {
 
     // todo: make the display name better (show size etc).
     char display_name[0x100];
-    std::snprintf(display_name, sizeof(display_name), "%s - %s", ctx.disc_type, ctx.fs.disc_fstype);
+    std::snprintf(display_name, sizeof(display_name), "%s - %s", ctx.drive.disc_type, ctx.fs.disc_fstype);
 
     out.mount = fs.mountpoint;
     out.name = display_name;

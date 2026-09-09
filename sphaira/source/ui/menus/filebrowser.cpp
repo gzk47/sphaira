@@ -722,18 +722,18 @@ void FsView::OnClick() {
                 fs::FsPath bin_path = cue_path;
                 std::strcpy(std::strstr(bin_path, ".cue"), ".bin");
                 if (m_fs->FileExists(bin_path)) {
-                    usbdvd = std::make_shared<CUSBDVD>(cue_path, bin_path);
+                    usbdvd = std::make_shared<CUSBDVD>(cue_path.toString(), bin_path.toString());
                 }
             } else {
-                usbdvd = std::make_shared<CUSBDVD>(GetNewPathCurrent());
+                usbdvd = std::make_shared<CUSBDVD>(GetNewPathCurrent().toString());
             }
 
-            if (usbdvd && usbdvd->usbdvd_drive_ctx.fs.mounted) {
-                auto fs = std::make_shared<FsStdioWrapper>(usbdvd->usbdvd_drive_ctx.fs.mountpoint, [usbdvd](){
+            if (usbdvd && usbdvd->usbdvd_ctx.fs.mounted) {
+                auto fs = std::make_shared<FsStdioWrapper>(usbdvd->usbdvd_ctx.fs.mountpoint, [usbdvd](){
                     // dummy func to keep shared_ptr alive until fs is closed.
                 });
 
-                MountFsHelper(fs, usbdvd->usbdvd_drive_ctx.fs.disc_fstype);
+                MountFsHelper(fs, usbdvd->usbdvd_ctx.fs.disc_fstype);
                 log_write("[USBDVD] mounted\n");
             } else {
                 log_write("[USBDVD] failed to mount\n");
