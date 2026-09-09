@@ -340,7 +340,7 @@ void Menu::Draw(NVGcontext* vg, Theme* theme) {
 
         std::string location;
         if (entry.size_sd && entry.size_nand) {
-            location = "microSD card"_i18n + " + " + "System memory"_i18n;
+            location = "SD + System"_i18n;
         } else if (entry.size_nand) {
             location = "System memory"_i18n;
         } else {

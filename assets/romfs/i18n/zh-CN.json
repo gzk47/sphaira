@@ -170,6 +170,7 @@
   "Base game": "游戏本体",
   "Update data": "更新数据",
   "DLC": "追加内容",
+  "SD + System": "SD + 主机",
   "Only list games that have content installed on the selected storage.": "仅列出在所选存储空间中安装了内容的游戏。",
   "Rebuild cache": "重建缓存",
   "Looks for new or removed games. Sizes are only recalculated for games whose content has changed.": "查找新增或已删除的游戏。仅对内容发生变化的游戏重新计算大小。",

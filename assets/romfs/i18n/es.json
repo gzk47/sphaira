@@ -169,6 +169,7 @@
   "Base game": "Juego base",
   "Update data": "Datos de actualización",
   "DLC": "DLC",
+  "SD + System": "SD + Sistema",
   "Only list games that have content installed on the selected storage.": "Muestra solo los juegos que tienen contenido instalado en el almacenamiento seleccionado.",
   "Rebuild cache": "Reconstruir caché",
   "Looks for new or removed games. Sizes are only recalculated for games whose content has changed.": "Busca juegos nuevos o eliminados. El tamaño solo se recalcula para los juegos cuyo contenido ha cambiado.",

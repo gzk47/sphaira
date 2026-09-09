@@ -173,6 +173,7 @@
   "Base game": "게임 본편",
   "Update data": "업데이트 데이터",
   "DLC": "추가 콘텐츠",
+  "SD + System": "SD + 본체",
   "Only list games that have content installed on the selected storage.": "선택한 저장 공간에 설치된 게임만 표시합니다.",
   "Rebuild cache": "캐시 다시 만들기",
   "Looks for new or removed games. Sizes are only recalculated for games whose content has changed.": "추가되거나 삭제된 게임을 확인합니다. 용량은 내용이 변경된 게임에 대해서만 다시 계산합니다.",

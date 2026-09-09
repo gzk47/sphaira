@@ -173,6 +173,7 @@
   "Base game": "ゲーム本体",
   "Update data": "更新データ",
   "DLC": "追加コンテンツ",
+  "SD + System": "SD + 本体",
   "Only list games that have content installed on the selected storage.": "選択したストレージにインストールされているゲームのみを表示します。",
   "Rebuild cache": "キャッシュを再作成",
   "Looks for new or removed games. Sizes are only recalculated for games whose content has changed.": "追加または削除されたゲームを検出します。容量を再計算するのは内容が変更されたゲームのみです。",

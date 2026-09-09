@@ -170,6 +170,7 @@
   "Base game": "Основная игра",
   "Update data": "Данные обновления",
   "DLC": "DLC",
+  "SD + System": "SD + Система",
   "Only list games that have content installed on the selected storage.": "Показывать только игры, содержимое которых установлено в выбранном хранилище.",
   "Rebuild cache": "Перестроить кэш",
   "Looks for new or removed games. Sizes are only recalculated for games whose content has changed.": "Ищет новые или удалённые игры. Размер пересчитывается только для игр, содержимое которых изменилось.",
