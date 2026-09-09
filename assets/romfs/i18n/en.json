@@ -410,6 +410,16 @@
     "Connected devices can be used in the FileBrowser, as well as a backup location when dumping games and saves."
   ],
   "HDD write protect": "HDD write protect",
+  "Show system files": "Show system files",
+  "hdd_show_system_files_info": [
+    "NTFS only. Shows entries that Windows marked as system files, such as $Recycle.Bin. ",
+    "Leave this off unless you know what you are doing."
+  ],
+  "Mount hibernated NTFS": "Mount hibernated NTFS",
+  "hdd_ignore_hibernation_info": [
+    "NTFS only. Mounts a drive that Windows left in a hibernated state (fast startup). ",
+    "WARNING: the saved Windows session on that drive is lost."
+  ],
   "Makes the connected HDD read-only.": "Makes the connected HDD read-only.",
   "Installing is disabled, enable now?": "Installing is disabled, enable now?",
   "WARNING: Installing apps will lead to a ban!": "WARNING: Installing apps will lead to a ban!",

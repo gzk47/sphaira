@@ -48,6 +48,49 @@ extern "C" {
 } // extern "C"
 
 namespace sphaira {
+
+#ifdef ENABLE_LIBUSBHSFS
+namespace {
+
+// builds the libusbhsfs mount flags out of the user's hdd options and pushes
+// them to the library. only affects devices mounted *after* this call, use
+// App::RemountHdd() if the change should be visible right away.
+//
+// most of these are NTFS only, they are ignored for FAT/exFAT volumes.
+void ApplyHddMountFlags() {
+    u32 flags = UsbHsFsMountFlags_None;
+
+    if (App::GetWriteProtect()) {
+        flags |= UsbHsFsMountFlags_ReadOnly;
+    } else {
+        // an NTFS volume with a dirty journal (the normal state after the drive
+        // was pulled out of a pc without ejecting it) is refused for writing
+        // unless the journal is replayed first.
+        flags |= UsbHsFsMountFlags_ReplayJournal;
+    }
+
+    // windows marks plenty of ordinary folders as hidden, without this they
+    // would silently not show up in the file browser.
+    flags |= UsbHsFsMountFlags_ShowHiddenFiles;
+
+    // deliberately *not* setting UsbHsFsMountFlags_UpdateAccessTimes (which is
+    // part of the library default), writing back an access time after every
+    // read costs a lot of speed when installing from an NTFS drive.
+
+    if (App::GetHddShowSystemFiles()) {
+        flags |= UsbHsFsMountFlags_ShowSystemFiles;
+    }
+
+    if (App::GetHddIgnoreHibernation()) {
+        flags |= UsbHsFsMountFlags_IgnoreHibernation;
+    }
+
+    usbHsFsSetFileSystemMountFlags(flags);
+}
+
+} // namespace
+#endif // ENABLE_LIBUSBHSFS
+
 namespace {
 
 constexpr const u8 DEFAULT_IMAGE_DATA[]{
@@ -705,6 +748,14 @@ auto App::GetWriteProtect() -> bool {
     return g_app->m_hdd_write_protect.Get();
 }
 
+auto App::GetHddShowSystemFiles() -> bool {
+    return g_app->m_hdd_show_system_files.Get();
+}
+
+auto App::GetHddIgnoreHibernation() -> bool {
+    return g_app->m_hdd_ignore_hibernation.Get();
+}
+
 auto App::GetLogEnable() -> bool {
     return g_app->m_log_enabled.Get();
 }
@@ -781,9 +832,7 @@ void App::SetHddEnable(bool enable) {
         g_app->m_hdd_enabled.Set(enable);
 #ifdef ENABLE_LIBUSBHSFS
         if (enable) {
-            if (App::GetWriteProtect()) {
-                usbHsFsSetFileSystemMountFlags(UsbHsFsMountFlags_ReadOnly);
-            }
+            ApplyHddMountFlags();
             usbHsFsInitialize(1);
         } else {
             usbHsFsExit();
@@ -795,15 +844,35 @@ void App::SetHddEnable(bool enable) {
 void App::SetWriteProtect(bool enable) {
     if (App::GetWriteProtect() != enable) {
         g_app->m_hdd_write_protect.Set(enable);
-
-#ifdef ENABLE_LIBUSBHSFS
-        if (enable) {
-            usbHsFsSetFileSystemMountFlags(UsbHsFsMountFlags_ReadOnly);
-        } else {
-            usbHsFsSetFileSystemMountFlags(0);
-        }
-#endif // ENABLE_LIBUSBHSFS
+        App::RemountHdd();
     }
+}
+
+void App::SetHddShowSystemFiles(bool enable) {
+    if (App::GetHddShowSystemFiles() != enable) {
+        g_app->m_hdd_show_system_files.Set(enable);
+        App::RemountHdd();
+    }
+}
+
+void App::SetHddIgnoreHibernation(bool enable) {
+    if (App::GetHddIgnoreHibernation() != enable) {
+        g_app->m_hdd_ignore_hibernation.Set(enable);
+        App::RemountHdd();
+    }
+}
+
+void App::RemountHdd() {
+#ifdef ENABLE_LIBUSBHSFS
+    ApplyHddMountFlags();
+
+    // mount flags are only read when a device is mounted, so cycle the library
+    // to pick them up, otherwise the user would have to unplug the drive.
+    if (App::GetHddEnable()) {
+        usbHsFsExit();
+        usbHsFsInitialize(1);
+    }
+#endif // ENABLE_LIBUSBHSFS
 }
 
 void App::SetLogEnable(bool enable) {
@@ -1587,6 +1656,8 @@ App::App(const char* argv0) {
             else if (app->m_ftp_enabled.LoadFrom(Key, Value)) {}
             else if (app->m_hdd_enabled.LoadFrom(Key, Value)) {}
             else if (app->m_hdd_write_protect.LoadFrom(Key, Value)) {}
+            else if (app->m_hdd_show_system_files.LoadFrom(Key, Value)) {}
+            else if (app->m_hdd_ignore_hibernation.LoadFrom(Key, Value)) {}
             else if (app->m_log_enabled.LoadFrom(Key, Value)) {}
             else if (app->m_replace_hbmenu.LoadFrom(Key, Value)) {}
             else if (app->m_default_music.LoadFrom(Key, Value)) {}
@@ -1778,10 +1849,7 @@ App::App(const char* argv0) {
 #ifdef ENABLE_LIBUSBHSFS
         if (App::GetHddEnable()) {
             SCOPED_TIMESTAMP("hdd init");
-            if (App::GetWriteProtect()) {
-                usbHsFsSetFileSystemMountFlags(UsbHsFsMountFlags_ReadOnly);
-            }
-
+            ApplyHddMountFlags();
             usbHsFsInitialize(1);
         }
 #endif // ENABLE_LIBUSBHSFS
@@ -2704,6 +2772,24 @@ void App::DisplayHddOptions(bool left_side) {
     options->Add<ui::SidebarEntryBool>("HDD write protect"_i18n, App::GetWriteProtect(), [](bool& enable){
         App::SetWriteProtect(enable);
     },  "Makes the connected HDD read-only."_i18n);
+
+#ifdef ENABLE_NTFS
+    options->Add<ui::SidebarEntryBool>("Show system files"_i18n, App::GetHddShowSystemFiles(), [](bool& enable){
+        App::SetHddShowSystemFiles(enable);
+    },  i18n::get("hdd_show_system_files_info",
+            "NTFS only. Shows entries that Windows marked as system files, such as $Recycle.Bin. "
+            "Leave this off unless you know what you are doing."
+        )
+    );
+
+    options->Add<ui::SidebarEntryBool>("Mount hibernated NTFS"_i18n, App::GetHddIgnoreHibernation(), [](bool& enable){
+        App::SetHddIgnoreHibernation(enable);
+    },  i18n::get("hdd_ignore_hibernation_info",
+            "NTFS only. Mounts a drive that Windows left in a hibernated state (fast startup). "
+            "WARNING: the saved Windows session on that drive is lost."
+        )
+    );
+#endif // ENABLE_NTFS
 }
 
 void App::ShowEnableInstallPrompt() {

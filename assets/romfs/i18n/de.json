@@ -410,6 +410,16 @@
     "Angeschlossene Geräte können im FileBrowser verwendet werden und dienen als Backup-Speicherort beim Sichern von Spielen und Spielständen."
   ],
   "HDD write protect": "HDD Schreibschutz",
+  "Show system files": "Systemdateien anzeigen",
+  "hdd_show_system_files_info": [
+    "Nur NTFS. Zeigt Einträge an, die Windows als Systemdateien markiert hat, z. B. $Recycle.Bin. ",
+    "Lass dies deaktiviert, wenn du nicht genau weißt, was du tust."
+  ],
+  "Mount hibernated NTFS": "Ruhezustand-NTFS einbinden",
+  "hdd_ignore_hibernation_info": [
+    "Nur NTFS. Bindet ein Laufwerk ein, das Windows im Ruhezustand hinterlassen hat (Schnellstart). ",
+    "ACHTUNG: Die gespeicherte Windows-Sitzung auf diesem Laufwerk geht dabei verloren."
+  ],
   "Makes the connected HDD read-only.": "Macht den verbundenen HDD schreibgeschützt.",
   "Installing is disabled, enable now?": "Die Installation ist deaktiviert. Jetzt aktivieren?",
   "WARNING: Installing apps will lead to a ban!": "ACHTUNG: Die Installation von Apps führt zu einem Verbot!",
