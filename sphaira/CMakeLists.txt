@@ -248,9 +248,8 @@ FetchContent_Declare(zstd
 )
 
 FetchContent_Declare(libnxtc
-    GIT_REPOSITORY https://github.com/ITotalJustice/libnxtc.git
-    GIT_TAG 88ce3d8
-    PATCH_COMMAND "${GIT_EXECUTABLE}" apply --ignore-whitespace "${CMAKE_SOURCE_DIR}/cmake/patches/libnxtc-libnx-nacp-layout.patch"
+    GIT_REPOSITORY https://github.com/DarkMatterCore/libnxtc.git
+    GIT_TAG aa0a375
 )
 
 FetchContent_Declare(nvjpg
@@ -586,14 +585,16 @@ target_include_directories(stb INTERFACE ${stb_SOURCE_DIR})
 add_library(dr_libs INTERFACE)
 target_include_directories(dr_libs INTERFACE ${dr_libs_SOURCE_DIR})
 
+find_package(ZLIB REQUIRED)
+find_path(zlib_inc zlib.h)
+
 add_library(libnxtc
     ${libnxtc_SOURCE_DIR}/source/nxtc.c
     ${libnxtc_SOURCE_DIR}/source/nxtc_log.c
     ${libnxtc_SOURCE_DIR}/source/nxtc_utils.c
 )
-target_include_directories(libnxtc PUBLIC ${libnxtc_SOURCE_DIR}/include)
+target_include_directories(libnxtc PUBLIC ${libnxtc_SOURCE_DIR}/include ${zlib_inc})
 
-find_package(ZLIB REQUIRED)
 find_library(minizip_lib minizip REQUIRED)
 find_path(minizip_inc minizip REQUIRED)
 

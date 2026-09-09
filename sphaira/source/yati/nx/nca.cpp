@@ -5,6 +5,8 @@
 #include "utils/utils.hpp"
 #include "log.hpp"
 
+#include <nxtc.h>
+
 namespace sphaira::nca {
 namespace {
 
@@ -223,7 +225,19 @@ Result ParseControl(const fs::FsPath& path, u64 program_id, void* nacp_out, s64 
         R_TRY(fs.OpenFile("/control.nacp", FsOpenMode_Read, &file));
 
         u64 bytes_read;
-        R_TRY(file.Read(nacp_off, nacp_out, nacp_size, 0, &bytes_read));
+        if (nacp_off == 0)
+        {
+            NacpStruct nacp;
+            NacpLanguageEntry* lang_entries = nullptr;
+            R_TRY(file.Read(0, &nacp, sizeof(NacpStruct), 0, &bytes_read));
+            lang_entries = nxtcDecompressNacpTitleBlock(&nacp);
+            std::memcpy(&nacp, lang_entries, sizeof(NacpLanguageEntryData));
+            std::memcpy(nacp_out, &nacp, nacp_size);
+        }
+        else
+        {
+            R_TRY(file.Read(nacp_off, nacp_out, nacp_size, 0, &bytes_read));
+        }
     }
 
     // read icon.
