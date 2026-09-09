@@ -49,6 +49,7 @@ struct Menu : MenuBase {
     virtual void Update(Controller* controller, TouchInfo* touch);
     virtual void Draw(NVGcontext* vg, Theme* theme);
     virtual void OnDisableInstallMode() = 0;
+    virtual void OnFinishInstallProgress() {}
 
 protected:
     bool OnInstallStart(const char* path);

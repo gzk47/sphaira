@@ -172,6 +172,7 @@ enum {
     Module_Fst2 = 251,
     Module_Nex = 306,
     Module_Npln = 321,
+    Module_Haze = 420,
     Module_Tspm = 499,
     Module_Devmenu = 500,
     Module_Sphaira = 505,
