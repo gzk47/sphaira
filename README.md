@@ -62,14 +62,34 @@ The USB protocol is the same as tinfoil, so tools such as [ns-usbloader](https:/
 
 Once you have connected your ftp client to your switch, you can upload files to install into the `install` folder.
 
+### Usb HDD (install)
+
+Connected USB mass storage devices show up in the file browser (and as a dump location) under `mounts:/`,
+installing from them works the same as installing from the sd card.
+
+Supported filesystems are FAT12/16/32, exFAT and NTFS. NTFS is provided by
+[NTFS-3G](https://github.com/tuxera/ntfs-3g) and can be turned off at build time with `-DENABLE_NTFS=OFF`.
+EXT2/3/4 is supported as well but off by default, enable it with `-DENABLE_EXT4=ON`.
+
+A few NTFS notes:
+
+- Always eject the drive properly on Windows. If the journal is left dirty, sphaira replays it on mount, but only
+  when `HDD write protect` is off.
+- A drive left behind by Windows fast startup / hibernation is not mounted by default. `Mount hibernated NTFS`
+  in the HDD options forces it, at the cost of the saved Windows session.
+- NTFS is noticeably slower than exFAT. For installing large files, exFAT is the better choice.
+
 ## Building from source
 
 You will first need to install [devkitPro](https://devkitpro.org/wiki/Getting_Started).
 
 Next you will need to install the dependencies:
 ```sh
-sudo pacman -S switch-dev deko3d switch-cmake switch-curl switch-glm switch-zlib switch-mbedtls
+sudo pacman -S switch-dev deko3d switch-cmake switch-curl switch-glm switch-zlib switch-mbedtls switch-ntfs-3g
 ```
+
+`switch-ntfs-3g` is only needed for NTFS support on USB HDDs, configure with `-DENABLE_NTFS=OFF` to build without it.
+For EXT2/3/4 support (`-DENABLE_EXT4=ON`) you also need `switch-lwext4`.
 
 Also you need to have on your environment the packages `git`, `make`, `zip` and `cmake`
 

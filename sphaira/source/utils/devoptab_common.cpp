@@ -11,11 +11,6 @@
 #include <minIni.h>
 #include <curl/curl.h>
 
-// see FixDkpBug();
-extern "C" {
-    extern const devoptab_t dotab_stdnull;
-}
-
 namespace sphaira::devoptab::common {
 namespace {
 
@@ -1596,17 +1591,6 @@ void UmountNeworkDevice(const fs::FsPath& mount) {
         it->reset();
     } else {
         log_write("[DEVOPTAB] No such mount %s\n", mount.s);
-    }
-}
-
-void FixDkpBug() {
-    const int max = 35;
-
-    for (int i = 0; i < max; i++) {
-        if (!devoptab_list[i]) {
-            devoptab_list[i] = &dotab_stdnull;
-            log_write("[DEVOPTAB] Fixing DKP bug at index: %d\n", i);
-        }
     }
 }
 

@@ -6,6 +6,13 @@ option(ENABLE_NSZ "enables exporting to nsz" ON)
 
 # lib options.
 option(ENABLE_LIBUSBHSFS "enables FAT/exFAT hdd mounting" ON)
+# ntfs is provided by ntfs-3g (GPLv2+, compatible with sphaira's GPLv3).
+# needs the portlib: (dkp-)pacman -S switch-ntfs-3g
+option(ENABLE_NTFS "enables NTFS hdd mounting, requires switch-ntfs-3g" ON)
+# ext is provided by lwext4 (GPLv2). off by default, it adds a lot to the final
+# binary size and next to no usb hdd is formatted with it.
+# needs the portlib: (dkp-)pacman -S switch-lwext4
+option(ENABLE_EXT4 "enables EXT2/3/4 hdd mounting, requires switch-lwext4" OFF)
 option(ENABLE_LIBUSBDVD "enables cd/dvd/iso/cue mounting" ON)
 option(ENABLE_FTPSRV "enables MTP server support" ON)
 option(ENABLE_LIBHAZE "enables MTP server support" ON)
@@ -28,7 +35,7 @@ option(ENABLE_DEVOPTAB_WEBDAV "" ON)
 # it also adds 230k to binary size, and i don't think anyone will use it.
 option(ENABLE_DEVOPTAB_SFTP "" OFF)
 
-set(sphaira_VERSION 1.0.6)
+set(sphaira_VERSION 1.0.7)
 
 project(sphaira
     VERSION ${sphaira_VERSION}
@@ -75,6 +82,7 @@ add_executable(sphaira
     source/ui/menus/main_menu.cpp
     source/ui/menus/menu_base.cpp
     source/ui/menus/save_menu.cpp
+    source/ui/menus/storage_menu.cpp
     source/ui/menus/themezer.cpp
     source/ui/menus/ghdl.cpp
     source/ui/menus/usb_menu.cpp
@@ -248,9 +256,8 @@ FetchContent_Declare(zstd
 )
 
 FetchContent_Declare(libnxtc
-    GIT_REPOSITORY https://github.com/ITotalJustice/libnxtc.git
-    GIT_TAG 88ce3d8
-    PATCH_COMMAND "${GIT_EXECUTABLE}" apply --ignore-whitespace "${CMAKE_SOURCE_DIR}/cmake/patches/libnxtc-libnx-nacp-layout.patch"
+    GIT_REPOSITORY https://github.com/DarkMatterCore/libnxtc.git
+    GIT_TAG aa0a375
 )
 
 FetchContent_Declare(nvjpg
@@ -291,9 +298,27 @@ if (ENABLE_NSZ)
 endif()
 
 if (ENABLE_LIBUSBHSFS)
-    # enable this if you want ntfs and ext4 support, at the cost of a huge final binary size.
+    # USBHSFS_GPL turns on both ntfs *and* ext4, they can also be enabled
+    # individually, which is what we do here as ext4 is what costs the most
+    # binary size.
     set(USBHSFS_GPL OFF)
+    set(USBHSFS_NTFS ${ENABLE_NTFS})
+    set(USBHSFS_EXT4 ${ENABLE_EXT4})
     set(USBHSFS_SXOS_DISABLE ON)
+
+    if (ENABLE_NTFS)
+        find_library(ntfs_3g_lib ntfs-3g)
+        if (NOT ntfs_3g_lib)
+            message(FATAL_ERROR "NTFS support is enabled but ntfs-3g is not installed, run '(dkp-)pacman -S switch-ntfs-3g' or configure with -DENABLE_NTFS=OFF")
+        endif()
+    endif()
+
+    if (ENABLE_EXT4)
+        find_library(lwext4_lib lwext4)
+        if (NOT lwext4_lib)
+            message(FATAL_ERROR "EXT4 support is enabled but lwext4 is not installed, run '(dkp-)pacman -S switch-lwext4' or configure with -DENABLE_EXT4=OFF")
+        endif()
+    endif()
 
     FetchContent_Declare(libusbhsfs
         GIT_REPOSITORY https://github.com/ITotalJustice/libusbhsfs.git
@@ -304,15 +329,24 @@ if (ENABLE_LIBUSBHSFS)
 
     target_compile_definitions(sphaira PRIVATE ENABLE_LIBUSBHSFS)
     target_link_libraries(sphaira PRIVATE libusbhsfs)
+
+    if (ENABLE_NTFS)
+        target_compile_definitions(sphaira PRIVATE ENABLE_NTFS)
+    endif()
+
+    if (ENABLE_EXT4)
+        target_compile_definitions(sphaira PRIVATE ENABLE_EXT4)
+    endif()
 else()
     target_sources(sphaira PRIVATE source/ff16/ffunicode.c)
 endif()
 
+find_path(mbedtls_inc mbedtls REQUIRED)
+
 if (ENABLE_LIBUSBDVD)
     FetchContent_Declare(libusbdvd
         GIT_REPOSITORY https://github.com/proconsule/libusbdvd.git
-        GIT_TAG 3cb0613
-        PATCH_COMMAND "${GIT_EXECUTABLE}" apply --ignore-whitespace "${CMAKE_SOURCE_DIR}/cmake/patches/libusbdvd-libnx-usb-enums.patch"
+        GIT_TAG c7598a9
     )
 
     FetchContent_MakeAvailable(libusbdvd)
@@ -321,6 +355,8 @@ if (ENABLE_LIBUSBDVD)
         ${libusbdvd_SOURCE_DIR}/source/usbdvd.cpp
         ${libusbdvd_SOURCE_DIR}/source/usbdvd_scsi.cpp
         ${libusbdvd_SOURCE_DIR}/source/usbdvd_utils.cpp
+        ${libusbdvd_SOURCE_DIR}/source/CSS/usbdvd_css.cpp
+        ${libusbdvd_SOURCE_DIR}/source/CSS/usbdvd_csscache.cpp
         ${libusbdvd_SOURCE_DIR}/source/fs/usbdvd_datadisc.cpp
         ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs/audiocdfs.cpp
         ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs/cdaudio_devoptab.cpp
@@ -333,11 +369,13 @@ if (ENABLE_LIBUSBDVD)
     )
     target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/)
     target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/os/switch)
+    target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/CSS)
     target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs)
     target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/audiocdfs)
     target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/iso9660)
     target_include_directories(libusbdvd PRIVATE ${libusbdvd_SOURCE_DIR}/source/fs/udf)
     target_include_directories(libusbdvd PUBLIC ${libusbdvd_SOURCE_DIR}/include)
+    target_include_directories(libusbdvd PUBLIC ${mbedtls_inc})
 
     target_compile_definitions(sphaira PRIVATE ENABLE_LIBUSBDVD)
     target_link_libraries(sphaira PRIVATE libusbdvd)
@@ -399,15 +437,13 @@ endif()
 
 if (ENABLE_LIBHAZE)
     FetchContent_Declare(libhaze
-        GIT_REPOSITORY https://github.com/ITotalJustice/libhaze.git
-        GIT_TAG 81154c1
-        PATCH_COMMAND "${GIT_EXECUTABLE}" apply --ignore-whitespace "${CMAKE_SOURCE_DIR}/cmake/patches/libhaze-sphaira.patch"
+        GIT_REPOSITORY https://github.com/R-YaTian/libhaze.git
+        GIT_TAG f1c9c63
     )
 
     FetchContent_MakeAvailable(libhaze)
-    target_compile_definitions(libhaze PRIVATE -DSPHAIRA_VERSION="${sphaira_VERSION}")
     target_compile_definitions(sphaira PRIVATE ENABLE_LIBHAZE)
-    target_link_libraries(sphaira PRIVATE libhaze)
+    target_link_libraries(sphaira PRIVATE haze)
 
     target_sources(sphaira PRIVATE
         source/haze_helper.cpp
@@ -581,19 +617,20 @@ target_include_directories(stb INTERFACE ${stb_SOURCE_DIR})
 add_library(dr_libs INTERFACE)
 target_include_directories(dr_libs INTERFACE ${dr_libs_SOURCE_DIR})
 
+find_package(ZLIB REQUIRED)
+find_path(zlib_inc zlib.h)
+
 add_library(libnxtc
     ${libnxtc_SOURCE_DIR}/source/nxtc.c
     ${libnxtc_SOURCE_DIR}/source/nxtc_log.c
     ${libnxtc_SOURCE_DIR}/source/nxtc_utils.c
 )
-target_include_directories(libnxtc PUBLIC ${libnxtc_SOURCE_DIR}/include)
+target_include_directories(libnxtc PUBLIC ${libnxtc_SOURCE_DIR}/include ${zlib_inc})
 
-find_package(ZLIB REQUIRED)
 find_library(minizip_lib minizip REQUIRED)
 find_path(minizip_inc minizip REQUIRED)
 
 find_package(CURL REQUIRED)
-find_path(mbedtls_inc mbedtls REQUIRED)
 find_library(mbedcrypto_lib mbedcrypto REQUIRED)
 
 add_library(fatfs

@@ -160,6 +160,21 @@
   "Install Options": "Install Options",
   "System memory": "System memory",
   "microSD card": "microSD card",
+  "Data Management": "Data Management",
+  "Storage": "Storage",
+  "Storage Options": "Storage Options",
+  "Calculating...": "Calculating...",
+  "Other": "Other",
+  "Free": "Free",
+  "Base game": "Base game",
+  "Update data": "Update data",
+  "DLC": "DLC",
+  "SD + System": "SD + System",
+  "Only list games that have content installed on the selected storage.": "Only list games that have content installed on the selected storage.",
+  "Rebuild cache": "Rebuild cache",
+  "Looks for new or removed games. Sizes are only recalculated for games whose content has changed.": "Looks for new or removed games. Sizes are only recalculated for games whose content has changed.",
+  "Discards the saved sizes and measures every game again from scratch.": "Discards the saved sizes and measures every game again from scratch.",
+  "See how much space each game uses on the microSD card and in system memory. Games are listed largest first, so it's easy to find what to remove.": "See how much space each game uses on the microSD card and in system memory. Games are listed largest first, so it's easy to find what to remove.",
   "Enable sysmmc": "Enable sysmmc",
   "Enables installing whilst in sysMMC mode.": "Enables installing whilst in sysMMC mode.",
   "Enable emummc": "Enable emummc",
@@ -410,6 +425,16 @@
     "Connected devices can be used in the FileBrowser, as well as a backup location when dumping games and saves."
   ],
   "HDD write protect": "HDD write protect",
+  "Show system files": "Show system files",
+  "hdd_show_system_files_info": [
+    "NTFS only. Shows entries that Windows marked as system files, such as $Recycle.Bin. ",
+    "Leave this off unless you know what you are doing."
+  ],
+  "Mount hibernated NTFS": "Mount hibernated NTFS",
+  "hdd_ignore_hibernation_info": [
+    "NTFS only. Mounts a drive that Windows left in a hibernated state (fast startup). ",
+    "WARNING: the saved Windows session on that drive is lost."
+  ],
   "Makes the connected HDD read-only.": "Makes the connected HDD read-only.",
   "Installing is disabled, enable now?": "Installing is disabled, enable now?",
   "WARNING: Installing apps will lead to a ban!": "WARNING: Installing apps will lead to a ban!",

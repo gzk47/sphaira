@@ -33,6 +33,8 @@
                 "ENABLE_NSZ": false,
 
                 "ENABLE_LIBUSBHSFS": false,
+                "ENABLE_NTFS": false,
+                "ENABLE_EXT4": false,
                 "ENABLE_LIBUSBDVD": false,
                 "ENABLE_FTPSRV": false,
                 "ENABLE_LIBHAZE": false,

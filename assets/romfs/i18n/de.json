@@ -161,6 +161,21 @@
   "Install Options": "Installationsoptionen",
   "System memory": "NAND Systemspeicher",
   "microSD card": "SD-Karte",
+  "Data Management": "Datenverwaltung",
+  "Storage": "Speicher",
+  "Storage Options": "Speicheroptionen",
+  "Calculating...": "Berechne...",
+  "Other": "Sonstiges",
+  "Free": "Frei",
+  "Base game": "Basisspiel",
+  "Update data": "Update-Daten",
+  "DLC": "DLC",
+  "SD + System": "SD + System",
+  "Only list games that have content installed on the selected storage.": "Zeigt nur Spiele an, die Inhalte auf dem gewählten Speicher haben.",
+  "Rebuild cache": "Cache neu aufbauen",
+  "Looks for new or removed games. Sizes are only recalculated for games whose content has changed.": "Sucht nach neuen oder entfernten Spielen. Die Größe wird nur für Spiele neu berechnet, deren Inhalt sich geändert hat.",
+  "Discards the saved sizes and measures every game again from scratch.": "Verwirft die gespeicherten Größen und misst jedes Spiel erneut.",
+  "See how much space each game uses on the microSD card and in system memory. Games are listed largest first, so it's easy to find what to remove.": "Zeigt an, wie viel Speicherplatz jedes Spiel auf der SD-Karte und im Systemspeicher belegt. Die größten Spiele stehen oben, so ist schnell zu sehen, was sich zu löschen lohnt.",
   "Enable sysmmc": "sysMMC aktivieren",
   "Enables installing whilst in sysMMC mode.": "Ermöglicht die Installation im sysMMC-Modus.",
   "Enable emummc": "emuMMC aktivieren",
@@ -410,6 +425,16 @@
     "Angeschlossene Geräte können im FileBrowser verwendet werden und dienen als Backup-Speicherort beim Sichern von Spielen und Spielständen."
   ],
   "HDD write protect": "HDD Schreibschutz",
+  "Show system files": "Systemdateien anzeigen",
+  "hdd_show_system_files_info": [
+    "Nur NTFS. Zeigt Einträge an, die Windows als Systemdateien markiert hat, z. B. $Recycle.Bin. ",
+    "Lass dies deaktiviert, wenn du nicht genau weißt, was du tust."
+  ],
+  "Mount hibernated NTFS": "Ruhezustand-NTFS einbinden",
+  "hdd_ignore_hibernation_info": [
+    "Nur NTFS. Bindet ein Laufwerk ein, das Windows im Ruhezustand hinterlassen hat (Schnellstart). ",
+    "ACHTUNG: Die gespeicherte Windows-Sitzung auf diesem Laufwerk geht dabei verloren."
+  ],
   "Makes the connected HDD read-only.": "Macht den verbundenen HDD schreibgeschützt.",
   "Installing is disabled, enable now?": "Die Installation ist deaktiviert. Jetzt aktivieren?",
   "WARNING: Installing apps will lead to a ban!": "ACHTUNG: Die Installation von Apps führt zu einem Verbot!",

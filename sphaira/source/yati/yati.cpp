@@ -369,6 +369,14 @@ struct Yati {
     std::unique_ptr<container::Base> container{};
     Config config{};
     keys::Keys keys{};
+
+    // tracks what Setup() actually managed to acquire. these services are
+    // refcounted process wide and other parts of sphaira (the game menu, the
+    // game:/ devoptab, ...) hold them at the same time, so releasing one that
+    // we never acquired would close the session out from under them.
+    bool spl_crypto_init{};
+    bool ns_init{};
+    bool es_init{};
 };
 
 auto ThreadData::GetResults() volatile -> Result {
@@ -866,9 +874,21 @@ Yati::Yati(ui::ProgressBox* _pbox, source::Base* _source) : pbox{_pbox}, source{
 }
 
 Yati::~Yati() {
-    splCryptoExit();
-    ns::Exit();
-    es::Exit();
+    // released in reverse order of acquisition, and only what Setup() got as
+    // far as acquiring, see the comment on the flags.
+    // note: the ncm handles below don't need the same treatment, they are
+    // zero initialised and closing an unopened one is a no-op.
+    if (es_init) {
+        es::Exit();
+    }
+
+    if (ns_init) {
+        ns::Exit();
+    }
+
+    if (spl_crypto_init) {
+        splCryptoExit();
+    }
 
     for (size_t i = 0; i < std::size(NCM_STORAGE_IDS); i++) {
         ncmContentMetaDatabaseClose(std::addressof(ncm_db[i]));
@@ -902,9 +922,15 @@ Result Yati::Setup(const ConfigOverride& override) {
     storage_id = config.sd_card_install ? NcmStorageId_SdCard : NcmStorageId_BuiltInUser;
 
     R_TRY(source->GetOpenResult());
+
     R_TRY(splCryptoInitialize());
+    spl_crypto_init = true;
+
     R_TRY(ns::Initialize());
+    ns_init = true;
+
     R_TRY(es::Initialize());
+    es_init = true;
 
     for (size_t i = 0; i < std::size(NCM_STORAGE_IDS); i++) {
         R_TRY(ncmOpenContentMetaDatabase(std::addressof(ncm_db[i]), NCM_STORAGE_IDS[i]));
