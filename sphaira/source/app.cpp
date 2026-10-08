@@ -5,6 +5,7 @@
 #include "ui/progress_box.hpp"
 #include "ui/error_box.hpp"
 
+#include "ui/menus/album_menu.hpp"
 #include "ui/menus/main_menu.hpp"
 
 #include "app.hpp"
@@ -359,7 +360,8 @@ void appplet_hook_calback(AppletHookType type, void *param) {
 
         case AppletHookType_OnAlbumScreenShotTaken:
             log_write("[APPLET] AppletHookType_OnAlbumScreenShotTaken\n");
-            // App::Notify("AppletHookType_OnAlbumScreenShotTaken");
+            // so that an open album menu picks the new capture up.
+            ui::menu::album::SignalChange();
             break;
 
         case AppletHookType_RequestToDisplay:
@@ -587,6 +589,11 @@ void App::Loop() {
                     log_write("[DownloadEventData] got event\n");
                     if (arg.callback && !arg.stoken.stop_requested()) {
                         arg.callback(arg.result);
+                    }
+                } else if constexpr(std::is_same_v<T, evman::CallbackEventData>) {
+                    log_write("[CallbackEventData] got event\n");
+                    if (arg.callback && !arg.stoken.stop_requested()) {
+                        arg.callback();
                     }
                 } else {
                     static_assert(false, "non-exhaustive visitor!");
@@ -1966,9 +1973,10 @@ App::App(const char* argv0) {
         }
     });
 
+    std::string language_name;
     {
         SCOPED_TIMESTAMP("i18n init");
-        i18n::init(GetLanguage());
+        language_name = i18n::init(GetLanguage());
     }
 
     if (App::GetLogEnable()) {
@@ -2022,22 +2030,38 @@ App::App(const char* argv0) {
     // not sure if these are meant to be deleted or not...
     {
         SCOPED_TIMESTAMP("font init");
+        PlSharedFontType standard_font_type = PlSharedFontType_Standard;
+        std::vector<PlSharedFontType> lang_fonts = {
+            PlSharedFontType_ChineseSimplified,
+            PlSharedFontType_ExtChineseSimplified,
+            PlSharedFontType_ChineseTraditional,
+            PlSharedFontType_Standard,
+        };
+        if (language_name == "zh-Hans")
+        {
+            standard_font_type = PlSharedFontType_ChineseSimplified;
+            std::erase(lang_fonts, PlSharedFontType_ChineseSimplified);
+        }
+        else if (language_name == "zh-Hant")
+        {
+            standard_font_type = PlSharedFontType_ChineseTraditional;
+            std::erase(lang_fonts, PlSharedFontType_ChineseTraditional);
+        }
+        else
+        {
+            std::erase(lang_fonts, PlSharedFontType_Standard);
+        }
+        lang_fonts.push_back(PlSharedFontType_KO);
+
         PlFontData font_standard, font_extended, font_lang;
-        plGetSharedFontByType(&font_standard, PlSharedFontType_Standard);
+        plGetSharedFontByType(&font_standard, standard_font_type);
         plGetSharedFontByType(&font_extended, PlSharedFontType_NintendoExt);
 
         auto standard_font = nvgCreateFontMem(this->vg, "Standard", (unsigned char*)font_standard.address, font_standard.size, 0);
         auto extended_font = nvgCreateFontMem(this->vg, "Extended", (unsigned char*)font_extended.address, font_extended.size, 0);
         nvgAddFallbackFontId(this->vg, standard_font, extended_font);
 
-        constexpr PlSharedFontType lang_font[] = {
-            PlSharedFontType_ChineseSimplified,
-            PlSharedFontType_ExtChineseSimplified,
-            PlSharedFontType_ChineseTraditional,
-            PlSharedFontType_KO,
-        };
-
-        for (auto type : lang_font) {
+        for (auto type : lang_fonts) {
             if (R_SUCCEEDED(plGetSharedFontByType(&font_lang, type))) {
                 char name[32];
                 std::snprintf(name, sizeof(name), "Lang_%u", font_lang.type);
@@ -2244,6 +2268,12 @@ void App::DisplayAdvancedOptions(bool left_side) {
         i18n::get("transfer_boost_info",
             "Enables boost mode during transfers which can improve transfer speed. "
             "This sets the CPU to 1785mhz and lowers the GPU 76mhz"));
+
+    options->Add<ui::SidebarEntryBool>("Album share PIN"_i18n, App::GetApp()->m_album_web_pin,
+        i18n::get("album_web_pin_info",
+            "If enabled, browsing the album from a phone asks for the PIN shown on the console.\n\n"
+            "Leaving this off means anyone on the same network can open the album whilst it is "
+            "being shared."));
 
     options->Add<ui::SidebarEntryArray>("Text scroll speed"_i18n, text_scroll_speed_items, [](s64& index_out){
         App::SetTextScrollSpeed(index_out);

@@ -8,6 +8,7 @@
 #include "ui/scrollable_text.hpp"
 #include "ui/nvg_util.hpp"
 
+#include "ui/menus/album_menu.hpp"
 #include "ui/menus/homebrew.hpp"
 #include "ui/menus/filebrowser.hpp"
 #include "ui/menus/irs_menu.hpp"
@@ -21,6 +22,7 @@
 #include "ui/menus/save_menu.hpp"
 #include "ui/menus/storage_menu.hpp"
 #include "ui/menus/appstore.hpp"
+#include "ui/menus/ownfoil.hpp"
 
 #include "app.hpp"
 #include "log.hpp"
@@ -325,6 +327,10 @@ const MiscMenuEntry MISC_MENU_ENTRIES[] = {
         "You can backup and restore saves.\n\n"
         "Experimental support for backing up system saves is possible." },
 
+    { .name = "Album", .title = "Album", .func = MiscMenuFuncGenerator<ui::menu::album::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
+        "Browse the screenshots and clips saved on the console. "
+        "Captures can be viewed and deleted from here." },
+
     { .name = "Themezer", .title = "Themezer", .func = MiscMenuFuncGenerator<ui::menu::themezer::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
         "Download themes from themezer.net. "
         "Themes are downloaded to /themes/sphaira\n"
@@ -333,6 +339,10 @@ const MiscMenuEntry MISC_MENU_ENTRIES[] = {
     { .name = "GitHub", .title = "GitHub", .func = MiscMenuFuncGenerator<ui::menu::gh::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
         "Download releases directly from GitHub. "
         "Custom entries can be added to /config/sphaira/github" },
+
+    { .name = "Ownfoil", .title = "Ownfoil", .func = MiscMenuFuncGenerator<ui::menu::ownfoil::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
+        "Browse and install titles from a self-hosted Ownfoil server.\n\n"
+        "Internet connection required." },
 
 #ifdef ENABLE_FTPSRV
     { .name = "FTP", .title = "FTP Install", .func = MiscMenuFuncGenerator<ui::menu::ftp::Menu>, .flag = MiscMenuFlag_Install, .info =
@@ -555,21 +565,21 @@ MainMenu::MainMenu() {
 
             SidebarEntryArray::Items language_items;
             language_items.push_back("Auto"_i18n);
-            language_items.push_back("English"_i18n);
-            language_items.push_back("Japanese"_i18n);
-            language_items.push_back("French"_i18n);
-            language_items.push_back("German"_i18n);
-            language_items.push_back("Italian"_i18n);
-            language_items.push_back("Spanish"_i18n);
-            language_items.push_back("Chinese (Simplified)"_i18n);
-            language_items.push_back("Korean"_i18n);
-            language_items.push_back("Dutch"_i18n);
-            language_items.push_back("Portuguese"_i18n);
-            language_items.push_back("Russian"_i18n);
-            language_items.push_back("Chinese (Traditional)"_i18n);
-            language_items.push_back("Swedish"_i18n);
-            language_items.push_back("Vietnamese"_i18n);
-            language_items.push_back("Ukrainian"_i18n);
+            language_items.push_back("English");
+            language_items.push_back("日本語"); // Japanese
+            language_items.push_back("Français"); // French
+            language_items.push_back("Deutsch"); // German
+            language_items.push_back("Italiano"); // Italian
+            language_items.push_back("Español"); // Spanish
+            language_items.push_back("简体中文"); // Chinese (Simplified)
+            language_items.push_back("한국어"); // Korean
+            language_items.push_back("Nederlands"); // Dutch
+            language_items.push_back("Português"); // Portuguese
+            language_items.push_back("Русский"); // Russian
+            language_items.push_back("繁體中文"); // Chinese (Traditional)
+            language_items.push_back("Svenska"); // Swedish
+            language_items.push_back("Tiếng Việt"); // Vietnamese
+            language_items.push_back("Українська"); // Ukrainian
 
             // build menus info.
             std::string menus_info = "Launch one of Sphaira's menus:\n"_i18n;

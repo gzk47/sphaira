@@ -8,8 +8,13 @@
 
 namespace sphaira {
 
+// Values are the NPDM AddressSpaceType field, written straight into meta.flags.
+// The 32-bit spaces start at 0x00200000 rather than 0x08000000, which is what
+// lets homebrew map a fixed low image base; they cap total VA at 4 GiB.
 enum class ForwarderAddressSpace : u8 {
+    Bit32 = 0,
     Bit36 = 1,
+    Bit32NoAlias = 2,
     Bit39 = 3,
 };
 

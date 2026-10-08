@@ -269,8 +269,12 @@ private:
                 m_values.profile_selection = !m_values.profile_selection;
                 break;
             case Row::AddressSpace:
-                m_values.address_space = m_values.address_space == ForwarderAddressSpace::Bit36
-                    ? ForwarderAddressSpace::Bit39 : ForwarderAddressSpace::Bit36;
+                switch (m_values.address_space) {
+                    case ForwarderAddressSpace::Bit36: m_values.address_space = ForwarderAddressSpace::Bit39; break;
+                    case ForwarderAddressSpace::Bit39: m_values.address_space = ForwarderAddressSpace::Bit32; break;
+                    case ForwarderAddressSpace::Bit32: m_values.address_space = ForwarderAddressSpace::Bit32NoAlias; break;
+                    case ForwarderAddressSpace::Bit32NoAlias: m_values.address_space = ForwarderAddressSpace::Bit36; break;
+                }
                 break;
             case Row::CpuCores:
                 if (m_values.core_mode == CpuCoreMode::Four) {
@@ -422,7 +426,14 @@ private:
             case Row::Author: return m_values.author;
             case Row::Version: return m_values.version;
             case Row::ProfileSelection: return m_values.profile_selection ? "Enabled"_i18n : "Disabled"_i18n;
-            case Row::AddressSpace: return m_values.address_space == ForwarderAddressSpace::Bit36 ? "36-bit (Default)"_i18n : "39-bit"_i18n;
+            case Row::AddressSpace:
+                switch (m_values.address_space) {
+                    case ForwarderAddressSpace::Bit36: return "36-bit (Default)"_i18n;
+                    case ForwarderAddressSpace::Bit39: return "39-bit"_i18n;
+                    case ForwarderAddressSpace::Bit32: return "32-bit"_i18n;
+                    case ForwarderAddressSpace::Bit32NoAlias: return "32-bit (no alias)"_i18n;
+                }
+                return {};
             case Row::CpuCores: return m_values.core_mode == CpuCoreMode::Three ? "3 (Default)"_i18n : "4 (Advanced)"_i18n;
             case Row::Screenshot: return m_values.screenshot ? "Enabled"_i18n : "Disabled"_i18n;
             case Row::VideoCapture: return m_values.video_capture ? "Enabled"_i18n : "Disabled"_i18n;
