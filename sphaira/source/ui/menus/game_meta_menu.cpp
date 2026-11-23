@@ -98,9 +98,11 @@ Menu::Menu(Entry& entry) : MenuBase{entry.GetName(), MenuFlag_None}, m_entry{ent
                     DumpGames(false);
                 });
 
+#ifdef ENABLE_NSZ
                 options->Add<SidebarEntryCallback>("Export NSZ"_i18n, [this](){
                     DumpGames(true);
                 });
+#endif // ENABLE_NSZ
 
                 options->Add<SidebarEntryCallback>("Export options"_i18n, [this](){
                     App::DisplayDumpOptions(false);
@@ -117,7 +119,7 @@ Menu::Menu(Entry& entry) : MenuBase{entry.GetName(), MenuFlag_None}, m_entry{ent
                     );
                 }, true);
 
-                if (ncm::HasRequiredSystemVersion(GetEntry().status.meta_type)) {
+                if (platform::SupportsContentMetaEdit && ncm::HasRequiredSystemVersion(GetEntry().status.meta_type)) {
                     options->Add<SidebarEntryCallback>("Reset required system version"_i18n, [this](){
                         App::Push<OptionBox>(
                             "Are you sure you want to reset required system version?"_i18n,
@@ -400,7 +402,7 @@ Result Menu::GetNcmSizeOfMetaStatus(MetaEntry& entry) const {
                 // fallback to ns
                 std::vector<u8> buf(sizeof(NsApplicationControlData));
                 u64 actual_size;
-                if (R_SUCCEEDED(nsGetApplicationControlData(NsApplicationControlSource_Storage, meta.app_id, (NsApplicationControlData*)buf.data(), buf.size(), &actual_size))) {
+                if (R_SUCCEEDED(ns::GetApplicationControlData(NsApplicationControlSource_Storage, meta.app_id, (NsApplicationControlData*)buf.data(), &actual_size))) {
                     has_nacp = true;
                     std::memcpy(&entry.nacp, buf.data() + MINI_NACP_OFFSET, sizeof(entry.nacp));
                 }
@@ -417,7 +419,7 @@ Result Menu::GetNcmSizeOfMetaStatus(MetaEntry& entry) const {
 
         if (!es::IsRightsIdValid(rights_id.rights_id)) {
             // todo: check if this gets the key gen if standard crypto is used.
-            if (R_SUCCEEDED(ncmContentStorageGetRightsIdFromContentId(meta.cs, &rights_id, &info.content_id, FsContentAttributes_All))) {
+            if (R_SUCCEEDED(ncmContentStorageGetRightsIdFromContentId(meta.cs, &rights_id, &info.content_id, static_cast<FsContentAttributes>(info.attr & FsContentAttributes_All)))) {
                 entry.key_gen = std::max(entry.key_gen, rights_id.key_generation);
             }
         }

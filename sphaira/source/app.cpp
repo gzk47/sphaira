@@ -219,6 +219,66 @@ Mutex g_screen_toggle_mutex{};
 u32 g_screen_toggle_ref_count{};
 bool g_screen_disabled{};
 
+// SetBoostMode(). on Switch 2 FastLoad drops the gpu to its minimum and
+// CancelCpuBoostMode doesn't undo it, so the end of a boost is checked against
+// the performance configuration from before it.
+bool g_boost_active{};
+u32 g_boost_from{};
+AppletOperationMode g_boost_operation{};
+bool g_boost_broken{};
+
+auto GetPerformanceConfiguration() -> u32 {
+    u32 configuration{};
+    appletGetCurrentPerformanceConfiguration(&configuration);
+    return configuration;
+}
+
+// waits up to 100ms for the system to apply it.
+auto IsBoostRestored() -> bool {
+    for (int i = 0; i < 20; i++) {
+        // docking changes the configuration too, the boost is over then.
+        if (appletGetOperationMode() != g_boost_operation || GetPerformanceConfiguration() == g_boost_from) {
+            return true;
+        }
+        svcSleepThread(5'000'000);
+    }
+    return false;
+}
+
+void BeginBoost() {
+    if (platform::IsSwitch2) {
+        if (g_boost_broken) {
+            return;
+        }
+        g_boost_from = GetPerformanceConfiguration();
+        g_boost_operation = appletGetOperationMode();
+    }
+
+    g_boost_active = R_SUCCEEDED(appletSetCpuBoostMode(ApmCpuBoostMode_FastLoad));
+}
+
+void EndBoost() {
+    if (!g_boost_active) {
+        return;
+    }
+    g_boost_active = false;
+
+    const auto rc = appletSetCpuBoostMode(ApmCpuBoostMode_Normal);
+    if (!platform::IsSwitch2 || (R_SUCCEEDED(rc) && IsBoostRestored())) {
+        return;
+    }
+
+    const auto cancel_rc = appletCancelCpuBoostMode();
+    if (R_SUCCEEDED(cancel_rc) && IsBoostRestored()) {
+        log_write("[BOOST] ended with CancelCpuBoostMode, SetCpuBoostMode(Normal): 0x%X\n", rc);
+        return;
+    }
+
+    g_boost_broken = true;
+    log_write("[BOOST] configuration stayed 0x%X (0x%X before the boost), Normal: 0x%X cancel: 0x%X, no more boosts\n",
+        GetPerformanceConfiguration(), g_boost_from, rc, cancel_rc);
+}
+
 void deko3d_error_cb(void* userData, const char* context, DkResult result, const char* message) {
     switch (result) {
         case DkResult_Success:
@@ -376,10 +436,39 @@ void appplet_hook_calback(AppletHookType type, void *param) {
     }
 }
 
+bool g_window_follows_display{};
+
+// Switch 2: the default window follows the output resolution, 1080p handheld
+// and the tv's docked. libounce updates it on docking and tv output changes.
+void ApplyDisplayModeDimensions() {
+#if defined(__SWITCH2__)
+    const auto rc = nwindowSetModeDimensions(nwindowGetDefault(), 0, 0, 0, 0);
+    if (R_FAILED(rc)) {
+        log_write("[DISPLAY] nwindowSetModeDimensions() failed: 0x%X\n", rc);
+    }
+    g_window_follows_display = R_SUCCEEDED(rc);
+#endif
+}
+
 auto GetFrameBufferSize() -> FrameBufferSize {
+    // 4K, the Switch 2's largest output.
+    constexpr u32 MAX_WIDTH = 3840;
+    constexpr u32 MAX_HEIGHT = 2160;
+
     FrameBufferSize fb{};
 
-    switch (appletGetOperationMode()) {
+    if (platform::FollowsDisplayResolution) {
+        // falls back to the 1080p of the Switch 2 screen.
+        u32 width{}, height{};
+        if (!g_window_follows_display || R_FAILED(nwindowGetDimensions(nwindowGetDefault(), &width, &height)) ||
+            width < SCREEN_WIDTH || height < SCREEN_HEIGHT || width > MAX_WIDTH || height > MAX_HEIGHT) {
+            width = 1920;
+            height = 1080;
+        }
+
+        fb.size.x = width;
+        fb.size.y = height;
+    } else switch (appletGetOperationMode()) {
         case AppletOperationMode_Handheld:
             fb.size.x = 1280;
             fb.size.y = 720;
@@ -802,6 +891,10 @@ auto App::GetReplaceHbmenuEnable() -> bool {
 }
 
 auto App::GetInstallEnable() -> bool {
+    if constexpr (!platform::SupportsInstall) {
+        return false;
+    }
+
     if (IsEmummc()) {
         return GetInstallEmummcEnable();
     } else {
@@ -971,8 +1064,11 @@ void App::SetReplaceHbmenuEnable(bool enable) {
                         rc = nro_get_nacp(sphaira_path, sphaira_nacp);
                     }
 
+                    // only copy between builds for this console, an sd card can be shared.
+                    const auto hbmenu_native = nro_is_native("/hbmenu.nro");
+
                     if (R_SUCCEEDED(rc) && !std::strcmp(NacpLanguageEntries(sphaira_nacp)[0].name, "sphaira")) {
-                        if (IsVersionNewer(sphaira_nacp.display_version, hbmenu_nacp.display_version)) {
+                        if (hbmenu_native && IsVersionNewer(sphaira_nacp.display_version, hbmenu_nacp.display_version) && nro_is_native(sphaira_path)) {
                             if (R_FAILED(rc = g_app->m_fs->copy_entire_file(sphaira_path, "/hbmenu.nro"))) {
                                 log_write("failed to copy entire file: %s 0x%X module: %u desc: %u\n", sphaira_path.s, rc, R_MODULE(rc), R_DESCRIPTION(rc));
                             } else {
@@ -982,8 +1078,10 @@ void App::SetReplaceHbmenuEnable(bool enable) {
                     } else {
                         // sphaira doesn't yet exist, create a new file.
                         sphaira_path = "/switch/sphaira/sphaira.nro";
-                        g_app->m_fs->CreateDirectoryRecursively("/switch/sphaira/");
-                        g_app->m_fs->copy_entire_file(sphaira_path, "/hbmenu.nro");
+                        if (hbmenu_native) {
+                            g_app->m_fs->CreateDirectoryRecursively("/switch/sphaira/");
+                            g_app->m_fs->copy_entire_file(sphaira_path, "/hbmenu.nro");
+                        }
                     }
 
                     // this should never fail, if it does, well then the sd card is fucked.
@@ -1150,12 +1248,34 @@ void App::ExitRestart() {
     Exit();
 }
 
+#if defined(__SWITCH2__)
+namespace {
+
+// how long the cursor shows after the joy-con mouse last moved.
+constexpr u64 JOYCON_MOUSE_SHOWN_NS = 2'000'000'000;
+
+// the click of the mouse joy-con.
+auto JoyConMouseClick(PadPointerSide side) -> u64 {
+    switch (side) {
+        case PadPointerSide_Left: return HidNpadButton_ZL;
+        case PadPointerSide_Right: return HidNpadButton_ZR;
+        default: return HidNpadButton_ZL | HidNpadButton_ZR;
+    }
+}
+
+} // namespace
+#endif
+
 void App::Poll() {
     m_controller.Reset();
 
     HidTouchScreenState state{};
     hidGetTouchScreenStates(&state, 1);
     m_touch_info.is_clicked = false;
+
+#if defined(__SWITCH2__)
+    UpdateJoyConMouse(state);
+#endif
 
     // todo:
     #if 0
@@ -1244,9 +1364,16 @@ void App::Poll() {
     if (!m_touch_info.is_touching && !m_touch_info.is_clicked) {
         // controller.
         padUpdate(&m_pad);
-        kdown |= padGetButtonsDown(&m_pad);
-        kheld |= padGetButtons(&m_pad);
-        kup |= padGetButtonsUp(&m_pad);
+        u64 claimed = 0;
+#if defined(__SWITCH2__)
+        // while the cursor shows, the mouse joy-con's trigger is the mouse's only.
+        if (IsJoyConMouseShown()) {
+            claimed = JoyConMouseClick(m_pointer.side);
+        }
+#endif
+        kdown |= padGetButtonsDown(&m_pad) & ~claimed;
+        kheld |= padGetButtons(&m_pad) & ~claimed;
+        kup |= padGetButtonsUp(&m_pad) & ~claimed;
 
         // keyboard.
         m_keyboard.Update();
@@ -1260,6 +1387,76 @@ void App::Poll() {
     m_controller.m_kup = kup;
     m_controller.UpdateButtonHeld(static_cast<u64>(Button::ANY_DIRECTION), m_delta_time);
 }
+
+#if defined(__SWITCH2__)
+// a joy-con set down on a surface is a mouse: its pointer moves a cursor and
+// its ZL or ZR is a touch at the cursor. a click counts only while the cursor
+// shows, so a joy-con in hand keeps its triggers.
+void App::UpdateJoyConMouse(HidTouchScreenState& state) {
+    if (!m_pointer_open) {
+        return;
+    }
+
+    padUpdate(&m_pointer_pad);
+    padPointerUpdate(&m_pointer, &m_pointer_pad);
+    if (!m_pointer.active) {
+        m_pointer_down = false;
+        m_pointer_moved_at = 0;
+        return;
+    }
+
+    if (m_pointer.delta_x || m_pointer.delta_y) {
+        m_pointer_moved_at = armTicksToNs(armGetSystemTick());
+    }
+
+    const auto click = JoyConMouseClick(m_pointer.side);
+    if (!(padGetButtons(&m_pointer_pad) & click)) {
+        m_pointer_down = false;
+    } else if ((padGetButtonsDown(&m_pointer_pad) & click) && IsJoyConMouseShown()) {
+        m_pointer_down = true;
+    }
+
+    if (m_pointer_down && !state.count) {
+        state.count = 1;
+        state.touches[0].x = m_pointer.x;
+        state.touches[0].y = m_pointer.y;
+    }
+}
+
+auto App::IsJoyConMouseShown() const -> bool {
+    if (!m_pointer_open || !m_pointer.active) {
+        return false;
+    }
+
+    return m_pointer_down || (m_pointer_moved_at && armTicksToNs(armGetSystemTick()) - m_pointer_moved_at < JOYCON_MOUSE_SHOWN_NS);
+}
+
+void App::DrawJoyConMouse() {
+    if (!IsJoyConMouseShown()) {
+        return;
+    }
+
+    const float x = m_pointer.x;
+    const float y = m_pointer.y;
+    nvgResetScissor(vg);
+
+    nvgBeginPath(vg);
+    nvgMoveTo(vg, x - 1.5f, y - 2.5f);
+    nvgLineTo(vg, x - 1.5f, y + 21.f);
+    nvgLineTo(vg, x + 16.f, y + 15.5f);
+    nvgClosePath(vg);
+    nvgFillColor(vg, nvgRGBA(20, 24, 32, 235));
+    nvgFill(vg);
+
+    nvgBeginPath(vg);
+    nvgMoveTo(vg, x, y);
+    nvgLineTo(vg, x, y + 17.f);
+    nvgLineTo(vg, x + 12.5f, y + 13.f);
+    nvgClosePath(vg);
+    nvgFillColor(vg, nvgRGBA(250, 252, 255, 255));
+    nvgFill(vg);
+}
+#endif
 
 void App::Update() {
     // loop background music if it has finished.
@@ -1306,7 +1503,9 @@ void App::Update() {
         m_widgets.back()->OnFocusGained();
     }
 
+#ifdef ENABLE_OWNFOIL
     ui::InstallQueue::Get().Update();
+#endif
 }
 
 void App::Draw() {
@@ -1342,8 +1541,14 @@ void App::Draw() {
         }
     }
 
+#ifdef ENABLE_OWNFOIL
     ui::InstallQueue::Get().Draw(vg, &m_theme);
+#endif
     m_notif_manager.Draw(vg, &m_theme);
+
+#if defined(__SWITCH2__)
+    DrawJoyConMouse();
+#endif
 
     nvgResetTransform(vg);
     nvgEndFrame(this->vg);
@@ -1352,6 +1557,25 @@ void App::Draw() {
 
 auto App::GetApp() -> App* {
     return g_app;
+}
+
+void App::SetBoostMode(bool enable, bool force) {
+    static Mutex mutex{};
+    static int ref_count{};
+    SCOPED_MUTEX(&mutex);
+
+    if (enable) {
+        if (!ref_count++) {
+            BeginBoost();
+        }
+    } else if (ref_count) {
+        ref_count--;
+    }
+
+    if (!ref_count || force) {
+        ref_count = 0;
+        EndBoost();
+    }
 }
 
 auto App::AcquireScreenToggle() -> bool {
@@ -1727,6 +1951,8 @@ App::App(const char* argv0) {
             else if (app->m_convert_to_standard_crypto.LoadFrom(Key, Value)) {}
             else if (app->m_lower_master_key.LoadFrom(Key, Value)) {}
             else if (app->m_lower_system_version.LoadFrom(Key, Value)) {}
+        } else if (!std::strcmp(Section, "homebrew")) {
+            app->m_show_abi_warning.LoadFrom(Key, Value);
         } else if (!std::strcmp(Section, "accessibility")) {
             if (app->m_text_scroll_speed.LoadFrom(Key, Value)) {}
         } else if (!std::strcmp(Section, "dump")) {
@@ -1832,24 +2058,26 @@ App::App(const char* argv0) {
             log_write("[version] display_version: %s\n", fw_version.display_version);
             log_write("[version] display_title: %s\n", fw_version.display_title);
 
-            splInitialize();
-            ON_SCOPE_EXIT(splExit());
+            if constexpr (platform::HasAtmosphere) {
+                splInitialize();
+                ON_SCOPE_EXIT(splExit());
 
-            u64 out{};
-            splGetConfig((SplConfigItem)65000, &out);
-            log_write("[ams] version: %lu.%lu.%lu\n", (out >> 56) & 0xFF, (out >> 48) & 0xFF, (out >> 40) & 0xFF);
-            log_write("[ams] target version: %lu.%lu.%lu\n", (out >> 24) & 0xFF, (out >> 16) & 0xFF, (out >> 8) & 0xFF);
-            log_write("[ams] key gen: %lu\n", (out >> 32) & 0xFF);
+                u64 out{};
+                splGetConfig((SplConfigItem)65000, &out);
+                log_write("[ams] version: %lu.%lu.%lu\n", (out >> 56) & 0xFF, (out >> 48) & 0xFF, (out >> 40) & 0xFF);
+                log_write("[ams] target version: %lu.%lu.%lu\n", (out >> 24) & 0xFF, (out >> 16) & 0xFF, (out >> 8) & 0xFF);
+                log_write("[ams] key gen: %lu\n", (out >> 32) & 0xFF);
 
-            splGetConfig((SplConfigItem)65003, &out);
-            log_write("[ams] hash: %lx\n", out);
+                splGetConfig((SplConfigItem)65003, &out);
+                log_write("[ams] hash: %lx\n", out);
 
-            splGetConfig((SplConfigItem)65010, &out);
-            log_write("[ams] usb 3.0 enabled: %lu\n", out);
+                splGetConfig((SplConfigItem)65010, &out);
+                log_write("[ams] usb 3.0 enabled: %lu\n", out);
+            }
         }
 
-        // get emummc config.
-        {
+        // get emummc config. the smc would end the process on Switch 2.
+        if constexpr (platform::HasAtmosphere) {
             SCOPED_TIMESTAMP("emummc detect init");
             alignas(0x1000) AmsEmummcPaths paths{};
             SecmonArgs args{};
@@ -1857,7 +2085,16 @@ App::App(const char* argv0) {
             args.X[1] = 0; /* EXO_EMUMMC_MMC_NAND*/
             args.X[2] = (u64)&paths; /* out path */
             svcCallSecureMonitor(&args);
-            m_emummc_paths = paths;
+
+            // exosphere copies the nintendo path for every type, including none,
+            // so only keep the paths if emummc is actually active.
+            // x1 holds the base config: magic (EFS0) in the low and the type in the high 32 bits.
+            const u32 magic = static_cast<u32>(args.X[1]);
+            const u32 type = static_cast<u32>(args.X[1] >> 32);
+            log_write("[emummc] result: 0x%lX magic: 0x%X type: %u\n", args.X[0], magic, type);
+            if (args.X[0] == 0 && magic == 0x30534645 && type != 0) {
+                m_emummc_paths = paths;
+            }
 
             log_write("[emummc] enabled: %u\n", App::IsEmummc());
             if (App::IsEmummc()) {
@@ -1986,6 +2223,16 @@ App::App(const char* argv0) {
             // padInitializeDefault(&m_pad);
             padInitializeAny(&m_pad);
 
+#if defined(__SWITCH2__)
+            // read every frame, also while a touch holds m_pad.
+            padInitializeAny(&m_pointer_pad);
+            const auto rc = padPointerInitialize(&m_pointer, SCREEN_WIDTH, SCREEN_HEIGHT);
+            if (R_FAILED(rc)) {
+                log_write("[HID] padPointerInitialize() failed: 0x%X\n", rc);
+            }
+            m_pointer_open = R_SUCCEEDED(rc);
+#endif
+
             m_keyboard.Init(KEYBOARD_BUTTON_MAP);
         }
 
@@ -2027,6 +2274,10 @@ App::App(const char* argv0) {
     // get current size of the framebuffer
     {
         SCOPED_TIMESTAMP("nvg init");
+        if (platform::FollowsDisplayResolution) {
+            ApplyDisplayModeDimensions();
+        }
+
         const auto fb = GetFrameBufferSize();
         s_width = fb.size.x;
         s_height = fb.size.y;
@@ -2226,7 +2477,7 @@ void App::DisplayMenuOptions(bool left_side) {
         }
     }
 
-    if (App::IsApplication()) {
+    if (platform::SupportsWebApplet && App::IsApplication()) {
         options->Add<ui::SidebarEntryCallback>("Web"_i18n, [](){
             // add some default entries, will use a config file soon so users can set their own.
             ui::PopupList::Items items;
@@ -2282,6 +2533,11 @@ void App::DisplayAdvancedOptions(bool left_side) {
     options->Add<ui::SidebarEntryBool>("Logging"_i18n, App::GetLogEnable(), [](bool& enable){
         App::SetLogEnable(enable);
     }, "Logs to /config/sphaira/log.txt"_i18n);
+
+    if (platform::ShowsAbiWarning) {
+        options->Add<ui::SidebarEntryBool>("Show ABI warning"_i18n, App::GetApp()->m_show_abi_warning,
+            "Shows a warning for homebrew built for an older ABI. These applications may have compatibility issues."_i18n);
+    }
 
     options->Add<ui::SidebarEntryBool>("Replace hbmenu on exit"_i18n, App::GetReplaceHbmenuEnable(), [](bool& enable){
         App::SetReplaceHbmenuEnable(enable);
@@ -2369,11 +2625,13 @@ void App::DisplayAdvancedOptions(bool left_side) {
         }
     }, i18n::get(g_app->m_right_menu.Get()), "Set the menu that appears on the right tab."_i18n);
 
-    options->Add<ui::SidebarEntryCallback>("Install options"_i18n, [left_side](){
-        App::DisplayInstallOptions(left_side);
-    },  i18n::get("install_options_info",
-            "Change the install options.\n"
-            "You can enable installing from here."));
+    if (platform::SupportsInstall) {
+        options->Add<ui::SidebarEntryCallback>("Install options"_i18n, [left_side](){
+            App::DisplayInstallOptions(left_side);
+        },  i18n::get("install_options_info",
+                "Change the install options.\n"
+                "You can enable installing from here."));
+    }
 
     options->Add<ui::SidebarEntryCallback>("Export options"_i18n, [left_side](){
         App::DisplayDumpOptions(left_side);
@@ -2479,6 +2737,7 @@ void App::DisplayDumpOptions(bool left_side) {
     auto options = std::make_unique<ui::Sidebar>("Export Options"_i18n, left_side ? ui::Sidebar::Side::LEFT : ui::Sidebar::Side::RIGHT);
     ON_SCOPE_EXIT(App::Push(std::move(options)));
 
+#ifdef ENABLE_NSZ
     ui::SidebarEntryArray::Items nsz_level_items;
     for (auto& e : NSZ_COMPRESS_LEVEL_OPTIONS) {
         nsz_level_items.emplace_back(i18n::get(e.name));
@@ -2493,6 +2752,7 @@ void App::DisplayDumpOptions(bool left_side) {
     for (auto& e : NSZ_COMPRESS_BLOCK_OPTIONS) {
         nsz_block_items.emplace_back(i18n::get(e.name));
     }
+#endif // ENABLE_NSZ
 
     options->Add<ui::SidebarEntryBool>(
         "Fix export filenames"_i18n, App::GetApp()->m_dump_fix_filenames,
@@ -2509,28 +2769,33 @@ void App::DisplayDumpOptions(bool left_side) {
             "Disabling this would use /name.xci"
         )
     );
-    options->Add<ui::SidebarEntryBool>(
-        "Append folder with .xci"_i18n, App::GetApp()->m_dump_append_folder_with_xci,
-        i18n::get("xci_folder_info",
-            "XCI dumps will name the folder with the .xci extension.\n"
-            "For example, /name.xci/name.xci\n\n"
-            "Some devices only function is the xci folder is named exactly the same as the xci."
-        )
-    );
-    options->Add<ui::SidebarEntryBool>(
-        "Trim XCI"_i18n, App::GetApp()->m_dump_trim_xci,
-        "Removes the unused data at the end of the XCI, making the output smaller."_i18n
-    );
-    options->Add<ui::SidebarEntryBool>(
-        "Label trimmed XCI"_i18n, App::GetApp()->m_dump_label_trim_xci,
-        "Names the trimmed xci.\n"
-        "For example, /name/name (trimmed).xci"_i18n
-    );
-    options->Add<ui::SidebarEntryBool>(
-        "Convert to common ticket"_i18n, App::GetApp()->m_dump_convert_to_common_ticket,
-        "Converts personalised ticket to a fake common ticket."_i18n
-    );
+    if (platform::SupportsGameCard) {
+        options->Add<ui::SidebarEntryBool>(
+            "Append folder with .xci"_i18n, App::GetApp()->m_dump_append_folder_with_xci,
+            i18n::get("xci_folder_info",
+                "XCI dumps will name the folder with the .xci extension.\n"
+                "For example, /name.xci/name.xci\n\n"
+                "Some devices only function is the xci folder is named exactly the same as the xci."
+            )
+        );
+        options->Add<ui::SidebarEntryBool>(
+            "Trim XCI"_i18n, App::GetApp()->m_dump_trim_xci,
+            "Removes the unused data at the end of the XCI, making the output smaller."_i18n
+        );
+        options->Add<ui::SidebarEntryBool>(
+            "Label trimmed XCI"_i18n, App::GetApp()->m_dump_label_trim_xci,
+            "Names the trimmed xci.\n"
+            "For example, /name/name (trimmed).xci"_i18n
+        );
+    }
+    if (platform::SupportsKeyDerivation) {
+        options->Add<ui::SidebarEntryBool>(
+            "Convert to common ticket"_i18n, App::GetApp()->m_dump_convert_to_common_ticket,
+            "Converts personalised ticket to a fake common ticket."_i18n
+        );
+    }
 
+#ifdef ENABLE_NSZ
     options->Add<ui::SidebarEntryArray>("NSZ level"_i18n, nsz_level_items, [](s64& index_out){
         App::GetApp()->m_nsz_compress_level.Set(index_out);
     }, App::GetApp()->m_nsz_compress_level.Get(),
@@ -2574,6 +2839,7 @@ void App::DisplayDumpOptions(bool left_side) {
         "Sets the size of each block. The smaller the size, the faster the random access is at the cost of compression ratio."_i18n
     );
     block_size_option->Depends(App::GetApp()->m_nsz_compress_block, "NSZ block compression is disabled."_i18n);
+#endif // ENABLE_NSZ
 }
 
 void App::DisplayFtpOptions(bool left_side) {
@@ -2630,42 +2896,55 @@ void App::DisplayFtpOptions(bool left_side) {
         "Shows the microSD card album folder."_i18n
     );
 
-    options->Add<ui::SidebarEntryBool>(
-        "Show Atmosphere contents"_i18n, App::GetApp()->m_ftp_show_ams_contents,
-        "Shows the shortcut for the /atmosphere/contents folder."_i18n
-    );
+    if (platform::HasAtmosphere) {
+        options->Add<ui::SidebarEntryBool>(
+            "Show Atmosphere contents"_i18n, App::GetApp()->m_ftp_show_ams_contents,
+            "Shows the shortcut for the /atmosphere/contents folder."_i18n
+        );
+    }
 
-    options->Add<ui::SidebarEntryBool>(
-        "Show bis storage"_i18n, App::GetApp()->m_ftp_show_bis_storage,
-        i18n::get("bis_contents_info",
-            "Shows the bis folder which contains the following:\n"
-            "- BootPartition1Root.bin\n"
-            "- BootPartition2Root.bin\n"
-            "- UserDataRoot.bin\n"
-            "- BootConfigAndPackage2Part1.bin\n"
-            "- BootConfigAndPackage2Part2.bin\n"
-            "- BootConfigAndPackage2Part3.bin\n"
-            "- BootConfigAndPackage2Part4.bin\n"
-            "- BootConfigAndPackage2Part5.bin\n"
-            "- BootConfigAndPackage2Part6.bin\n"
-            "- CalibrationFile.bin\n"
-            "- SafeMode.bin\n"
-            "- User.bin\n"
-            "- System.bin\n"
-            "- SystemProperEncryption.bin"
-        )
-    );
+    if (platform::SupportsAllNandPartitions) {
+        options->Add<ui::SidebarEntryBool>(
+            "Show bis storage"_i18n, App::GetApp()->m_ftp_show_bis_storage,
+            i18n::get("bis_contents_info",
+                "Shows the bis folder which contains the following:\n"
+                "- BootPartition1Root.bin\n"
+                "- BootPartition2Root.bin\n"
+                "- UserDataRoot.bin\n"
+                "- BootConfigAndPackage2Part1.bin\n"
+                "- BootConfigAndPackage2Part2.bin\n"
+                "- BootConfigAndPackage2Part3.bin\n"
+                "- BootConfigAndPackage2Part4.bin\n"
+                "- BootConfigAndPackage2Part5.bin\n"
+                "- BootConfigAndPackage2Part6.bin\n"
+                "- CalibrationFile.bin\n"
+                "- SafeMode.bin\n"
+                "- User.bin\n"
+                "- System.bin\n"
+                "- SystemProperEncryption.bin"
+            )
+        );
 
-    options->Add<ui::SidebarEntryBool>(
-        "Show bis file systems"_i18n, App::GetApp()->m_ftp_show_bis_fs,
-        i18n::get("bis_fs_info",
-            "Shows the following bis file systems:\n"
-            "- bis_calibration_file\n"
-            "- bis_safe_mode\n"
-            "- bis_user\n"
-            "- bis_system"
-        )
-    );
+        options->Add<ui::SidebarEntryBool>(
+            "Show bis file systems"_i18n, App::GetApp()->m_ftp_show_bis_fs,
+            i18n::get("bis_fs_info",
+                "Shows the following bis file systems:\n"
+                "- bis_calibration_file\n"
+                "- bis_safe_mode\n"
+                "- bis_user\n"
+                "- bis_system"
+            )
+        );
+    } else {
+        options->Add<ui::SidebarEntryBool>(
+            "Show bis file systems"_i18n, App::GetApp()->m_ftp_show_bis_fs,
+            i18n::get("bis_fs_user_system_info",
+                "Shows the following bis file systems:\n"
+                "- bis_user\n"
+                "- bis_system"
+            )
+        );
+    }
 
     options->Add<ui::SidebarEntryBool>(
         "Show system contents"_i18n, App::GetApp()->m_ftp_show_content_system,
@@ -2696,14 +2975,16 @@ void App::DisplayFtpOptions(bool left_side) {
         )
     );
 
-    options->Add<ui::SidebarEntryBool>(
-        "Show install"_i18n, App::GetApp()->m_ftp_show_install,
-        i18n::get("install_ftp_info",
-            "Shows the install folder.\n\n"
-            "This folder is used for installing games via FTP.\n\n"
-            "NOTE: You must open the \"FTP Install\" menu when trying to install a game!"
-        )
-    );
+    if (platform::SupportsInstall) {
+        options->Add<ui::SidebarEntryBool>(
+            "Show install"_i18n, App::GetApp()->m_ftp_show_install,
+            i18n::get("install_ftp_info",
+                "Shows the install folder.\n\n"
+                "This folder is used for installing games via FTP.\n\n"
+                "NOTE: You must open the \"FTP Install\" menu when trying to install a game!"
+            )
+        );
+    }
 
     options->Add<ui::SidebarEntryBool>(
         "Show mounts"_i18n, App::GetApp()->m_ftp_show_mounts,
@@ -2791,14 +3072,16 @@ void App::DisplayMtpOptions(bool left_side) {
         )
     );
 
-    options->Add<ui::SidebarEntryBool>(
-        "Show install"_i18n, App::GetApp()->m_mtp_show_install,
-        i18n::get("install_mtp_info",
-            "Shows the install folder.\n\n"
-            "This folder is used for installing games via MTP.\n\n"
-            "NOTE: You must open the \"MTP Install\" menu when trying to install a game!"
-        )
-    );
+    if (platform::SupportsInstall) {
+        options->Add<ui::SidebarEntryBool>(
+            "Show install"_i18n, App::GetApp()->m_mtp_show_install,
+            i18n::get("install_mtp_info",
+                "Shows the install folder.\n\n"
+                "This folder is used for installing games via MTP.\n\n"
+                "NOTE: You must open the \"MTP Install\" menu when trying to install a game!"
+            )
+        );
+    }
 
     options->Add<ui::SidebarEntryBool>(
         "Show mounts"_i18n, App::GetApp()->m_mtp_show_mounts,
@@ -2855,6 +3138,11 @@ void App::DisplayHddOptions(bool left_side) {
 }
 
 void App::ShowEnableInstallPrompt() {
+    if constexpr (!platform::SupportsInstall) {
+        App::Push<ui::OptionBox>("Installing is not supported on Switch 2"_i18n, "OK"_i18n);
+        return;
+    }
+
     // warn the user the dangers of installing.
     App::Push<ui::OptionBox>(
         "Installing is disabled, enable now?"_i18n,
@@ -2902,10 +3190,12 @@ App::~App() {
         appletUnhook(&m_appletHookCookie);
 
         // stop a background install before the services it uses go away.
+#ifdef ENABLE_OWNFOIL
         {
             SCOPED_TIMESTAMP("install queue exit");
             ui::InstallQueue::Get().Shutdown();
         }
+#endif
 
         // async exit as these threads sleep every 100ms.
         {
@@ -2947,6 +3237,15 @@ App::~App() {
                 libhaze::Exit();
             }
 #endif // ENABLE_LIBHAZE
+
+#if defined(__SWITCH2__)
+            // the next homebrew runs in this process, and hid would keep writing
+            // to the joy-con mouse memory.
+            if (m_pointer_open) {
+                SCOPED_TIMESTAMP("joy-con mouse exit");
+                padPointerExit(&m_pointer);
+            }
+#endif
 
 #ifdef ENABLE_LIBUSBHSFS
             {
@@ -3050,7 +3349,7 @@ App::~App() {
                     }
 
                     // found sphaira, now lets get compare version
-                    if (R_SUCCEEDED(rc) && !std::strcmp(NacpLanguageEntries(sphaira_nacp)[0].name, "sphaira")) {
+                    if (R_SUCCEEDED(rc) && !std::strcmp(NacpLanguageEntries(sphaira_nacp)[0].name, "sphaira") && nro_is_native(sphaira_path)) {
                         if (IsVersionNewer(hbmenu_nacp.display_version, sphaira_nacp.display_version)) {
                             if (R_FAILED(rc = m_fs->copy_entire_file(GetExePath(), sphaira_path))) {
                                 log_write("failed to copy entire file: %s 0x%X module: %u desc: %u\n", sphaira_path.s, rc, R_MODULE(rc), R_DESCRIPTION(rc));

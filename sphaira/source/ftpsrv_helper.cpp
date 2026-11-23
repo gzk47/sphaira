@@ -623,13 +623,14 @@ bool Init() {
     std::strncpy(g_ftpsrv_config.pass, app->m_ftp_pass.Get().c_str(), sizeof(g_ftpsrv_config.pass) - 1);
     g_ftpsrv_config.port = app->m_ftp_port.Get();
 
+    // a config from the other console can have options set that are hidden here.
     if (app->m_ftp_show_album.Get()) {
         g_ftpsrv_mount_flags |= VfsNxMountFlag_ALBUM;
     }
-    if (app->m_ftp_show_ams_contents.Get()) {
+    if (platform::HasAtmosphere && app->m_ftp_show_ams_contents.Get()) {
         g_ftpsrv_mount_flags |= VfsNxMountFlag_AMS_CONTENTS;
     }
-    if (app->m_ftp_show_bis_storage.Get()) {
+    if (platform::SupportsAllNandPartitions && app->m_ftp_show_bis_storage.Get()) {
         g_ftpsrv_mount_flags |= VfsNxMountFlag_BIS_STORAGE;
     }
     if (app->m_ftp_show_bis_fs.Get()) {
@@ -659,7 +660,7 @@ bool Init() {
         g_ftpsrv_mount_flags |= VfsNxMountFlag_SWITCH;
     }
 
-    if (app->m_ftp_show_install.Get()) {
+    if (platform::SupportsInstall && app->m_ftp_show_install.Get()) {
         g_custom_vfs.push_back({
             .name = "install",
             .user = &g_shared_data,

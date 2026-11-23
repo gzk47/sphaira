@@ -30,6 +30,8 @@
 #include "download.hpp"
 #include "defines.hpp"
 #include "i18n.hpp"
+#include "nro.hpp"
+#include "platform.hpp"
 #include "threaded_file_transfer.hpp"
 #include "nacp_compat.hpp"
 
@@ -301,6 +303,7 @@ auto MiscMenuFuncGenerator(u32 flags) {
     return std::make_unique<T>(flags);
 }
 
+// GetMenuMenuEntries() leaves out the ones the platform does not support.
 const MiscMenuEntry MISC_MENU_ENTRIES[] = {
     { .name = "Homebrew", .title = "Homebrew", .func = MiscMenuFuncGenerator<ui::menu::homebrew::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
         "The homebrew menu.\n\n"
@@ -341,9 +344,11 @@ const MiscMenuEntry MISC_MENU_ENTRIES[] = {
         "Download releases directly from GitHub. "
         "Custom entries can be added to /config/sphaira/github" },
 
+#ifdef ENABLE_OWNFOIL
     { .name = "Ownfoil", .title = "Ownfoil", .func = MiscMenuFuncGenerator<ui::menu::ownfoil::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
         "Browse and install titles from a self-hosted Ownfoil server.\n\n"
         "Internet connection required." },
+#endif // ENABLE_OWNFOIL
 
 #ifdef ENABLE_FTPSRV
     { .name = "FTP", .title = "FTP Install", .func = MiscMenuFuncGenerator<ui::menu::ftp::Menu>, .flag = MiscMenuFlag_Install, .info =
@@ -368,6 +373,33 @@ const MiscMenuEntry MISC_MENU_ENTRIES[] = {
     { .name = "IRS", .title = "IRS (Infrared Joycon Camera)", .func = MiscMenuFuncGenerator<ui::menu::irs::Menu>, .flag = MiscMenuFlag_Shortcut, .info =
         "InfraRed Sensor (IRS) is the small camera found on right JoyCon." },
 };
+
+auto IsMenuSupported(const MiscMenuEntry& e) -> bool {
+    const std::string_view name{e.name};
+
+    if (e.IsInstall() && !platform::SupportsInstall) {
+        return false;
+    } else if (name == "Themezer") {
+        return platform::SupportsThemezer;
+    } else if (name == "USB") {
+        return platform::SupportsUsbInstall;
+    } else if (name == "GameCard") {
+        return platform::SupportsGameCard;
+    } else if (name == "IRS") {
+        return platform::SupportsIrs;
+    }
+
+    return true;
+}
+
+auto CreateMenuByName(std::string_view name, u32 flags) -> std::unique_ptr<MenuBase> {
+    for (auto& e : GetMenuMenuEntries()) {
+        if (e.name == name) {
+            return e.func(flags);
+        }
+    }
+    return {};
+}
 
 auto InstallUpdate(ProgressBox* pbox, const std::string url, const std::string version) -> Result {
     static const fs::FsPath zip_out{"/switch/sphaira/cache/update.zip"};
@@ -405,11 +437,13 @@ auto InstallUpdate(ProgressBox* pbox, const std::string url, const std::string v
     R_TRY(pbox->ShouldExitResult());
 
     // 2. Extract only sphaira.nro from archives. Other release files cannot
-    // write to arbitrary SD-card paths during self-update.
+    // write to arbitrary SD-card paths during self-update. sphaira.zip has the
+    // Switch 2 build in its nx2 folder, see build_release.sh.
     bool found_exe{direct_nro};
     if (!direct_nro) {
         R_TRY(thread::TransferUnzipAll(pbox, zip_out, &fs, "/", [&](const fs::FsPath& name, fs::FsPath& path) -> bool {
-            if (name.ends_with("sphaira.nro")) {
+            const bool switch2_build = name.starts_with("nx2/");
+            if (switch2_build == platform::IsSwitch2 && name.ends_with("sphaira.nro")) {
                 path = staged_nro;
                 found_exe = true;
                 return true;
@@ -427,6 +461,9 @@ auto InstallUpdate(ProgressBox* pbox, const std::string url, const std::string v
     const auto expected_version = App::GetVersionFromString(version.c_str());
     const auto staged_version = App::GetVersionFromString(staged_nacp.display_version);
     R_UNLESS(staged_version && (!expected_version || staged_version == expected_version), Result_MainDownloadedUpdateInvalid);
+
+    // never install the other console's build.
+    R_UNLESS(nro_is_native(staged_nro), Result_MainDownloadedUpdateInvalid);
 
     // 4. Keep a recovery copy while replacing the running NRO.
     pbox->NewTransfer("Backing up current version"_i18n);
@@ -461,14 +498,14 @@ auto InstallUpdate(ProgressBox* pbox, const std::string url, const std::string v
     fs.DeleteFile(backup_nro);
 
     // 5. Update known secondary installations, but only when their NACP
-    // identifies them as Sphaira.
+    // identifies them as Sphaira and they are built for this console.
     for (const auto& path : SPHAIRA_PATHS) {
         if (exe_path == path) {
             continue;
         }
         NacpStruct nacp{};
         if (R_SUCCEEDED(nro_get_nacp(path, nacp))) {
-            if (IsSphairaNacp(nacp)) {
+            if (IsSphairaNacp(nacp) && nro_is_native(path)) {
                 pbox->NewTransfer(path);
                 const auto secondary_result = pbox->CopyFile(&fs, staged_nro, path);
                 if (R_FAILED(secondary_result)) {
@@ -531,27 +568,41 @@ auto CreateRightSideMenu(std::string_view left_name) -> std::unique_ptr<MenuBase
     // handle if the user tries to mount the same menu twice.
     if (name == left_name) {
         // check if we can mount the default.
-        if (left_name != "AppStore") {
-            return std::make_unique<ui::menu::appstore::Menu>(MenuFlag_Tab);
-        } else {
-            // otherwise, fallback to left side default.
-            return std::make_unique<ui::menu::filebrowser::Menu>(MenuFlag_Tab);
+        if (left_name != App::DEFAULT_RIGHT_MENU) {
+            if (auto menu = CreateMenuByName(App::DEFAULT_RIGHT_MENU, MenuFlag_Tab)) {
+                return menu;
+            }
         }
+
+        // otherwise, fallback to left side default.
+        return std::make_unique<ui::menu::filebrowser::Menu>(MenuFlag_Tab);
     }
 
-    for (auto& e : GetMenuMenuEntries()) {
-        if (e.name == name) {
-            return e.func(MenuFlag_Tab);
-        }
+    if (auto menu = CreateMenuByName(name, MenuFlag_Tab)) {
+        return menu;
     }
 
-    return std::make_unique<ui::menu::appstore::Menu>(MenuFlag_Tab);
+    if (auto menu = CreateMenuByName(App::DEFAULT_RIGHT_MENU, MenuFlag_Tab)) {
+        return menu;
+    }
+
+    return std::make_unique<ui::menu::filebrowser::Menu>(MenuFlag_Tab);
 }
 
 } // namespace
 
 auto GetMenuMenuEntries() -> std::span<const MiscMenuEntry> {
-    return MISC_MENU_ENTRIES;
+    static const auto entries = [](){
+        std::vector<MiscMenuEntry> supported;
+        for (const auto& e : MISC_MENU_ENTRIES) {
+            if (IsMenuSupported(e)) {
+                supported.emplace_back(e);
+            }
+        }
+        return supported;
+    }();
+
+    return entries;
 }
 
 MainMenu::MainMenu() {
@@ -559,6 +610,7 @@ MainMenu::MainMenu() {
 
     this->SetActions(
         std::make_pair(Button::START, Action{[](){
+#ifdef ENABLE_OWNFOIL
             // leaving mid install can leave half installed content behind.
             if (!InstallQueue::Get().IsBusy()) {
                 App::Exit();
@@ -570,6 +622,9 @@ MainMenu::MainMenu() {
                     App::Exit();
                 }
             });
+#else
+            App::Exit();
+#endif
         }}),
         std::make_pair(Button::SELECT, Action{App::DisplayMenuOptions}),
         std::make_pair(Button::Y, Action{"Menu"_i18n, [this](){
@@ -594,6 +649,7 @@ MainMenu::MainMenu() {
             language_items.push_back("Tiếng Việt"); // Vietnamese
             language_items.push_back("Українська"); // Ukrainian
             language_items.push_back("Türkçe"); // Turkish
+			language_items.push_back("Magyar"); // Hungarian
 
             // build menus info.
             std::string menus_info = "Launch one of Sphaira's menus:\n"_i18n;
@@ -616,21 +672,27 @@ MainMenu::MainMenu() {
                 auto options = std::make_unique<Sidebar>("Network Options"_i18n, Sidebar::Side::LEFT);
                 ON_SCOPE_EXIT(App::Push(std::move(options)));
 
+#ifdef ENABLE_FTPSRV
                 options->Add<SidebarEntryCallback>("FTP"_i18n, [](){ App::DisplayFtpOptions(); },
                     i18n::get("ftp_settings_info",
                         "Enable / modify the FTP server settings such as port, user/pass and the folders that are shown.\n\n"
                         "NOTE: Changing any of the options will automatically restart the FTP server when exiting the options menu.")
                 );
+#endif // ENABLE_FTPSRV
 
+#ifdef ENABLE_LIBHAZE
                 options->Add<SidebarEntryCallback>("MTP"_i18n, [](){ App::DisplayMtpOptions(); },
                     i18n::get("mtp_settings_info",
                         "Enable / modify the MTP responder settings such as the folders that are shown.\n\n"
                         "NOTE: Changing any of the options will automatically restart the MTP server when exiting the options menu.")
                 );
+#endif // ENABLE_LIBHAZE
 
+#ifdef ENABLE_LIBUSBHSFS
                 options->Add<SidebarEntryCallback>("HDD"_i18n, [](){
                     App::DisplayHddOptions();
                 },  "Enable / modify the HDD mount options."_i18n);
+#endif // ENABLE_LIBUSBHSFS
 
                 options->Add<SidebarEntryBool>("NXlink"_i18n, App::GetNxlinkEnable(), [](bool& enable){
                     App::SetNxlinkEnable(enable);
@@ -796,6 +858,10 @@ auto MainMenu::ParseUpdateMetadata(const fs::FsPath& path) -> bool {
         const bool sphaira_asset = lower_name.find("sphaira") != std::string::npos;
         int score{};
         if (EndsWithCaseInsensitive(name, ".nro")) {
+            // the Switch 2 build is only released in sphaira.zip.
+            if (platform::IsSwitch2) {
+                continue;
+            }
             score = sphaira_asset ? 4 : 3;
         } else if (EndsWithCaseInsensitive(name, ".zip")) {
             score = sphaira_asset ? 2 : 1;

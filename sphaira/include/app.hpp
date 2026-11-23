@@ -8,6 +8,7 @@
 #include "option.hpp"
 #include "fs.hpp"
 #include "log.hpp"
+#include "platform.hpp"
 #include "utils/audio.hpp"
 
 #ifdef USE_NVJPG
@@ -156,6 +157,12 @@ public:
     void Update();
     void Poll();
 
+#if defined(__SWITCH2__)
+    void UpdateJoyConMouse(HidTouchScreenState& state);
+    auto IsJoyConMouseShown() const -> bool;
+    void DrawJoyConMouse();
+#endif
+
     // void DrawElement(float x, float y, float w, float h, ui::ThemeEntryID id);
     auto LoadElementImage(std::string_view value) -> ElementEntry;
     auto LoadElementColour(std::string_view value) -> ElementEntry;
@@ -187,7 +194,7 @@ public:
     }
 
     static auto CanSetCpuCores() -> bool {
-        return IsApplication() && GetApp()->m_is_launched_via_sphaira_forwader;
+        return platform::SupportsForwarders && IsApplication() && GetApp()->m_is_launched_via_sphaira_forwader;
     }
 
     // returns true if launched in applet mode with a title suspended in the background.
@@ -231,27 +238,7 @@ public:
         }
     }
 
-    static void SetBoostMode(bool enable, bool force = false) {
-        static Mutex mutex{};
-        static int ref_count{};
-
-        mutexLock(&mutex);
-        ON_SCOPE_EXIT(mutexUnlock(&mutex));
-
-        if (enable) {
-            ref_count++;
-            appletSetCpuBoostMode(ApmCpuBoostMode_FastLoad);
-        } else {
-            if (ref_count) {
-                ref_count--;
-            }
-        }
-
-        if (!ref_count || force) {
-            ref_count = 0;
-            appletSetCpuBoostMode(ApmCpuBoostMode_Normal);
-        }
-    }
+    static void SetBoostMode(bool enable, bool force = false);
 
     static auto GetAccountList() -> std::vector<AccountProfileBase> {
         std::vector<AccountProfileBase> out;
@@ -284,6 +271,7 @@ public:
     static constexpr inline auto PLAYLOG_PATH = "/config/sphaira/playlog.ini";
     static constexpr inline auto INI_SECTION = "config";
     static constexpr inline auto DEFAULT_THEME_PATH = "romfs:/themes/default_theme.ini";
+    static constexpr inline auto DEFAULT_RIGHT_MENU = "Appstore";
 
     fs::FsPath m_app_path;
     u64 m_start_timestamp{};
@@ -294,6 +282,13 @@ public:
     NVGcontext* vg{};
     PadState m_pad{};
     TouchInfo m_touch_info{};
+#if defined(__SWITCH2__)
+    PadPointer m_pointer{};
+    PadState m_pointer_pad{};
+    bool m_pointer_open{};
+    bool m_pointer_down{};
+    u64 m_pointer_moved_at{};
+#endif
     Controller m_controller{};
     KeyboardState m_keyboard{};
     std::vector<ThemeMeta> m_theme_meta_entries;
@@ -329,10 +324,11 @@ public:
     option::OptionString m_theme_path{INI_SECTION, "theme", DEFAULT_THEME_PATH};
     option::OptionBool m_theme_music{INI_SECTION, "theme_music", true};
     option::OptionBool m_show_ip_addr{INI_SECTION, "show_ip_addr", true};
+    option::OptionBool m_show_abi_warning{"homebrew", "show_abi_warning", true};
     option::OptionLong m_language{INI_SECTION, "language", 0}; // auto
     option::OptionString m_center_menu{INI_SECTION, "center_side_menu", "Homebrew"};
     option::OptionString m_left_menu{INI_SECTION, "left_side_menu", "FileBrowser"};
-    option::OptionString m_right_menu{INI_SECTION, "right_side_menu", "Appstore"};
+    option::OptionString m_right_menu{INI_SECTION, "right_side_menu", DEFAULT_RIGHT_MENU};
     option::OptionBool m_progress_boost_mode{INI_SECTION, "progress_boost_mode", true};
 
     // install options

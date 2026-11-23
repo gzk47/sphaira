@@ -350,6 +350,11 @@
     "- bis_user",
     "- біс_система"
   ],
+  "bis_fs_user_system_info": [
+    "Показує такі файлові системи bis:",
+    "- bis_user",
+    "- bis_system"
+  ],
   "Show system contents": "Показати вміст системи",
   "Shows the system contents folder.": "Показує папку системного вмісту.",
   "Show user contents": "Показати вміст користувача",
@@ -1335,5 +1340,9 @@
   "Album share PIN": "PIN-код для доступу до альбому",
   "Serves the album on this port.": "Відкриває доступ до альбому на цьому порту.",
   "Browse": "Огляд",
-  "Starts the server and shows the address and the QR code.": "Запускає сервер і показує адресу та QR-код."
+  "Starts the server and shows the address and the QR code.": "Запускає сервер і показує адресу та QR-код.",
+  "Show ABI warning": "Показувати попередження ABI",
+  "ABI warning: compatibility issues": "ABI: можливі проблеми сумісності",
+  "Shows a warning for homebrew built for an older ABI. These applications may have compatibility issues.": "Показує попередження для програм homebrew, зібраних для старої версії ABI. У них можуть виникати проблеми сумісності.",
+  "Installing is not supported on Switch 2": "Встановлення не підтримується на Switch 2"
 }

@@ -16,6 +16,7 @@ option(ENABLE_EXT4 "enables EXT2/3/4 hdd mounting, requires switch-lwext4" OFF)
 option(ENABLE_LIBUSBDVD "enables cd/dvd/iso/cue mounting" ON)
 option(ENABLE_FTPSRV "enables MTP server support" ON)
 option(ENABLE_LIBHAZE "enables MTP server support" ON)
+option(ENABLE_OWNFOIL "enables the Ownfoil browser and installer" ON)
 
 # audio options.
 option(ENABLE_AUDIO_MP3 "" ON)
@@ -35,7 +36,18 @@ option(ENABLE_DEVOPTAB_WEBDAV "" ON)
 # it also adds 230k to binary size, and i don't think anyone will use it.
 option(ENABLE_DEVOPTAB_SFTP "" OFF)
 
-set(sphaira_VERSION 1.0.9)
+# not available on Switch 2: usb hdd/dvd need usb:hs, which kaiHEN never
+# answers (every later program then hangs until a reboot), nvjpg is written for
+# the Switch 1 gpu, nsz is only used by the game and game card exports and
+# ownfoil installs titles (see include/platform.hpp).
+if (SWITCH2)
+    foreach (feature IN ITEMS ENABLE_LIBUSBHSFS ENABLE_NTFS ENABLE_EXT4 ENABLE_LIBUSBDVD ENABLE_NVJPG ENABLE_NSZ
+                              ENABLE_OWNFOIL)
+        set(${feature} OFF CACHE BOOL "not available on Switch 2" FORCE)
+    endforeach()
+endif()
+
+set(sphaira_VERSION 1.1.1)
 
 project(sphaira
     VERSION ${sphaira_VERSION}
@@ -75,8 +87,6 @@ add_executable(sphaira
     source/ui/menus/album_menu.cpp
     source/ui/menus/album_share_menu.cpp
     source/ui/menus/appstore.cpp
-    source/ui/menus/ownfoil.cpp
-    source/ui/menus/ownfoil_title.cpp
     source/ui/menus/file_viewer.cpp
     source/ui/menus/image_viewer.cpp
     source/ui/menus/filebrowser.cpp
@@ -104,7 +114,6 @@ add_executable(sphaira
     source/ui/popup_list.cpp
     source/ui/popup_multi_select.cpp
     source/ui/progress_box.cpp
-    source/ui/install_queue.cpp
     source/ui/scrollable_text.cpp
     source/ui/sidebar.cpp
     source/ui/widget.cpp
@@ -130,7 +139,6 @@ add_executable(sphaira
     source/nro.cpp
     source/nxlink.cpp
     source/qrcode.cpp
-    source/owo.cpp
     source/swkbd.cpp
     source/web.cpp
     source/hasher.cpp
@@ -157,10 +165,6 @@ add_executable(sphaira
     source/utils/devoptab_game.cpp
     source/utils/devoptab_mounts.cpp
     source/utils/devoptab.cpp
-    source/utils/ownfoil.cpp
-    source/utils/ownfoil_discovery.cpp
-    source/utils/ownfoil_api.cpp
-    source/utils/ownfoil_installed.cpp
 
     source/usb/base.cpp
     source/usb/usbds.cpp
@@ -195,6 +199,13 @@ target_compile_definitions(sphaira PRIVATE
     -DDEV_BUILD=$<BOOL:${DEV_BUILD}>
     -DZSTD_STATIC_LINKING_ONLY=1
 )
+
+# owo installs forwarders, which embed hbl. Switch 2 has neither.
+if (SWITCH2)
+    target_sources(sphaira PRIVATE source/owo_unsupported.cpp)
+else()
+    target_sources(sphaira PRIVATE source/owo.cpp)
+endif()
 
 target_compile_options(sphaira PRIVATE
     -Wall
@@ -283,6 +294,7 @@ FetchContent_Declare(nvjpg
 FetchContent_Declare(dr_libs
     GIT_REPOSITORY https://github.com/mackron/dr_libs.git
     GIT_TAG b962384
+    GIT_SUBMODULES ""
     SOURCE_SUBDIR NONE
 )
 
@@ -398,11 +410,25 @@ if (ENABLE_LIBUSBDVD)
 endif()
 
 if (ENABLE_FTPSRV)
+    # Switch 2 only mounts the user and system bis partitions.
+    set(ftpsrv_switch2_patch)
+    if (SWITCH2)
+        set(ftpsrv_switch2_patch COMMAND ${CMAKE_COMMAND}
+            -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+            -DPATCH=${CMAKE_SOURCE_DIR}/cmake/patches/ftpsrv-switch2-bis.patch
+            -P ${CMAKE_SOURCE_DIR}/cmake/apply_patch.cmake
+        )
+    endif()
+
     FetchContent_Declare(ftpsrv
         GIT_REPOSITORY https://github.com/ITotalJustice/ftpsrv.git
         GIT_TAG 7c82402
         SOURCE_SUBDIR NONE
-        PATCH_COMMAND "${GIT_EXECUTABLE}" apply --ignore-whitespace "${CMAKE_SOURCE_DIR}/cmake/patches/ftpsrv-upload-callback.patch"
+        PATCH_COMMAND ${CMAKE_COMMAND}
+            -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+            -DPATCH=${CMAKE_SOURCE_DIR}/cmake/patches/ftpsrv-upload-callback.patch
+            -P ${CMAKE_SOURCE_DIR}/cmake/apply_patch.cmake
+        ${ftpsrv_switch2_patch}
     )
 
     FetchContent_MakeAvailable(ftpsrv)
@@ -451,9 +477,21 @@ if (ENABLE_FTPSRV)
 endif()
 
 if (ENABLE_LIBHAZE)
+    # Switch 2's usb:ds differs from what libounce's usb:ds helpers send, see
+    # the patch.
+    set(libhaze_patch)
+    if (SWITCH2)
+        set(libhaze_patch PATCH_COMMAND ${CMAKE_COMMAND}
+            -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+            -DPATCH=${CMAKE_SOURCE_DIR}/cmake/patches/libhaze-switch2-usbds.patch
+            -P ${CMAKE_SOURCE_DIR}/cmake/apply_patch.cmake
+        )
+    endif()
+
     FetchContent_Declare(libhaze
         GIT_REPOSITORY https://github.com/R-YaTian/libhaze.git
         GIT_TAG 9f5467c
+        ${libhaze_patch}
     )
 
     FetchContent_MakeAvailable(libhaze)
@@ -463,6 +501,19 @@ if (ENABLE_LIBHAZE)
     target_sources(sphaira PRIVATE
         source/haze_helper.cpp
         source/ui/menus/mtp_menu.cpp
+    )
+endif()
+
+if (ENABLE_OWNFOIL)
+    target_compile_definitions(sphaira PRIVATE ENABLE_OWNFOIL)
+    target_sources(sphaira PRIVATE
+        source/ui/install_queue.cpp
+        source/ui/menus/ownfoil.cpp
+        source/ui/menus/ownfoil_title.cpp
+        source/utils/ownfoil.cpp
+        source/utils/ownfoil_discovery.cpp
+        source/utils/ownfoil_api.cpp
+        source/utils/ownfoil_installed.cpp
     )
 endif()
 
@@ -605,6 +656,81 @@ set(NANOVG_NO_HDR ON)
 set(NANOVG_NO_PIC ON)
 set(NANOVG_NO_PNM ON)
 
+if (SWITCH2)
+    # nanovg draws with drako3d, the deko3d api for the Switch 2 gpu, installed
+    # in libounce. switch2/include maps the deko3d headers to it.
+    if (NANOVG_DEBUG)
+        find_library(drako3d_lib NAMES drako3dd)
+    else()
+        find_library(drako3d_lib NAMES drako3d)
+    endif()
+    find_path(drako3d_inc drako3d.hpp)
+    if (NOT drako3d_lib OR NOT drako3d_inc)
+        message(FATAL_ERROR "drako3d is not installed, build it from https://github.com/ouncebrew/drako3d and run 'make install'")
+    endif()
+
+    # nanovg links deko3d_lib, find_library() keeps a value that is already set.
+    set(deko3d_lib "${drako3d_lib}" CACHE FILEPATH "the deko3d library nanovg links, drako3d on Switch 2" FORCE)
+
+    # the Switch 2 shaders are compiled with uam2, without it the prebuilt ones
+    # in assets/switch2/shaders are used. after a nanovg update that changes
+    # its shaders, rebuild them with "uam2 -s vert|frag -o name.dksh name.glsl"
+    # and update glsl.sha256 (sha256sum of each glsl, without carriage returns).
+    option(SWITCH2_UAM2 "compile the Switch 2 shaders with uam2 when it is installed, OFF uses assets/switch2/shaders" ON)
+    if (SWITCH2_UAM2)
+        find_program(NX_UAM2_EXE NAMES uam2 HINTS "${DEVKITPRO}/tools/bin")
+    endif()
+    if (SWITCH2_UAM2 AND NX_UAM2_EXE)
+        message(STATUS "compiling the nanovg shaders with ${NX_UAM2_EXE}")
+    else()
+        message(STATUS "using the prebuilt Switch 2 shaders in assets/switch2/shaders")
+    endif()
+
+    # overrides devkitPro's nx_add_shader_program(), which nanovg calls.
+    function(nx_add_shader_program target source type)
+        cmake_parse_arguments(PARSE_ARGV 3 NX_UAM "" "OUTPUT" "")
+        if (DEFINED NX_UAM_OUTPUT)
+            get_filename_component(NX_UAM_OUTPUT "${NX_UAM_OUTPUT}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+        else()
+            set(NX_UAM_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${target}.dksh")
+        endif()
+        get_filename_component(source "${source}" ABSOLUTE)
+
+        if (SWITCH2_UAM2 AND NX_UAM2_EXE)
+            add_custom_command(
+                OUTPUT "${NX_UAM_OUTPUT}"
+                COMMAND "${NX_UAM2_EXE}" -o "${NX_UAM_OUTPUT}" -s ${type} "${source}"
+                DEPENDS "${source}"
+                COMMENT "Building Switch 2 shader program ${target}"
+                VERBATIM
+            )
+        else()
+            # only valid for the glsl it was built from. the hash leaves out
+            # carriage returns, git may convert line endings.
+            set(prebuilt_dir "${CMAKE_SOURCE_DIR}/assets/switch2/shaders")
+            get_filename_component(source_name "${source}" NAME)
+            file(READ "${source}" source_text)
+            string(REPLACE "\r" "" source_text "${source_text}")
+            string(SHA256 source_hash "${source_text}")
+            file(STRINGS "${prebuilt_dir}/glsl.sha256" prebuilt_hash REGEX " ${source_name}")
+            string(REGEX REPLACE "^([0-9a-f]+) .*$" "\\1" prebuilt_hash "${prebuilt_hash}")
+            if (NOT EXISTS "${prebuilt_dir}/${target}.dksh" OR NOT prebuilt_hash STREQUAL source_hash)
+                message(FATAL_ERROR "assets/switch2/shaders has no shader built from ${source}, install uam2 to compile it")
+            endif()
+            add_custom_command(
+                OUTPUT "${NX_UAM_OUTPUT}"
+                COMMAND ${CMAKE_COMMAND} -E copy "${prebuilt_dir}/${target}.dksh" "${NX_UAM_OUTPUT}"
+                DEPENDS "${prebuilt_dir}/${target}.dksh"
+                COMMENT "Using the prebuilt Switch 2 shader program ${target}"
+                VERBATIM
+            )
+        endif()
+
+        add_custom_target(${target} DEPENDS "${NX_UAM_OUTPUT}")
+        dkp_set_target_file(${target} "${NX_UAM_OUTPUT}")
+    endfunction()
+endif()
+
 # yyjson
 set(YYJSON_INSTALL OFF)
 set(YYJSON_DISABLE_READER OFF)
@@ -625,6 +751,10 @@ FetchContent_MakeAvailable(
     libnxtc
     dr_libs
 )
+
+if (SWITCH2)
+    target_include_directories(nanovg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/switch2/include)
+endif()
 
 add_library(stb INTERFACE)
 target_include_directories(stb INTERFACE ${stb_SOURCE_DIR})
@@ -689,6 +819,19 @@ target_include_directories(sphaira PRIVATE
 # copy the romfs
 file(COPY ${CMAKE_SOURCE_DIR}/assets/romfs DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
+# Switch 2 leaves out the catalogue of Switch 1 homebrew, and the GitHub entry of
+# sphaira: the GitHub menu would install the Switch 1 build of sphaira.zip, the
+# updater takes the Switch 2 one from its nx2 folder.
+set(sphaira_romfs_switch2_commands)
+if (SWITCH2)
+    foreach (removed github/switchports.json github/sphaira.json)
+        file(REMOVE ${CMAKE_CURRENT_BINARY_DIR}/romfs/${removed})
+        list(APPEND sphaira_romfs_switch2_commands
+            COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_CURRENT_BINARY_DIR}/romfs/${removed}
+        )
+    endforeach()
+endif()
+
 # create assets target
 dkp_add_asset_target(sphaira_romfs ${CMAKE_CURRENT_BINARY_DIR}/romfs)
 
@@ -700,19 +843,26 @@ add_custom_target(sphaira_romfs_sync
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/assets/romfs
         ${CMAKE_CURRENT_BINARY_DIR}/romfs
+    ${sphaira_romfs_switch2_commands}
     DEPENDS ${sphaira_romfs_source_files}
 )
 add_dependencies(sphaira_romfs sphaira_romfs_sync)
 set_property(TARGET sphaira_romfs APPEND PROPERTY DKP_ASSET_FILES ${sphaira_romfs_source_files})
 
-# wait until hbl is built first as we need the exefs to embed
-add_dependencies(sphaira hbl_nso hbl_npdm)
-
-# set the embed path for assets and hbl
+# set the embed path for assets
 target_compile_options(sphaira PRIVATE
     --embed-dir=${CMAKE_SOURCE_DIR}/assets/embed
-    --embed-dir=${CMAKE_BINARY_DIR}/hbl
 )
+
+if (NOT SWITCH2)
+    # wait until hbl is built first as we need the exefs to embed
+    add_dependencies(sphaira hbl_nso hbl_npdm)
+
+    # set the embed path for hbl
+    target_compile_options(sphaira PRIVATE
+        --embed-dir=${CMAKE_BINARY_DIR}/hbl
+    )
+endif()
 
 # create nacp
 nx_generate_nacp(
